@@ -5,6 +5,8 @@
 #include <iostream>
 #include <concepts>
 #include <cassert>
+#include <set>
+#include <array>
 namespace peg
 {
     namespace parsers
@@ -25,24 +27,37 @@ namespace peg
         template <typename T, typename elem>
         concept ParsingExprType = std::is_base_of<ParsingExprInterface<elem>, T>::value;
 
-        template <typename elem>
-        struct TerminalExpr : ParsingExpr<elem, TerminalExpr<elem>> {
-            TerminalExpr(elem value) : m_terminalValue{value} {}
+
+        template<typename elem>
+        bool symbolConsumable(typename Context<elem>::IterType pos, const elem& value) {
+            return *pos == value;
+        }
+
+        template<typename elem>
+        bool symbolConsumable(typename Context<elem>::IterType pos, const std::set<elem>& values) {
+            return values.find(*pos) != values.end();
+        }
+
+        template<typename elem>
+        bool symbolConsumable(typename Context<elem>::IterType pos, const std::array<elem, 2>& values) {
+            return (*pos >= values[0]) && (*pos <= values[1]); 
+        }
+        
+        template <typename elem, typename ValuesType = elem>
+        struct TerminalExpr : ParsingExpr<elem, TerminalExpr<elem, ValuesType>> {
+            TerminalExpr(const ValuesType& value) : m_terminalValue{value} {}
             bool operator()(Context<elem>& context) const override {
-                std::cout<<"term"<<this<<' '<<m_terminalValue<<std::endl;
-                if(!context.ended()){
-                    if ( *context.mark() == m_terminalValue){
-                        context.next();
-                        return true;
-                    }
-                    else {
-                        return false;
-                    }
+                return parse(context);
+            }
+        private:
+            bool parse(Context<elem>& context) const {
+                if(!context.ended() && symbolConsumable(context.mark(), m_terminalValue)) {
+                    context.next();
+                    return true;
                 }
                 return false;
             }
-        private:
-            elem m_terminalValue;
+            ValuesType m_terminalValue;
         };
 
         template<typename elem>
@@ -100,7 +115,9 @@ namespace peg
 
         template<typename elem>
         struct NonTerminalRef : ParsingExpr<elem, NonTerminalRef<elem>> {
-            NonTerminalRef(const NonTerminal<elem>& rhs) : m_nonterm{rhs} {}
+            NonTerminalRef(const NonTerminal<elem>& rhs) : m_nonterm{rhs} {
+                std::cout<<"NonTerminalRef ctor"<<std::endl;
+            }
             bool operator()(Context<elem>& context) const override{
                 return m_nonterm(context);
             }
@@ -179,11 +196,14 @@ namespace peg
             std::tuple<Children...> m_children;
         };
 
-        template<typename elem, typename Child, size_t min_rep, ssize_t max_rep = -1>
-        struct Repetition : ParsingExpr<elem, Repetition<elem, Child, min_rep, max_rep>> {
-            static_assert((max_rep < 0) || ((max_rep > 0) && (min_rep <= max_rep)));
-            Repetition(const Child& child) 
-                : m_child(child){}
+        template<typename elem, typename Child>
+        struct Repetition : ParsingExpr<elem, Repetition<elem, Child>> {
+            Repetition(const Child& child, size_t min_r, ssize_t max_r = -1)
+                : m_child(child), min_rep(min_r), max_rep(max_r){
+                    if (!((max_rep < 0) || ((max_rep > 0) && (min_rep <= max_rep)))) {
+                        throw std::invalid_argument("rep not correct");
+                    }
+                }
 
             bool operator()(Context<elem> &context) const override {
                 return parse(context);
@@ -191,8 +211,13 @@ namespace peg
             const Child& child() {
                 return m_child;
             }
+            std::tuple<size_t, ssize_t> reps() const {
+                return {min_rep, max_rep};
+            }
         protected:
             Child m_child;
+            size_t min_rep;
+            ssize_t max_rep;
 
             bool parse(Context<elem> &context) const {
                 auto initState = context.state();
@@ -217,16 +242,35 @@ namespace peg
                     context.state(initState);
                     return false;
                 }
-                else if constexpr (max_rep < 0 ){
+                else if (max_rep < 0 ){
                     return true;
                 }
-                else if(loopCount < max_rep){
+                else if(loopCount < min_rep){
                     context.state(initState);
                     return false;
                 }
                 return true;
             }
+        };
 
+        template<typename elem, typename Child>
+        struct ZeroOrMoreExpr : Repetition<elem, Child> {
+            ZeroOrMoreExpr(const Child& child) : Repetition<elem, Child>(child, 0, -1) {}
+        };
+
+        template<typename elem, typename Child>
+        struct OneOrMoreExpr : Repetition<elem, Child> {
+            OneOrMoreExpr(const Child& child) : Repetition<elem, Child>(child, 1, -1) {}
+        };
+
+        template<typename elem, typename Child>
+        struct NTimesExpr : Repetition<elem, Child> {
+            NTimesExpr(const Child& child, size_t n_reps) : Repetition<elem, Child>(child, n_reps, n_reps) {}
+        };
+
+        template<typename elem, typename Child>
+        struct OptionalExpr : Repetition<elem, Child> {
+            OptionalExpr(const Child& child) : Repetition<elem, Child>(child, 0, 1) {}
         };
 
         template<typename elem, typename Child>
@@ -274,24 +318,6 @@ namespace peg
 
         
     } // namespace parsers
-    
-    
-#if 0
-    struct AndExpr : ParsingExpr {
-
-    };
-
-    struct ChoiceExpr : ParsingExpr {
-
-    };
-
-    template <typename ...Children>
-    struct SequenceExpr : ParsingExpr {
-        bool operator() (Context& context) {return false;}
-    private:
-        std::tuple<Children...> m_children;
-    };
-#endif
 
 
 } // namespace peg

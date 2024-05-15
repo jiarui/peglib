@@ -10,8 +10,23 @@ namespace peg
 
     template <typename elem>
     TerminalExpr<elem> terminal(elem value) {
-        std::cout<<"termvalue "<<value<<std::endl;
         return TerminalExpr<elem>(value);
+    }
+
+    template <typename elem>
+    TerminalExpr<elem, std::set<elem>> terminalSet(const std::set<elem>& values) {
+        return TerminalExpr<elem, std::set<elem>>(values);
+    }
+
+    template <typename elem>
+    TerminalExpr<elem, std::array<elem, 2>> terminalRange(const std::array<elem, 2>& values) {
+        return TerminalExpr<elem, std::array<elem, 2>>(values);
+    }
+
+    template <typename elem>
+    TerminalExpr<elem, std::array<elem,2>> terminalRange(const elem& value_min, const elem& value_max) {
+        std::array<elem, 2> values = {value_min, value_max};
+        return terminalRange(values);
     }
 
     template<typename elem>
@@ -78,7 +93,17 @@ namespace peg
         return lhs >> NonTerminalRef<elem>(rhs);
     }
 
-    template<typename elem>
+    template<typename elem, typename ParsingExprType>
+    auto operator>>(const ParsingExpr<elem, ParsingExprType>& lhs, const elem& value) {
+        return static_cast<const ParsingExprType&>(lhs) >> terminal(value);
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator>>(const elem& value, const ParsingExpr<elem, ParsingExprType>& rhs) {
+        return terminal(value) >> static_cast<const ParsingExprType&>(rhs);
+    }
+
+    template<typename elem, typename ParsingExprType>
     auto operator>>(const NonTerminal<elem>& lhs, const elem& value) {
         return NonTerminalRef<elem>(lhs) >> terminal(value);
     }
@@ -145,33 +170,72 @@ namespace peg
     }
 
     template<typename elem, typename ParsingExprType>
-    auto operator*(const ParsingExpr<elem, ParsingExprType>& n) {
-        return Repetition<elem, ParsingExprType, 0>(static_cast<const ParsingExprType&>(n));
+    auto
+    operator|(const ParsingExpr<elem, ParsingExprType>& lhs, const NonTerminal<elem>& rhs) {
+        return static_cast<const ParsingExprType&>(lhs) | NonTerminalRef<elem>(rhs);
     }
 
     template<typename elem, typename ParsingExprType>
-    auto operator*(const Repetition<elem, ParsingExprType, 0, -1>& n) {
+    auto
+    operator|(const NonTerminal<elem>& lhs, const ParsingExpr<elem, ParsingExprType>& rhs) {
+        return NonTerminalRef<elem>(lhs) | static_cast<const ParsingExprType&>(rhs);
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator*(const ParsingExpr<elem, ParsingExprType>& n) {
+        return ZeroOrMoreExpr<elem, ParsingExprType>(static_cast<const ParsingExprType&>(n));
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator*(const ZeroOrMoreExpr<elem, ParsingExprType>& n) {
         return n;
     }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator*(size_t n_rep, const ParsingExpr<elem, ParsingExprType>& expr) {
+        return NTimesExpr<elem, ParsingExprType>(static_cast<const ParsingExprType&>(expr), n_rep);
+    }
+
+    template<typename elem>
+    auto operator*(const NonTerminal<elem> &expr) {
+        return NonTerminalRef<elem>(expr);
+    }
+
+    template<typename elem>
+    auto operator*(size_t n_rep, const NonTerminal<elem> &expr) {
+        return n_rep * NonTerminalRef<elem>(expr);
+    }
+
+
 
     template<typename elem, typename ParsingExprType>
     auto operator+(const ParsingExpr<elem, ParsingExprType>& n) {
-        return Repetition<elem, ParsingExprType, 1>(static_cast<const ParsingExprType&>(n));
+        return OneOrMoreExpr<elem, ParsingExprType>(static_cast<const ParsingExprType&>(n));
     }
 
     template<typename elem, typename ParsingExprType>
-    auto operator+(const Repetition<elem, ParsingExprType, 1, -1>& n) {
+    auto operator+(const OneOrMoreExpr<elem, ParsingExprType>& n) {
         return n;
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator+(const NonTerminal<elem>& n) {
+        return +NonTerminalRef(n);
     }
 
     template<typename elem, typename ParsingExprType>
     auto operator-(const ParsingExpr<elem, ParsingExprType>& n){
-        return Repetition<elem, ParsingExprType, 0, 1>(static_cast<const ParsingExprType&>(n));
+        return OptionalExpr<elem, ParsingExprType>(static_cast<const ParsingExprType&>(n));
     }
 
     template<typename elem, typename ParsingExprType>
-    auto operator-(const Repetition<elem, ParsingExprType, 0, 1>& n){
+    auto operator-(const OptionalExpr<elem, ParsingExprType>& n){
         return n;
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator-(const NonTerminal<elem>& n) {
+        return -NonTerminalRef(n);
     }
 
     template<typename elem, typename ParsingExprType>
@@ -185,6 +249,11 @@ namespace peg
     }
 
     template<typename elem, typename ParsingExprType>
+    auto operator!(const NonTerminal<elem>& n) {
+        return !NonTerminalRef(n);
+    }
+
+    template<typename elem, typename ParsingExprType>
     auto operator&(const ParsingExpr<elem, ParsingExprType>& n) {
         return AndExpr<elem, ParsingExprType>(static_cast<const ParsingExprType&>(n));
     }
@@ -192,6 +261,11 @@ namespace peg
     template<typename elem, typename ParsingExprType>
     auto operator&(const AndExpr<elem, ParsingExprType>& n) {
         return n.child();
+    }
+
+    template<typename elem, typename ParsingExprType>
+    auto operator&(const NonTerminal<elem>& n) {
+        return &NonTerminalRef(n);
     }
 
 

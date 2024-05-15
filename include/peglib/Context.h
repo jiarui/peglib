@@ -2,6 +2,7 @@
 #include <span>
 #include <vector>
 #include <map>
+#include <tuple>
 #include <iostream>
 namespace peg
 {
@@ -63,9 +64,11 @@ namespace peg
         }
 
         void next() {
-            std::cout<<"Current"<<*m_position<<std::endl;
+            std::cout<<"Current "<<*m_position<<std::to_address(m_position)<<std::endl;
             if(m_position < m_input.end()) {
+                
                 ++m_position;
+                std::cout<<"Now at "<<*m_position<<std::to_address(m_position)<<std::endl;
             }
         }
 
@@ -84,7 +87,7 @@ namespace peg
         }
 
         RuleState& ruleState(const peg::parsers::NonTerminal<elem> *rule, IterType pos) {
-            const auto [iter, ok] = m_mem.emplace(rule, RuleState{pos, false});
+            const auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos, false});
             if(!ok){
                 iter->second.m_leftRecursion = true;
             }
@@ -94,7 +97,7 @@ namespace peg
         std::span<const elem> m_input;
         IterType m_position;
         std::vector<std::span<const elem>> m_matches;
-        std::map<const parsers::NonTerminal<elem>*, RuleState> m_mem;
+        std::map<std::tuple<const parsers::NonTerminal<elem>*, IterType>, RuleState> m_mem;
     };
 
     template<typename InputType>
