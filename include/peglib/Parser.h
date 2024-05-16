@@ -3,7 +3,6 @@
 #include <tuple>
 #include <memory>
 #include <iostream>
-#include <concepts>
 #include <cassert>
 #include <set>
 #include <array>
@@ -85,6 +84,9 @@ namespace peg
             SeqType m_terminalValues;
         };
 
+        template<typename elem>
+        struct NonTerminalRef;
+        
         template<typename elem>
         struct NonTerminal : ParsingExpr<elem, NonTerminal<elem>> {
         public:
@@ -338,9 +340,27 @@ namespace peg
 
         };
 
-
-
-
+        template<typename elem, typename Child, typename MatchType>
+        struct MatchExpr : ParsingExpr<elem, MatchExpr<elem, Child, MatchType>> {
+            MatchExpr(const Child& child, const MatchType& match_id) 
+                : m_child{child}, m_match_id{match_id} {}
+            
+            bool operator()(Context<elem>& context) const override {
+                return parse(context);
+            } 
+        protected:
+            bool parse(Context<elem>& context) const {
+                auto startPos = context.mark();
+                bool result = m_child(context);
+                if(result) {
+                    auto endPos = context.mark();
+                    context.addMatch(m_match_id, startPos, endPos);
+                }
+                return result;
+            }
+            Child m_child;
+            MatchType m_match_id; 
+        };
         
     } // namespace parsers
 

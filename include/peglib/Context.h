@@ -12,17 +12,29 @@ namespace peg
 
     template <typename elem, typename MatchType>
     struct Match {
-        Match(std::span<elem> range) {}
-    private:
-        std::span<elem> m_match_range;
-        MatchType m_match_type;
-        std::vector<Match> m_children;
+        using IterType = typename std::span<const elem>::iterator;
+        Match() = default;
+        Match(const MatchType& match_id, const std::span<const elem>& match_pos) :
+            m_match_id{match_id}, m_match_pos(match_pos) {}
+        
+        Match(const MatchType& match_id, std::span<const elem>&& match_pos) :
+            m_match_id{match_id}, m_match_pos(match_pos) {}
+        
+        Match(const MatchType& match_id, const IterType start, const IterType end):
+            Match(match_id, std::span<const elem>(start, end)) {}
+        const MatchType& id() const {
+            return m_match_id;
+        }
+    protected:
+        MatchType m_match_id;
+        std::span<const elem> m_match_pos;
     };
 
-    template <typename elem>
+    template <typename elem, typename MatchType_ = int>
     struct Context {
     public:
         using IterType = typename std::span<const elem>::iterator;
+        using MatchType = MatchType_;
 
         struct RuleState {
             RuleState(IterType pos, bool lr = false) : m_pos{pos}, m_leftRecursion{lr} {}
@@ -47,7 +59,7 @@ namespace peg
             m_matches.resize(state.m_matchCount);
         }
 
-        Context(std::span<elem> input) :m_input(input), m_position(m_input.begin()) {}
+        Context(std::span<const elem> input) :m_input(input), m_position(m_input.begin()) {}
 
         template <typename InputType>
         Context(const InputType& input) {
@@ -66,7 +78,6 @@ namespace peg
         void next() {
             std::cout<<"Current "<<*m_position<<std::to_address(m_position)<<std::endl;
             if(m_position < m_input.end()) {
-                
                 ++m_position;
                 std::cout<<"Now at "<<*m_position<<std::to_address(m_position)<<std::endl;
             }
@@ -93,10 +104,19 @@ namespace peg
             }
             return iter->second;
         }
+
+        void addMatch(MatchType match_id, IterType start, IterType end) {
+            m_matches.emplace_back(match_id, start, end);
+        }
+
+        const std::vector<Match<elem, MatchType>>& matches(){
+            return m_matches;
+        }
+
     private:
         std::span<const elem> m_input;
         IterType m_position;
-        std::vector<std::span<const elem>> m_matches;
+        std::vector<Match<elem, MatchType>> m_matches;
         std::map<std::tuple<const parsers::NonTerminal<elem>*, IterType>, RuleState> m_mem;
     };
 

@@ -1,6 +1,7 @@
 #include "peglib.h"
 #include <string>
 #include <iostream>
+#include <sstream>
 using namespace peg;
 
 static void testAndExpr() {
@@ -406,18 +407,302 @@ static void testTerminalSeqExpr() {
     }
 }
 
+static void testMatchExpr() {
+    const auto grammar = terminal('a') == 1;
+
+    {
+        const std::string input = "a";
+        Context context(input);
+        bool ok = grammar(context);
+        const auto matches = context.matches();
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+        assert(matches.size() == 1);
+        assert(matches[0].id() == 1);
+    }
+
+    {
+        const std::string input = "b";
+        Context context(input);
+        bool ok = grammar(context);
+        const auto matches = context.matches();
+        assert(!ok);
+        assert(context.mark() == context.get_input().begin());
+        assert(matches.size() == 0);
+    }
+}
+
+static void testRecursion() {
+    const Rule<std::string::value_type> r = 'x' >> r >> 'b'
+                   | 'a';
+
+    {
+        const std::string input = "a";
+        Context context(input);
+        bool ok = r(context);
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+    }
+
+    {
+        const std::string input = "xab";
+        Context context(input);
+        bool ok = r(context);
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+    }
+
+    {
+        const std::string input = "xxabb";
+        Context context(input);
+        bool ok = r(context);
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+    }
+}
+
+#if 1
+
+extern Rule<std::string::value_type> add;
+
+
+static auto digit = terminal('0', '9');
+
+
+static auto integer = +digit;
+
+
+static auto num = integer
+                | '(' >> add >> ')';
+
+
+static Rule<std::string::value_type> mul = (mul >> '*' >> num)
+                  | (mul >> '/' >> num)
+                  | num;
+
+
+Rule<std::string::value_type> add = (add >> '+' >> mul)
+                  | (add >> '-' >> mul)
+                  | mul;
+
+template<typename MatchType>
+static int eval(const MatchType& m) {
+    if (m.id() == "add") {
+        return eval(m.children()[0]) + eval(m.children()[1]);
+    }
+    if (m.id() == "sub") {
+        return eval(m.children()[0]) - eval(m.children()[1]);
+    }
+    if (m.id() == "mul") {
+        return eval(m.children()[0]) * eval(m.children()[1]);
+    }
+    if (m.id() == "div") {
+        return eval(m.children()[0]) / eval(m.children()[1]);
+    }
+    if (m.id() == "int") {
+        std::stringstream stream;
+        stream << m.content();
+        int v;
+        stream >> v;
+        return v;
+    }
+    throw std::logic_error("Invalid match id");
+}
+
+static void testLeftRecursion() {
+    {
+        Rule<std::string::value_type> r = (r >> 'b')
+                 | (r >> 'c')
+                 | terminal('a')
+                 | terminal('d');
+
+        // {
+        //     const std::string input = "a";
+        //     Context context(input);
+        //     bool ok = r(context);
+        //     assert(ok);
+        //     assert(context.ended());
+        // }
+
+        {
+            const std::string input = "ab";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "abc";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "acb";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "abcb";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "acbc";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "aa";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
+
+        {
+            const std::string input = "aba";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "aca";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "b";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "c";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "ba";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "ca";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "ad";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+
+        {
+            const std::string input = "abd";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(!context.ended());
+        }
+    }
+
+    {
+        std::string input = "1";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "1+2";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "1+2*3";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "1*2+3";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "(1+2)*3";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "1*(2+3)";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+
+    {
+        std::string input = "(1*(2+3))*4";
+        Context context(input);
+        const bool ok = add(context);
+        assert(ok);
+    }
+}
+
+#endif
 
 int main(int argc, char* argv[]){
-    testAndExpr();
-    testAlternationExpr();
-    testZeroOrMoreExpr();
-    testOneOrMoreExpr();
-    testNTimesExpr();
-    testNotExpr();
-    testOptionalExpr();
-    testNonTerminalExpr();
-    testSequenceExpr();
-    testTerminalSetExpr();
-    testTerminalSeqExpr();
+    // testAndExpr();
+    // testAlternationExpr();
+    // testZeroOrMoreExpr();
+    // testOneOrMoreExpr();
+    // testNTimesExpr();
+    // testNotExpr();
+    // testOptionalExpr();
+    // testNonTerminalExpr();
+    // testSequenceExpr();
+    // testTerminalSetExpr();
+    // testTerminalSeqExpr();
+    // testMatchExpr();
+    // testRecursion();
+    testLeftRecursion();
     return 0;
 }
