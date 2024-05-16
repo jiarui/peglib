@@ -14,19 +14,27 @@ namespace peg
     }
 
     template <typename elem>
-    TerminalExpr<elem, std::set<elem>> terminalSet(const std::set<elem>& values) {
+    TerminalExpr<elem, std::set<elem>> terminal(const std::set<elem>& values) {
         return TerminalExpr<elem, std::set<elem>>(values);
     }
 
     template <typename elem>
-    TerminalExpr<elem, std::array<elem, 2>> terminalRange(const std::array<elem, 2>& values) {
+    TerminalExpr<elem, std::array<elem, 2>> terminal(const std::array<elem, 2>& values) {
         return TerminalExpr<elem, std::array<elem, 2>>(values);
     }
 
     template <typename elem>
-    TerminalExpr<elem, std::array<elem,2>> terminalRange(const elem& value_min, const elem& value_max) {
+    TerminalExpr<elem, std::array<elem,2>> terminal(const elem& value_min, const elem& value_max) {
         std::array<elem, 2> values = {value_min, value_max};
-        return terminalRange(values);
+        return terminal(values);
+    }
+
+    template<typename SeqType>
+    TerminalSeqExpr<typename SeqType::value_type, SeqType> terminalSeq(const SeqType& valueSeq){
+        return TerminalSeqExpr<typename SeqType::value_type, SeqType>(valueSeq);
+    }
+    TerminalSeqExpr<char, std::string> terminalSeq(const char* str){
+        return TerminalSeqExpr<char, std::string>(std::string{str});
     }
 
     template<typename elem>

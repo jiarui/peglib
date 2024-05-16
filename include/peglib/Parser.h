@@ -7,6 +7,7 @@
 #include <cassert>
 #include <set>
 #include <array>
+#include <ranges>
 namespace peg
 {
     namespace parsers
@@ -58,6 +59,30 @@ namespace peg
                 return false;
             }
             ValuesType m_terminalValue;
+        };
+
+        template <typename elem, typename SeqType>
+        requires std::ranges::random_access_range<SeqType>
+        struct TerminalSeqExpr : ParsingExpr<elem, TerminalSeqExpr<elem, SeqType>> {
+            TerminalSeqExpr(const SeqType& value) : m_terminalValues{value} {}
+            bool operator()(Context<elem>& context) const override {
+                return parse(context);
+            }
+        private:
+            bool parse(Context<elem>& context) const {
+                auto initState = context.state();
+                for(const auto& i: m_terminalValues){
+                    if(!context.ended() && symbolConsumable(context.mark(), i)) {
+                        context.next();
+                    }
+                    else {
+                        context.state(initState);
+                        return false;
+                    }
+                }                
+                return true;
+            }
+            SeqType m_terminalValues;
         };
 
         template<typename elem>

@@ -331,7 +331,7 @@ static void testSequenceExpr() {
 }
 
 static void testTerminalRangeExpr() {
-    const auto grammar = terminalRange('0', '9');
+    const auto grammar = terminal('0', '9');
 
     {
         const std::string input = "0";
@@ -350,9 +350,8 @@ static void testTerminalRangeExpr() {
     }
 }
 
-
 static void testTerminalSetExpr() {
-    const auto grammar = terminalSet(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
+    const auto grammar = terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
 
     {
         const std::string input = "0";
@@ -387,6 +386,26 @@ static void testTerminalSetExpr() {
     }
 }
 
+static void testTerminalSeqExpr() {
+    const auto grammar = terminalSeq("int");
+
+    {
+        const std::string input = "int";
+        Context context(input);
+        bool ok = grammar(context);
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+    }
+
+    {
+        const std::string input = "b";
+        Context context(input);
+        bool ok = grammar(context);
+        assert(!ok);
+        assert(context.mark() == context.get_input().begin());
+    }
+}
+
 
 int main(int argc, char* argv[]){
     testAndExpr();
@@ -399,5 +418,6 @@ int main(int argc, char* argv[]){
     testNonTerminalExpr();
     testSequenceExpr();
     testTerminalSetExpr();
+    testTerminalSeqExpr();
     return 0;
 }
