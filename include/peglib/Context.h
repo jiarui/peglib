@@ -77,10 +77,8 @@ namespace peg
         }
 
         void next() {
-            std::cout<<"Current "<<*m_position<<std::to_address(m_position)<<std::endl;
             if(m_position < m_input.end()) {
                 ++m_position;
-                std::cout<<"Now at "<<*m_position<<std::to_address(m_position)<<std::endl;
             }
         }
 

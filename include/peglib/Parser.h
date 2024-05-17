@@ -30,7 +30,6 @@ namespace peg
 
         template<typename elem>
         bool symbolConsumable(typename Context<elem>::IterType pos, const elem& value) {
-            std::cout<<"Check Terminal " << value <<": "<<*pos;
             return *pos == value;
         }
 
@@ -150,7 +149,6 @@ namespace peg
         template<typename elem>
         struct NonTerminalRef : ParsingExpr<elem, NonTerminalRef<elem>> {
             NonTerminalRef(const NonTerminal<elem>& rhs) : m_nonterm{rhs} {
-                std::cout<<"NonTerminalRef ctor"<<std::endl;
             }
             bool operator()(Context<elem>& context) const override{
                 return m_nonterm(context);
@@ -171,7 +169,6 @@ namespace peg
         template<typename elem, typename ...Children>
         struct SequenceExpr : ParsingExpr<elem, SequenceExpr<elem, Children...>>  {
             SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {
-                std::cout<<"Seq"<<std::endl;
             }
             bool operator()(Context<elem>& context) const override {
                 auto state = context.state();
