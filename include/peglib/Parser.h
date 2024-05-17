@@ -30,6 +30,7 @@ namespace peg
 
         template<typename elem>
         bool symbolConsumable(typename Context<elem>::IterType pos, const elem& value) {
+            std::cout<<"Check Terminal " << value <<": "<<*pos;
             return *pos == value;
         }
 
@@ -115,26 +116,32 @@ namespace peg
         private:
             bool parse(Context<elem>& context) const {
                 auto current_pos = context.mark();
-                auto ruleState = context.ruleState(this, current_pos);
-                std::cout<<__func__<<':'<<ruleState.m_leftRecursion<<':'<<m_rule<<std::endl;
-                if (ruleState.m_leftRecursion) {
-                    return false;
+                std::tuple<bool, typename Context<elem>::RuleState&> rs = context.ruleState(this, current_pos);
+                typename Context<elem>::RuleState& ruleState = std::get<1>(rs);
+                bool result = false;
+                if(!std::get<0>(rs)) {
+                    context.reset(ruleState.m_last_pos);
+                    result = ruleState.m_last_return;
                 }
-                typename Context<elem>::RuleState prev{ruleState};
-                bool result = m_rule->operator()(context);
-                if(!result){
-                    return false;
-                }
-                if(ruleState.m_leftRecursion) {
-                    while(!context.ended()) {
-                        const auto start = context.mark();
-                        ruleState.m_pos = start;
-                        bool result = m_rule->operator()(context);
-                        const auto end = context.mark();
-                        if(!result || end < start) break;
+                else {
+                    auto last_pos = current_pos;
+                    bool last_return = false;
+                    ruleState.m_last_pos = last_pos;
+                    ruleState.m_last_return = last_return;
+                    while(true) {
+                        context.reset(current_pos);
+                        bool res = m_rule->operator()(context);
+                        auto end_pos = context.mark();
+                        if (end_pos <= last_pos){
+                            break;
+                        }
+                        ruleState.m_last_pos = (last_pos = end_pos);
+                        ruleState.m_last_return = (last_return = res);
                     }
+                    result = last_return;
+                    context.reset(last_pos);
                 }
-                return true;
+                return result;
 
             }
             std::shared_ptr<ParsingExprInterface<elem>> m_rule;

@@ -4,6 +4,7 @@
 #include <map>
 #include <tuple>
 #include <iostream>
+#include <cassert>
 namespace peg
 {
     namespace parsers{
@@ -37,11 +38,11 @@ namespace peg
         using MatchType = MatchType_;
 
         struct RuleState {
-            RuleState(IterType pos, bool lr = false) : m_pos{pos}, m_leftRecursion{lr} {}
+            RuleState(IterType pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
             RuleState(const RuleState&) = default;
             RuleState& operator=(const RuleState&) = default;
-            IterType m_pos;
-            bool m_leftRecursion;
+            IterType m_last_pos;
+            bool m_last_return;
         };
 
         struct State {
@@ -97,12 +98,9 @@ namespace peg
             return m_input;
         }
 
-        RuleState& ruleState(const peg::parsers::NonTerminal<elem> *rule, IterType pos) {
-            const auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos, false});
-            if(!ok){
-                iter->second.m_leftRecursion = true;
-            }
-            return iter->second;
+        std::tuple<bool, RuleState&> ruleState(const peg::parsers::NonTerminal<elem> *rule, IterType pos) {
+            auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos});
+            return std::tuple<bool, RuleState&>{ok, iter->second};
         }
 
         void addMatch(MatchType match_id, IterType start, IterType end) {

@@ -461,8 +461,6 @@ static void testRecursion() {
     }
 }
 
-#if 1
-
 extern Rule<std::string::value_type> add;
 
 
@@ -516,13 +514,13 @@ static void testLeftRecursion() {
                  | terminal('a')
                  | terminal('d');
 
-        // {
-        //     const std::string input = "a";
-        //     Context context(input);
-        //     bool ok = r(context);
-        //     assert(ok);
-        //     assert(context.ended());
-        // }
+        {
+            const std::string input = "a";
+            Context context(input);
+            bool ok = r(context);
+            assert(ok);
+            assert(context.ended());
+        }
 
         {
             const std::string input = "ab";
@@ -569,7 +567,7 @@ static void testLeftRecursion() {
             Context context(input);
             bool ok = r(context);
             assert(ok);
-            assert(context.ended());
+            assert(!context.ended());
         }
 
         {
@@ -592,7 +590,7 @@ static void testLeftRecursion() {
             const std::string input = "b";
             Context context(input);
             bool ok = r(context);
-            assert(ok);
+            assert(!ok);
             assert(!context.ended());
         }
 
@@ -600,7 +598,7 @@ static void testLeftRecursion() {
             const std::string input = "c";
             Context context(input);
             bool ok = r(context);
-            assert(ok);
+            assert(!ok);
             assert(!context.ended());
         }
 
@@ -608,7 +606,7 @@ static void testLeftRecursion() {
             const std::string input = "ba";
             Context context(input);
             bool ok = r(context);
-            assert(ok);
+            assert(!ok);
             assert(!context.ended());
         }
 
@@ -616,7 +614,7 @@ static void testLeftRecursion() {
             const std::string input = "ca";
             Context context(input);
             bool ok = r(context);
-            assert(ok);
+            assert(!ok);
             assert(!context.ended());
         }
 
@@ -687,22 +685,21 @@ static void testLeftRecursion() {
     }
 }
 
-#endif
 
 int main(int argc, char* argv[]){
-    // testAndExpr();
-    // testAlternationExpr();
-    // testZeroOrMoreExpr();
-    // testOneOrMoreExpr();
-    // testNTimesExpr();
-    // testNotExpr();
-    // testOptionalExpr();
-    // testNonTerminalExpr();
-    // testSequenceExpr();
-    // testTerminalSetExpr();
-    // testTerminalSeqExpr();
-    // testMatchExpr();
-    // testRecursion();
+    testAndExpr();
+    testAlternationExpr();
+    testZeroOrMoreExpr();
+    testOneOrMoreExpr();
+    testNTimesExpr();
+    testNotExpr();
+    testOptionalExpr();
+    testNonTerminalExpr();
+    testSequenceExpr();
+    testTerminalSetExpr();
+    testTerminalSeqExpr();
+    testMatchExpr();
+    testRecursion();
     testLeftRecursion();
     return 0;
 }
