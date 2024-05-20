@@ -1,6 +1,7 @@
 #pragma once
 #include "Context.h"
 #include "Parser.h"
+#include <concepts>
 namespace peg
 {
     using namespace parsers;
@@ -10,6 +11,11 @@ namespace peg
     template <typename elem>
     TerminalExpr<elem> terminal(elem value) {
         return TerminalExpr<elem>(value);
+    }
+
+    template <typename elem>
+    auto terminal(const std::predicate<elem> auto& f) {
+        return TerminalExpr<elem, decltype(f)>(f);
     }
 
     template <typename elem>

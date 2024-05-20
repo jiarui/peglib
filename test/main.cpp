@@ -407,6 +407,25 @@ static void testTerminalSeqExpr() {
     }
 }
 
+static void testTerminalPredExpr() {
+    const auto grammar = terminal<char>([](char c) { return c == 'a';});
+    {
+        const std::string input = "a";
+        Context context(input);
+        bool ok = grammar(context);
+        assert(ok);
+        assert(context.mark() == context.get_input().end());
+    }
+
+    {
+        const std::string input = "b";
+        Context context(input);
+        bool ok = grammar(context);
+        assert(!ok);
+        assert(context.mark() == context.get_input().begin());
+    }
+}
+
 static void testMatchExpr() {
     const auto grammar = terminal('a') == 1;
 
@@ -698,6 +717,7 @@ int main(int argc, char* argv[]){
     testSequenceExpr();
     testTerminalSetExpr();
     testTerminalSeqExpr();
+    testTerminalPredExpr();
     testMatchExpr();
     testRecursion();
     testLeftRecursion();

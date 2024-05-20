@@ -7,6 +7,7 @@
 #include <set>
 #include <array>
 #include <ranges>
+#include <concepts>
 namespace peg
 {
     namespace parsers
@@ -29,18 +30,24 @@ namespace peg
 
 
         template<typename elem>
-        bool symbolConsumable(typename Context<elem>::IterType pos, const elem& value) {
-            return *pos == value;
+        bool symbolConsumable(const elem& v, const elem& value) {
+            return v == value;
         }
 
         template<typename elem>
-        bool symbolConsumable(typename Context<elem>::IterType pos, const std::set<elem>& values) {
-            return values.find(*pos) != values.end();
+        bool symbolConsumable(const elem& v, const std::set<elem>& values) {
+            return values.find(v) != values.end();
         }
 
         template<typename elem>
-        bool symbolConsumable(typename Context<elem>::IterType pos, const std::array<elem, 2>& values) {
-            return (*pos >= values[0]) && (*pos <= values[1]); 
+        bool symbolConsumable(const elem& v, const std::array<elem, 2>& values) {
+            return (v >= values[0]) && (v <= values[1]); 
+        }
+
+        template<typename elem, typename Functor>
+        requires std::predicate<Functor, elem>
+        bool symbolConsumable(const elem& v, const Functor& f) {
+            return f(v);
         }
         
         template <typename elem, typename ValuesType = elem>
@@ -51,7 +58,7 @@ namespace peg
             }
         private:
             bool parse(Context<elem>& context) const {
-                if(!context.ended() && symbolConsumable(context.mark(), m_terminalValue)) {
+                if(!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
                     context.next();
                     return true;
                 }
@@ -71,7 +78,7 @@ namespace peg
             bool parse(Context<elem>& context) const {
                 auto initState = context.state();
                 for(const auto& i: m_terminalValues){
-                    if(!context.ended() && symbolConsumable(context.mark(), i)) {
+                    if(!context.ended() && symbolConsumable(*context.mark(), i)) {
                         context.next();
                     }
                     else {
