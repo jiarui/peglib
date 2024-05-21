@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
 project(peglib VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 20)
-add_executable(peglib_test test/main.cpp)
-target_include_directories(peglib_test PUBLIC include)
+enable_testing()
+add_subdirectory(test)
