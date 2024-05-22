@@ -13,26 +13,6 @@ namespace peg
         template<typename elem> struct NonTerminal;
     }
 
-    template <typename elem, typename MatchType>
-    struct Match {
-        using IterType = typename std::span<const elem>::iterator;
-        Match() = default;
-        Match(const MatchType& match_id, const std::span<const elem>& match_pos) :
-            m_match_id{match_id}, m_match_pos(match_pos) {}
-        
-        Match(const MatchType& match_id, std::span<const elem>&& match_pos) :
-            m_match_id{match_id}, m_match_pos(match_pos) {}
-        
-        Match(const MatchType& match_id, const IterType start, const IterType end):
-            Match(match_id, std::span<const elem>(start, end)) {}
-        const MatchType& id() const {
-            return m_match_id;
-        }
-    protected:
-        MatchType m_match_id;
-        std::span<const elem> m_match_pos;
-    };
-
     template <typename elem>
     struct Context {
     public:

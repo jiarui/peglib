@@ -6,7 +6,7 @@ using namespace peg;
 auto WS = *terminal(std::set({' ', '\f', '\t', '\v'}));
 auto linebreak = terminal('\n');
 auto not_linebreak = terminal<char>([](char c){return c!='\n';});
-auto names = terminal<char>([](char c){return std::isalpha(c) || c == '_';}) 
+Rule<std::string::value_type> names = terminal<char>([](char c){return std::isalpha(c) || c == '_';}) 
         >> *terminal<char>([](char c){return std::isalnum(c);});
 auto digit = terminal('0', '9');
 auto xdigit = terminal<char>([](char c){return std::isxdigit(c);});
@@ -25,13 +25,16 @@ auto string_single_quote = terminal('\'')>> *(string_content | escape_single_quo
 
 BOOST_AUTO_TEST_CASE(test_names) {
     {
+        names.setAction([](Context<char>& c, std::span<const char> range){
+            BOOST_CHECK_EQUAL(std::string(range.begin(), range.end()), "print");
+        });
         std::string input = R"(   print)";
         Context context(input);
         bool ok = WS(context);
         BOOST_TEST(ok);
         auto start = context.mark();
         BOOST_TEST(names(context));
-        BOOST_TEST(std::string(start, context.mark()) == "print");
+        BOOST_CHECK_EQUAL(std::string(start, context.mark()), "print");
     }
 }
 
@@ -57,7 +60,7 @@ BOOST_AUTO_TEST_CASE(test_number) {
         Context context(input);
         auto start = context.mark();
         BOOST_TEST(numeral(context));
-        BOOST_TEST(std::string(start, context.mark()) == input);
+        BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
     }
 }
 
