@@ -5,9 +5,11 @@
 #include <tuple>
 #include <iostream>
 #include <cassert>
+#include <functional>
 namespace peg
 {
     namespace parsers{
+        template<typename elem> struct ParsingExprInterface;
         template<typename elem> struct NonTerminal;
     }
 
@@ -31,11 +33,14 @@ namespace peg
         std::span<const elem> m_match_pos;
     };
 
-    template <typename elem, typename MatchType_ = int>
+    template <typename elem>
     struct Context {
     public:
         using IterType = typename std::span<const elem>::iterator;
-        using MatchType = MatchType_;
+        using ValueType = elem;
+        using Rule = peg::parsers::NonTerminal<elem>;
+        using Action = std::function<void(Context<elem>&)>;
+        using Expr = peg::parsers::ParsingExprInterface<elem>;
 
         struct RuleState {
             RuleState(IterType pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
@@ -52,12 +57,11 @@ namespace peg
         };
 
         State state() {
-            return {m_position, m_matches.size()};
+            return {m_position, 0};
         }
 
         void state(const State& state) {
             m_position = state.m_pos;
-            m_matches.resize(state.m_matchCount);
         }
 
         Context(std::span<const elem> input) :m_input(input), m_position(m_input.begin()) {}
@@ -96,24 +100,15 @@ namespace peg
             return m_input;
         }
 
-        std::tuple<bool, RuleState&> ruleState(const peg::parsers::NonTerminal<elem> *rule, IterType pos) {
+        std::tuple<bool, RuleState&> ruleState(const Rule *rule, IterType pos) {
             auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos});
             return std::tuple<bool, RuleState&>{ok, iter->second};
-        }
-
-        void addMatch(MatchType match_id, IterType start, IterType end) {
-            m_matches.emplace_back(match_id, start, end);
-        }
-
-        const std::vector<Match<elem, MatchType>>& matches(){
-            return m_matches;
         }
 
     private:
         std::span<const elem> m_input;
         IterType m_position;
-        std::vector<Match<elem, MatchType>> m_matches;
-        std::map<std::tuple<const parsers::NonTerminal<elem>*, IterType>, RuleState> m_mem;
+        std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
     };
 
     template<typename InputType>

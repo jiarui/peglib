@@ -250,15 +250,15 @@ namespace peg
         return n.child();
     }
 
-    template <typename elem, typename ParsingExprType, typename MatchType>
-    auto operator==(const ParsingExpr<elem, ParsingExprType>& expr, const MatchType& match_id) {
-        return MatchExpr<elem, ParsingExprType, MatchType>(static_cast<const ParsingExprType&>(expr), match_id);
-    }
+    // template <typename elem, typename ParsingExprType, typename MatchType>
+    // auto operator==(const ParsingExpr<elem, ParsingExprType>& expr, const MatchType& match_id) {
+    //     return MatchExpr<elem, ParsingExprType, MatchType>(static_cast<const ParsingExprType&>(expr), match_id);
+    // }
 
-    template <typename elem, typename ParsingExprType, typename CharType>
-    auto operator==(const ParsingExpr<elem, ParsingExprType>& expr, const CharType* match_id) {
-        return static_cast<const ParsingExprType&>(expr) == std::basic_string<CharType>{match_id};
-    }
+    // template <typename elem, typename ParsingExprType, typename CharType>
+    // auto operator==(const ParsingExpr<elem, ParsingExprType>& expr, const CharType* match_id) {
+    //     return static_cast<const ParsingExprType&>(expr) == std::basic_string<CharType>{match_id};
+    // }
 
 
 

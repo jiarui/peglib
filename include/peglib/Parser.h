@@ -97,6 +97,7 @@ namespace peg
         template<typename elem>
         struct NonTerminal : ParsingExpr<elem, NonTerminal<elem>> {
         public:
+            using Action = std::function<void(Context<elem>&, std::span<const elem> match_range)>;
 
             NonTerminal(const NonTerminal& rhs) : m_rule{rhs.m_rule} {}
 
@@ -117,8 +118,20 @@ namespace peg
             }
 
             bool operator()(Context<elem>& context) const override {
-                return parse(context);
+                auto start_pos = context.mark();
+                const bool result = parse(context);
+                if (result && m_action) {
+                    auto end_pos = context.mark();
+                    m_action(context, std::span<const elem>(start_pos, end_pos));
+                }
+                return result;
             }
+
+            void setAction(const Action& action) {
+                m_action = action;
+            }
+
+
         private:
             bool parse(Context<elem>& context) const {
                 auto current_pos = context.mark();
@@ -151,6 +164,7 @@ namespace peg
 
             }
             std::shared_ptr<ParsingExprInterface<elem>> m_rule;
+            Action m_action;
         };
 
         template<typename elem>
@@ -351,27 +365,27 @@ namespace peg
 
         };
 
-        template<typename elem, typename Child, typename MatchType>
-        struct MatchExpr : ParsingExpr<elem, MatchExpr<elem, Child, MatchType>> {
-            MatchExpr(const Child& child, const MatchType& match_id) 
-                : m_child{child}, m_match_id{match_id} {}
+        // template<typename elem, typename Child, typename MatchType>
+        // struct MatchExpr : ParsingExpr<elem, MatchExpr<elem, Child, MatchType>> {
+        //     MatchExpr(const Child& child, const MatchType& match_id) 
+        //         : m_child{child}, m_match_id{match_id} {}
             
-            bool operator()(Context<elem>& context) const override {
-                return parse(context);
-            } 
-        protected:
-            bool parse(Context<elem>& context) const {
-                auto startPos = context.mark();
-                bool result = m_child(context);
-                if(result) {
-                    auto endPos = context.mark();
-                    context.addMatch(m_match_id, startPos, endPos);
-                }
-                return result;
-            }
-            Child m_child;
-            MatchType m_match_id; 
-        };
+        //     bool operator()(Context<elem>& context) const override {
+        //         return parse(context);
+        //     } 
+        // protected:
+        //     bool parse(Context<elem>& context) const {
+        //         auto startPos = context.mark();
+        //         bool result = m_child(context);
+        //         if(result) {
+        //             auto endPos = context.mark();
+        //             context.addMatch(m_match_id, startPos, endPos);
+        //         }
+        //         return result;
+        //     }
+        //     Child m_child;
+        //     MatchType m_match_id; 
+        // };
         
     } // namespace parsers
 
