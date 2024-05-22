@@ -15,19 +15,16 @@ namespace peg
         
         template <typename elem>
         struct ParsingExprInterface {
+            friend NonTerminal<elem>;
             using ElementType = elem;
             virtual ~ParsingExprInterface() = default;
-            virtual bool operator()(Context<elem>& context) const = 0;
+            virtual bool parse(Context<elem>& context) const = 0;
         };
 
         template<typename elem, typename ExprType>
         struct ParsingExpr : ParsingExprInterface<elem>{
             using ParseExprType = ExprType;
         };
-
-        template <typename T, typename elem>
-        concept ParsingExprType = std::is_base_of<ParsingExprInterface<elem>, T>::value;
-
 
         template<typename elem>
         bool symbolConsumable(const elem& v, const elem& value) {
@@ -53,10 +50,6 @@ namespace peg
         template <typename elem, typename ValuesType = elem>
         struct TerminalExpr : ParsingExpr<elem, TerminalExpr<elem, ValuesType>> {
             TerminalExpr(const ValuesType& value) : m_terminalValue{value} {}
-            bool operator()(Context<elem>& context) const override {
-                return parse(context);
-            }
-        private:
             bool parse(Context<elem>& context) const {
                 if(!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
                     context.next();
@@ -64,6 +57,7 @@ namespace peg
                 }
                 return false;
             }
+        protected:
             ValuesType m_terminalValue;
         };
 
@@ -71,11 +65,7 @@ namespace peg
         requires std::ranges::random_access_range<SeqType>
         struct TerminalSeqExpr : ParsingExpr<elem, TerminalSeqExpr<elem, SeqType>> {
             TerminalSeqExpr(const SeqType& value) : m_terminalValues{value} {}
-            bool operator()(Context<elem>& context) const override {
-                return parse(context);
-            }
-        private:
-            bool parse(Context<elem>& context) const {
+            bool parse(Context<elem>& context) const override {
                 auto initState = context.state();
                 for(const auto& i: m_terminalValues){
                     if(!context.ended() && symbolConsumable(*context.mark(), i)) {
@@ -88,6 +78,7 @@ namespace peg
                 }                
                 return true;
             }
+        protected:
             SeqType m_terminalValues;
         };
 
@@ -117,7 +108,7 @@ namespace peg
                 return *this;
             }
 
-            bool operator()(Context<elem>& context) const override {
+            bool operator()(Context<elem>& context) const {
                 auto start_pos = context.mark();
                 const bool result = parse(context);
                 if (result && m_action) {
@@ -131,9 +122,7 @@ namespace peg
                 m_action = action;
             }
 
-
-        private:
-            bool parse(Context<elem>& context) const {
+            bool parse(Context<elem>& context) const override {
                 auto current_pos = context.mark();
                 std::tuple<bool, typename Context<elem>::RuleState&> rs = context.ruleState(this, current_pos);
                 typename Context<elem>::RuleState& ruleState = std::get<1>(rs);
@@ -149,13 +138,21 @@ namespace peg
                     ruleState.m_last_return = last_return;
                     while(true) {
                         context.reset(current_pos);
-                        bool res = m_rule->operator()(context);
+                        bool res = m_rule->parse(context);
                         auto end_pos = context.mark();
-                        if (end_pos <= last_pos){
+                        if (res){
+                            if(end_pos > last_pos){
+                                ruleState.m_last_pos = (last_pos = end_pos);
+                                ruleState.m_last_return = (last_return = res);
+                            }
+                            else {
+                                ruleState.m_last_return = (last_return = res);
+                                break;
+                            }
+                        }
+                        else{
                             break;
                         }
-                        ruleState.m_last_pos = (last_pos = end_pos);
-                        ruleState.m_last_return = (last_return = res);
                     }
                     result = last_return;
                     context.reset(last_pos);
@@ -163,6 +160,7 @@ namespace peg
                 return result;
 
             }
+        protected:
             std::shared_ptr<ParsingExprInterface<elem>> m_rule;
             Action m_action;
         };
@@ -171,10 +169,10 @@ namespace peg
         struct NonTerminalRef : ParsingExpr<elem, NonTerminalRef<elem>> {
             NonTerminalRef(const NonTerminal<elem>& rhs) : m_nonterm{rhs} {
             }
-            bool operator()(Context<elem>& context) const override{
-                return m_nonterm(context);
+            bool parse(Context<elem>& context) const override {
+                return m_nonterm.parse(context);
             }
-        private:
+        protected:
             const NonTerminal<elem>& m_nonterm;
 
         };
@@ -182,7 +180,7 @@ namespace peg
         template<typename elem>
         struct EmptyExpr : ParsingExpr<elem, EmptyExpr<elem>> {
             EmptyExpr() {}
-            bool operator()(Context<elem>& context) const override {
+            bool parse(Context<elem>& context) const override{
                 return true;
             }
         };
@@ -191,7 +189,10 @@ namespace peg
         struct SequenceExpr : ParsingExpr<elem, SequenceExpr<elem, Children...>>  {
             SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {
             }
-            bool operator()(Context<elem>& context) const override {
+            const std::tuple<Children...>& children() const {
+                return m_children;
+            }
+            bool parse(Context<elem>& context) const override {
                 auto state = context.state();
                 bool result = parseSeq<0>(context);
                 if (!result){
@@ -199,14 +200,11 @@ namespace peg
                 }
                 return result;
             }
-            const std::tuple<Children...>& children() const {
-                return m_children;
-            }
         protected:
             template<size_t Index>
             bool parseSeq(Context<elem>& context) const {
                 if constexpr (Index < sizeof...(Children)) {
-                    bool result = std::get<Index>(m_children)(context);
+                    bool result = std::get<Index>(m_children).parse(context);
                     if (result) {
                         return parseSeq<Index+1>(context);
                     }
@@ -227,15 +225,14 @@ namespace peg
             const std::tuple<Children...>& children() const {
                 return m_children;
             }
-            bool operator()(Context<elem>& context) const override {
+            bool parse(Context<elem>& context) const override {
                 return parse<0>(context);
-
             }
         protected:
             template <size_t Index>
             bool parse(Context<elem>& context) const{
                 if constexpr ( Index < sizeof...(Children)) {
-                    bool result = std::get<Index>(m_children)(context);
+                    bool result = std::get<Index>(m_children).parse(context);
                     if (result){
                         return true;
                     }
@@ -256,28 +253,21 @@ namespace peg
                         throw std::invalid_argument("rep not correct");
                     }
                 }
-
-            bool operator()(Context<elem> &context) const override {
-                return parse(context);
-            }
+            
             const Child& child() {
                 return m_child;
             }
             std::tuple<size_t, ssize_t> reps() const {
                 return {min_rep, max_rep};
             }
-        protected:
-            Child m_child;
-            size_t min_rep;
-            ssize_t max_rep;
 
-            bool parse(Context<elem> &context) const {
+            bool parse(Context<elem> &context) const override {
                 auto initState = context.state();
                 bool result = true;
                 size_t loopCount = 0;
                 while(true){
                     auto startState = context.state();
-                    result = m_child(context);
+                    result = m_child.parse(context);
                     if(result)
                         loopCount++;
                     else
@@ -303,6 +293,10 @@ namespace peg
                 }
                 return true;
             }
+        protected:
+            Child m_child;
+            size_t min_rep;
+            ssize_t max_rep;
         };
 
         template<typename elem, typename Child>
@@ -328,64 +322,36 @@ namespace peg
         template<typename elem, typename Child>
         struct NotExpr : ParsingExpr<elem, NotExpr<elem, Child>>{
             NotExpr(const Child& child) :m_child(child) {}
-            bool operator()(Context<elem>& context) const override {
-                return parse(context);
-            }
             const Child& child() {
                 return m_child;
             }
-        protected:
-            Child m_child;
-            bool parse(Context<elem>& context) const {
+            bool parse(Context<elem>& context) const override{
                 auto initState = context.state();
-                bool result = !m_child(context);
+                bool result = !m_child.parse(context);
                 context.state(initState);
                 return result;
             }
-
-        };
+        protected:
+            Child m_child;
+        };   
 
         template<typename elem, typename Child>
         struct AndExpr : ParsingExpr<elem, AndExpr<elem, Child>>{
             AndExpr(const Child& child) :m_child(child){}
-            bool operator()(Context<elem>& context) const override {
-                return parse(context);
-            }
             const Child& child() {
                 return m_child;
             }
-        protected:
-            Child m_child;
-            bool parse(Context<elem>& context) const {
+            bool parse(Context<elem>& context) const override {
                 auto initState = context.state();
-                bool result = m_child(context);
+                bool result = m_child.parse(context);
                 context.state(initState);
                 return result; 
             }
+        protected:
+            Child m_child;
+            
 
         };
-
-        // template<typename elem, typename Child, typename MatchType>
-        // struct MatchExpr : ParsingExpr<elem, MatchExpr<elem, Child, MatchType>> {
-        //     MatchExpr(const Child& child, const MatchType& match_id) 
-        //         : m_child{child}, m_match_id{match_id} {}
-            
-        //     bool operator()(Context<elem>& context) const override {
-        //         return parse(context);
-        //     } 
-        // protected:
-        //     bool parse(Context<elem>& context) const {
-        //         auto startPos = context.mark();
-        //         bool result = m_child(context);
-        //         if(result) {
-        //             auto endPos = context.mark();
-        //             context.addMatch(m_match_id, startPos, endPos);
-        //         }
-        //         return result;
-        //     }
-        //     Child m_child;
-        //     MatchType m_match_id; 
-        // };
         
     } // namespace parsers
 

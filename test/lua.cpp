@@ -10,12 +10,12 @@ Rule<std::string::value_type> names = terminal<char>([](char c){return std::isal
         >> *terminal<char>([](char c){return std::isalnum(c) || c=='_';});
 auto digit = terminal('0', '9');
 auto xdigit = terminal<char>([](char c){return std::isxdigit(c);});
-auto fractional = -(terminal('+') | '-') >> +digit >> -(terminal('.') >> +digit);
+auto fractional = -(terminal('+') | '-') >> ((*digit >> terminal('.') >> +digit) | (+digit >> terminal('.') >> *digit));
 auto decimal = -(terminal('+') | '-') >> +digit;
 
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >> -(terminal('.') >> +xdigit) >> 
             -((terminal('p') | 'P') >> decimal);
-Rule<std::string::value_type> numeral = hexdecimal | (-fractional >> -((terminal('e') | 'E') >> -(decimal)));
+Rule<std::string::value_type> numeral = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
 
 Rule<std::string::value_type> comment = terminal('-') >> '-' >> *not_linebreak >> linebreak;
 
@@ -26,7 +26,7 @@ Rule<std::string::value_type> string_literal = string_single_quote;
 
 Rule<std::string::value_type> ops = terminal('(') | terminal(')');
 
-auto token = numeral | names | string_literal | ops | comment;
+Rule<std::string::value_type> token = numeral | names | string_literal | ops | comment;
 Rule<std::string::value_type> lexer = +token;
 
 BOOST_AUTO_TEST_CASE(test_names) {
@@ -36,7 +36,8 @@ BOOST_AUTO_TEST_CASE(test_names) {
         });
         std::string input = R"(   print)";
         Context context(input);
-        bool ok = WS(context);
+        Rule<std::string::value_type> ws = WS;
+        bool ok = ws(context);
         BOOST_TEST(ok);
         auto start = context.mark();
         BOOST_TEST(names(context));
@@ -93,7 +94,7 @@ BOOST_AUTO_TEST_CASE(test_string) {
         std::string input = t;
         Context context(input);
         auto start = context.mark();
-        BOOST_TEST(string_single_quote(context));
+        BOOST_TEST(string_literal(context));
         BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
     }
 }
