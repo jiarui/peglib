@@ -90,4 +90,11 @@ BOOST_AUTO_TEST_CASE(test_start) {
         BOOST_TEST(expr(context));
         BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
     }
+    {
+        std::string input = R"(a=10)";
+        Context context(input);
+        auto start = context.mark();
+        BOOST_TEST(chunk(context));
+        BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
+    }
 }
