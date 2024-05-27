@@ -32,8 +32,12 @@ namespace peg
             }
             ParsingExpr() = default;
             ParsingExpr(SematicAction action) : m_action(action) {}
+            ParsingExpr(const ParsingExpr&) = default;
+            ParsingExpr(ParsingExpr&&) = delete;
         protected:
             SematicAction m_action;
+        private:
+            
         };
 
         template<typename elem>
@@ -100,10 +104,6 @@ namespace peg
         struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>> {
         public:
 
-            NonTerminal(const NonTerminal& rhs) : m_rule{rhs.m_rule} {}
-
-            NonTerminal(NonTerminal&& rhs) : m_rule(rhs.m_rule) {}
-
             template<typename ExprType>
             NonTerminal(const ParsingExpr<Context, ExprType>& rhs) 
                 : m_rule(std::make_shared<ExprType>(static_cast<const ExprType&>(rhs))) {}
@@ -119,52 +119,58 @@ namespace peg
             }
 
             bool operator()(Context& context) const {
-                auto start_pos = context.mark();
-                const bool result = parse(context);
-                if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
-                    auto end_pos = context.mark();
-                    ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::MatchRange(start_pos, end_pos));
-                }
-                return result;
+                return parse(context);
             }
 
             bool parse(Context& context) const override {
-                auto current_pos = context.mark();
-                std::tuple<bool, typename Context::RuleState&> rs = context.ruleState(this, current_pos);
+                auto start_pos = context.mark();
+                std::tuple<bool, typename Context::RuleState&> rs = context.ruleState(this, start_pos);
                 typename Context::RuleState& ruleState = std::get<1>(rs);
                 bool result = false;
-                if(!std::get<0>(rs)) {
+                if(!std::get<0>(rs)){
                     context.reset(ruleState.m_last_pos);
                     result = ruleState.m_last_return;
+                    return result;
                 }
                 else {
-                    auto last_pos = current_pos;
-                    bool last_return = false;
-                    ruleState.m_last_pos = last_pos;
-                    ruleState.m_last_return = last_return;
-                    while(true) {
-                        context.reset(current_pos);
-                        bool res = m_rule->parse(context);
+                    result = parseImpl(context, ruleState);
+                    if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                         auto end_pos = context.mark();
-                        if (res){
-                            if(end_pos > last_pos){
-                                ruleState.m_last_pos = (last_pos = end_pos);
-                                ruleState.m_last_return = (last_return = res);
-                            }
-                            else {
-                                ruleState.m_last_return = (last_return = res);
-                                break;
-                            }
+                        ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::MatchRange(start_pos, end_pos));
+                    }
+                    return result;
+                }
+            }
+
+        protected:
+
+            bool parseImpl(Context& context, typename Context::RuleState& ruleState) const {
+                auto current_pos = context.mark();
+                auto last_pos = context.mark();
+                bool last_return = false;
+                ruleState.m_last_pos = last_pos;
+                ruleState.m_last_return = last_return;
+                while(true) {
+                    context.reset(current_pos);
+                    bool res = m_rule->parse(context);
+                    auto end_pos = context.mark();
+                    if (res){
+                        if(end_pos > last_pos){
+                            ruleState.m_last_pos = (last_pos = end_pos);
+                            ruleState.m_last_return = (last_return = res);
                         }
-                        else{
+                        else {
+                            ruleState.m_last_return = (last_return = res);
                             break;
                         }
                     }
-                    result = last_return;
-                    context.reset(last_pos);
+                    else{
+                        break;
+                    }
                 }
+                bool result = last_return;
+                context.reset(last_pos);
                 return result;
-
             }
         protected:
             std::shared_ptr<ParsingExprInterface<Context>> m_rule;
@@ -192,8 +198,8 @@ namespace peg
 
         template<typename Context, typename ...Children>
         struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>  {
-            SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {
-            }
+            SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {}
+            
             const std::tuple<Children...>& children() const {
                 return m_children;
             }

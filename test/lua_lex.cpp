@@ -1,6 +1,7 @@
 #define BOOST_TEST_MODULE lua_test
 #include <boost/test/unit_test.hpp>
 #include "peglib.h"
+#include <variant>
 using namespace peg;
 
 auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
@@ -26,8 +27,63 @@ Rule<std::string::value_type> string_literal = string_single_quote;
 
 Rule<std::string::value_type> ops = terminal('(') | terminal(')');
 
-Rule<std::string::value_type> token = numeral | names | string_literal | ops | comment;
+Rule<std::string::value_type> token = numeral | names | string_literal | ops | comment | WS;
 Rule<std::string::value_type> lexer = +token;
+
+
+enum class TokenID : std::intmax_t {
+    TK_AND = UCHAR_MAX + 1, TK_BREAK,
+    TK_DO, TK_ELSE, TK_ELSEIF, TK_END, TK_FALSE, TK_FOR, TK_FUNCTION,
+    TK_GOTO, TK_IF, TK_IN, TK_LOCAL, TK_NIL, TK_NOT, TK_OR, TK_REPEAT,
+    TK_RETURN, TK_THEN, TK_TRUE, TK_UNTIL, TK_WHILE,
+    /* other terminal symbols */
+    TK_IDIV, TK_CONCAT, TK_DOTS, TK_EQ, TK_GE, TK_LE, TK_NE,
+    TK_SHL, TK_SHR,
+    TK_DBCOLON, TK_EOS,
+    TK_FLT, TK_INT, TK_NAME, TK_STRING
+};
+
+struct Token{
+    using TokenInfo = std::variant<long long, double, std::string>;
+    Token() = default;
+    Token(TokenID i) : id{i} {}
+    Token(const std::string str) : id{TokenID::TK_NAME}, info{std::move(str)} {}
+    TokenID id;
+    TokenInfo info;
+};
+
+struct TokenizerTest {
+    std::vector<Token> m_token_buf;
+    void run(const std::string& input) {
+        names.setAction(
+            [this](Context<std::string::value_type>& context, Context<std::string::value_type>::MatchRange match) {
+                std::string m = std::string{match.begin(), match.end()};
+                if(m == "if"){
+                    m_token_buf.emplace_back(TokenID::TK_IF);
+                }
+                else if (match.size() > 0) {
+                    m_token_buf.emplace_back(m);
+                }
+            }
+        );
+        Context context(input);
+        while(!context.ended()){
+            token(context);
+        }
+    }
+    ~TokenizerTest() {
+        names.setAction(nullptr);
+    }
+};
+
+BOOST_AUTO_TEST_CASE(test_token) {
+    TokenizerTest t;
+    t.run("if test");
+    BOOST_CHECK_EQUAL(t.m_token_buf.size(), 2);
+    BOOST_CHECK(t.m_token_buf[0].id == TokenID::TK_IF);
+    BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
+}
+
 
 BOOST_AUTO_TEST_CASE(test_names) {
     {
