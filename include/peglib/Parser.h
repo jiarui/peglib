@@ -8,22 +8,32 @@
 #include <array>
 #include <ranges>
 #include <concepts>
+#include <functional>
 namespace peg
 {
     namespace parsers
     {
         
-        template <typename elem>
+        template <typename Context>
         struct ParsingExprInterface {
-            friend NonTerminal<elem>;
-            using ElementType = elem;
+            friend NonTerminal<Context>;
+            using ElementType = typename Context::ValueType;
             virtual ~ParsingExprInterface() = default;
-            virtual bool parse(Context<elem>& context) const = 0;
+            virtual bool parse(Context& context) const = 0;
         };
 
-        template<typename elem, typename ExprType>
-        struct ParsingExpr : ParsingExprInterface<elem>{
+        template<typename Context, typename ExprType, typename NodeType_ = void>
+        struct ParsingExpr : ParsingExprInterface<Context>{
             using ParseExprType = ExprType;
+            using NodeType = NodeType_;
+            using SematicAction = std::function<NodeType(Context&, typename Context::MatchRange match_range)>;
+            void setAction(SematicAction action) {
+                m_action = action;
+            }
+            ParsingExpr() = default;
+            ParsingExpr(SematicAction action) : m_action(action) {}
+        protected:
+            SematicAction m_action;
         };
 
         template<typename elem>
@@ -47,10 +57,11 @@ namespace peg
             return f(v);
         }
         
-        template <typename elem, typename ValuesType = elem>
-        struct TerminalExpr : ParsingExpr<elem, TerminalExpr<elem, ValuesType>> {
-            TerminalExpr(const ValuesType& value) : m_terminalValue{value} {}
-            bool parse(Context<elem>& context) const {
+        template <typename Context, typename ValuesType>
+        struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, ValuesType>> {
+            using SematicAction = typename ParsingExpr<Context, TerminalExpr<Context, ValuesType>>::SematicAction;
+            TerminalExpr(const ValuesType& value, SematicAction action=nullptr) : m_terminalValue{value}, ParsingExpr<Context, TerminalExpr<Context, ValuesType>>(action) {}
+            bool parse(Context& context) const {
                 if(!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
                     context.next();
                     return true;
@@ -61,11 +72,11 @@ namespace peg
             ValuesType m_terminalValue;
         };
 
-        template <typename elem, typename SeqType>
+        template <typename Context, typename SeqType>
         requires std::ranges::random_access_range<SeqType>
-        struct TerminalSeqExpr : ParsingExpr<elem, TerminalSeqExpr<elem, SeqType>> {
+        struct TerminalSeqExpr : ParsingExpr<Context, TerminalSeqExpr<Context, SeqType>> {
             TerminalSeqExpr(const SeqType& value) : m_terminalValues{value} {}
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 auto initState = context.state();
                 for(const auto& i: m_terminalValues){
                     if(!context.ended() && symbolConsumable(*context.mark(), i)) {
@@ -85,47 +96,42 @@ namespace peg
         template<typename elem>
         struct NonTerminalRef;
         
-        template<typename elem>
-        struct NonTerminal : ParsingExpr<elem, NonTerminal<elem>> {
+        template<typename Context>
+        struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>> {
         public:
-            using Action = std::function<void(Context<elem>&, std::span<const elem> match_range)>;
 
             NonTerminal(const NonTerminal& rhs) : m_rule{rhs.m_rule} {}
 
             NonTerminal(NonTerminal&& rhs) : m_rule(rhs.m_rule) {}
 
             template<typename ExprType>
-            NonTerminal(const ParsingExpr<elem, ExprType>& rhs) 
+            NonTerminal(const ParsingExpr<Context, ExprType>& rhs) 
                 : m_rule(std::make_shared<ExprType>(static_cast<const ExprType&>(rhs))) {}
             
             template<typename ExprType>
-            NonTerminal(ParsingExpr<elem, ExprType>&& rhs)
+            NonTerminal(ParsingExpr<Context, ExprType>&& rhs)
                 : m_rule(std::make_shared<ExprType>(static_cast<const ExprType&>(rhs))) {}
 
             template<typename ExprType>
-            NonTerminal& operator=(const ParsingExpr<elem, ExprType>& rhs){
+            NonTerminal& operator=(const ParsingExpr<Context, ExprType>& rhs){
                 m_rule = std::make_shared<ExprType>(rhs);
                 return *this;
             }
 
-            bool operator()(Context<elem>& context) const {
+            bool operator()(Context& context) const {
                 auto start_pos = context.mark();
                 const bool result = parse(context);
-                if (result && m_action) {
+                if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                     auto end_pos = context.mark();
-                    m_action(context, std::span<const elem>(start_pos, end_pos));
+                    ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::MatchRange(start_pos, end_pos));
                 }
                 return result;
             }
 
-            void setAction(const Action& action) {
-                m_action = action;
-            }
-
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 auto current_pos = context.mark();
-                std::tuple<bool, typename Context<elem>::RuleState&> rs = context.ruleState(this, current_pos);
-                typename Context<elem>::RuleState& ruleState = std::get<1>(rs);
+                std::tuple<bool, typename Context::RuleState&> rs = context.ruleState(this, current_pos);
+                typename Context::RuleState& ruleState = std::get<1>(rs);
                 bool result = false;
                 if(!std::get<0>(rs)) {
                     context.reset(ruleState.m_last_pos);
@@ -161,38 +167,37 @@ namespace peg
 
             }
         protected:
-            std::shared_ptr<ParsingExprInterface<elem>> m_rule;
-            Action m_action;
+            std::shared_ptr<ParsingExprInterface<Context>> m_rule;
         };
 
-        template<typename elem>
-        struct NonTerminalRef : ParsingExpr<elem, NonTerminalRef<elem>> {
-            NonTerminalRef(const NonTerminal<elem>& rhs) : m_nonterm{rhs} {
+        template<typename Context>
+        struct NonTerminalRef : ParsingExpr<Context, NonTerminalRef<Context>> {
+            NonTerminalRef(const NonTerminal<Context>& rhs) : m_nonterm{rhs} {
             }
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 return m_nonterm.parse(context);
             }
         protected:
-            const NonTerminal<elem>& m_nonterm;
+            const NonTerminal<Context>& m_nonterm;
 
         };
 
-        template<typename elem>
-        struct EmptyExpr : ParsingExpr<elem, EmptyExpr<elem>> {
+        template<typename Context>
+        struct EmptyExpr : ParsingExpr<Context, EmptyExpr<Context>> {
             EmptyExpr() {}
-            bool parse(Context<elem>& context) const override{
+            bool parse(Context& context) const override{
                 return true;
             }
         };
 
-        template<typename elem, typename ...Children>
-        struct SequenceExpr : ParsingExpr<elem, SequenceExpr<elem, Children...>>  {
+        template<typename Context, typename ...Children>
+        struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>  {
             SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {
             }
             const std::tuple<Children...>& children() const {
                 return m_children;
             }
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 auto state = context.state();
                 bool result = parseSeq<0>(context);
                 if (!result){
@@ -202,7 +207,7 @@ namespace peg
             }
         protected:
             template<size_t Index>
-            bool parseSeq(Context<elem>& context) const {
+            bool parseSeq(Context& context) const {
                 if constexpr (Index < sizeof...(Children)) {
                     bool result = std::get<Index>(m_children).parse(context);
                     if (result) {
@@ -219,18 +224,18 @@ namespace peg
             std::tuple<Children...> m_children;
         };
 
-        template<typename elem, typename ...Children>
-        struct AlternationExpr : ParsingExpr<elem, AlternationExpr<elem, Children...>>{
+        template<typename Context, typename ...Children>
+        struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children...>>{
             AlternationExpr(const std::tuple<Children...>& children) : m_children(children) {}
             const std::tuple<Children...>& children() const {
                 return m_children;
             }
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 return parse<0>(context);
             }
         protected:
             template <size_t Index>
-            bool parse(Context<elem>& context) const{
+            bool parse(Context& context) const{
                 if constexpr ( Index < sizeof...(Children)) {
                     bool result = std::get<Index>(m_children).parse(context);
                     if (result){
@@ -245,8 +250,8 @@ namespace peg
             std::tuple<Children...> m_children;
         };
 
-        template<typename elem, typename Child>
-        struct Repetition : ParsingExpr<elem, Repetition<elem, Child>> {
+        template<typename Context, typename Child>
+        struct Repetition : ParsingExpr<Context, Repetition<Context, Child>> {
             Repetition(const Child& child, size_t min_r, ssize_t max_r = -1)
                 : m_child(child), min_rep(min_r), max_rep(max_r){
                     if (!((max_rep < 0) || ((max_rep > 0) && (min_rep <= max_rep)))) {
@@ -261,7 +266,7 @@ namespace peg
                 return {min_rep, max_rep};
             }
 
-            bool parse(Context<elem> &context) const override {
+            bool parse(Context &context) const override {
                 auto initState = context.state();
                 bool result = true;
                 size_t loopCount = 0;
@@ -299,33 +304,33 @@ namespace peg
             ssize_t max_rep;
         };
 
-        template<typename elem, typename Child>
-        struct ZeroOrMoreExpr : Repetition<elem, Child> {
-            ZeroOrMoreExpr(const Child& child) : Repetition<elem, Child>(child, 0, -1) {}
+        template<typename Context, typename Child>
+        struct ZeroOrMoreExpr : Repetition<Context, Child> {
+            ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 0, -1) {}
         };
 
-        template<typename elem, typename Child>
-        struct OneOrMoreExpr : Repetition<elem, Child> {
-            OneOrMoreExpr(const Child& child) : Repetition<elem, Child>(child, 1, -1) {}
+        template<typename Context, typename Child>
+        struct OneOrMoreExpr : Repetition<Context, Child> {
+            OneOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 1, -1) {}
         };
 
-        template<typename elem, typename Child>
-        struct NTimesExpr : Repetition<elem, Child> {
-            NTimesExpr(const Child& child, size_t n_reps) : Repetition<elem, Child>(child, n_reps, n_reps) {}
+        template<typename Context, typename Child>
+        struct NTimesExpr : Repetition<Context, Child> {
+            NTimesExpr(const Child& child, size_t n_reps) : Repetition<Context, Child>(child, n_reps, n_reps) {}
         };
 
-        template<typename elem, typename Child>
-        struct OptionalExpr : Repetition<elem, Child> {
-            OptionalExpr(const Child& child) : Repetition<elem, Child>(child, 0, 1) {}
+        template<typename Context, typename Child>
+        struct OptionalExpr : Repetition<Context, Child> {
+            OptionalExpr(const Child& child) : Repetition<Context, Child>(child, 0, 1) {}
         };
 
-        template<typename elem, typename Child>
-        struct NotExpr : ParsingExpr<elem, NotExpr<elem, Child>>{
+        template<typename Context, typename Child>
+        struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>{
             NotExpr(const Child& child) :m_child(child) {}
             const Child& child() {
                 return m_child;
             }
-            bool parse(Context<elem>& context) const override{
+            bool parse(Context& context) const override{
                 auto initState = context.state();
                 bool result = !m_child.parse(context);
                 context.state(initState);
@@ -335,13 +340,13 @@ namespace peg
             Child m_child;
         };   
 
-        template<typename elem, typename Child>
-        struct AndExpr : ParsingExpr<elem, AndExpr<elem, Child>>{
+        template<typename Context, typename Child>
+        struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>{
             AndExpr(const Child& child) :m_child(child){}
             const Child& child() {
                 return m_child;
             }
-            bool parse(Context<elem>& context) const override {
+            bool parse(Context& context) const override {
                 auto initState = context.state();
                 bool result = m_child.parse(context);
                 context.state(initState);

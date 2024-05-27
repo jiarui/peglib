@@ -9,8 +9,8 @@
 namespace peg
 {
     namespace parsers{
-        template<typename elem> struct ParsingExprInterface;
-        template<typename elem> struct NonTerminal;
+        template<typename Context> struct ParsingExprInterface;
+        template<typename Context> struct NonTerminal;
     }
 
     template <typename elem>
@@ -18,9 +18,10 @@ namespace peg
     public:
         using IterType = typename std::span<const elem>::iterator;
         using ValueType = elem;
-        using Rule = peg::parsers::NonTerminal<elem>;
+        using Rule = peg::parsers::NonTerminal<Context<elem>>;
         using Action = std::function<void(Context<elem>&)>;
         using Expr = peg::parsers::ParsingExprInterface<elem>;
+        using MatchRange = typename std::span<const elem>;
 
         struct RuleState {
             RuleState(IterType pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}

@@ -432,9 +432,7 @@ static void testMatchExpr() {
 
     {
         int matches = 0;
-        grammar.setAction([&matches](Context<char>& c, std::span<const std::string::value_type> range){
-            matches++;
-        });
+        grammar.setAction([&matches](Context<char>& c, std::span<const std::string::value_type> range){matches++;});
         const std::string input = "a";
         Context context(input);
         bool ok = grammar(context);

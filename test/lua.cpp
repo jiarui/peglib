@@ -1,5 +1,8 @@
 #include <boost/test/unit_test.hpp>
 #include "peglib.h"
+#include <cstddef>
+
+std::byte a;
 using namespace peg;
 using LuaRule = Rule<std::string::value_type>;
 
@@ -91,10 +94,23 @@ BOOST_AUTO_TEST_CASE(test_start) {
         BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
     }
     {
-        std::string input = R"(a=10)";
+        std::string input = R"(a=10+10+10)";
         Context context(input);
         auto start = context.mark();
         BOOST_TEST(chunk(context));
+        BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
+    }
+}
+
+LuaRule aaaa = terminalSeq("abc");
+LuaRule bbbb = terminalSeq("abb") | aaaa;
+
+BOOST_AUTO_TEST_CASE(test_keyword_or_name) {
+    {
+        std::string input = R"(abc)";
+        Context context(input);
+        auto start = context.mark();
+        BOOST_TEST(bbbb(context));
         BOOST_CHECK_EQUAL(std::string(start, context.mark()), input);
     }
 }

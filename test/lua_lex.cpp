@@ -31,9 +31,9 @@ Rule<std::string::value_type> lexer = +token;
 
 BOOST_AUTO_TEST_CASE(test_names) {
     {
-        names.setAction([](Context<char>& c, std::span<const char> range){
+        names.setAction(([](Context<char>& c, std::span<const char> range){
             BOOST_CHECK_EQUAL(std::string(range.begin(), range.end()), "print");
-        });
+        }));
         std::string input = R"(   print)";
         Context context(input);
         Rule<std::string::value_type> ws = WS;
