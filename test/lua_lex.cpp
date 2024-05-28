@@ -89,8 +89,9 @@ BOOST_AUTO_TEST_CASE(test_token) {
     {
         TokenizerTest t;
         t.run("if true here");
-        BOOST_CHECK_EQUAL(t.m_token_buf.size(), 2);
+        BOOST_CHECK_EQUAL(t.m_token_buf.size(), 3);
         BOOST_CHECK(t.m_token_buf[0].id == TokenID::TK_IF);
+        BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
         BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
 
     }
