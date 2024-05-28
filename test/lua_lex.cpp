@@ -198,3 +198,34 @@ BOOST_AUTO_TEST_CASE(test_tokens) {
     }
     
 }
+
+namespace lexconv{
+    auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
+    auto not_linebreak = terminal<char>([](char c){return c!='\n';});
+    auto name_start = terminal<char>([](char c){return std::isalpha(c) || c == '_';});
+    auto name_cont = terminal<char>([](char c){return std::isalnum(c) || c=='_';});
+    Rule<std::string::value_type> name =  name_start >> *name_cont;
+    auto linebreak = terminalSeq<char>("\r\n") | terminal('\n');
+    auto digit = terminal('0', '9');
+    auto xdigit = terminal<char>([](char c){return std::isxdigit(c);});
+    auto pos_or_neg = (terminal('+') | '-');
+    auto fractional = -pos_or_neg >> ((*digit >> '.' >> +digit) | (+digit >> '.' >> *digit));
+    auto decimal = -pos_or_neg >> +digit;
+    auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >> -('.' >> +xdigit) >> -((terminal('p') | 'P') >> +decimal);
+    auto expotent = -pos_or_neg >> +digit;
+    Rule<std::string::value_type> numeral = hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
+
+    auto common_escape_code = terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | (terminal('\\') >>'\\'>>'n')| ('z' >> WS) | (3 * digit) | (2 * xdigit) | (terminal('u') >> '{' >> *xdigit >> '}') ;
+    Rule<std::string::value_type> single_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
+    Rule<std::string::value_type> double_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
+    auto single_no_escape_code = terminal<char>([](char c){return c != '\'';});
+    auto double_no_escape_code = terminal<char>([](char c){return c != '"';});
+    auto string_single_quote = '\'' >> *(single_escape_code | single_no_escape_code) >> '\'';
+    auto string_double_quote = '"' >> *(double_escape_code | double_no_escape_code) >> '"';
+    Rule<std::string::value_type> long_bracket_start = '[' >> *terminal('=') >> '[';
+    Rule<std::string::value_type> string_literal = string_single_quote | string_double_quote | long_bracket_start;
+    
+    Rule<std::string::value_type> comment = terminal('-') >> '-' >> (long_bracket_start | (*not_linebreak >> linebreak));
+    Rule<std::string::value_type> token = numeral | name | string_literal | comment | WS;
+};
+

@@ -258,7 +258,7 @@ namespace peg
         struct Repetition {
             Repetition(const Child& child, size_t min_r, ssize_t max_r = -1)
                 : m_child(child), min_rep(min_r), max_rep(max_r){
-                    if (!((max_rep < 0) || ((max_rep > 0) && (min_rep <= max_rep)))) {
+                    if (!((max_rep < 0) || ((max_rep >= 0) && (min_rep <= max_rep)))) {
                         throw std::invalid_argument("rep not correct");
                     }
                 }
