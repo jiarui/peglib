@@ -36,8 +36,6 @@ namespace peg
             ParsingExpr(ParsingExpr&&) = delete;
         protected:
             SematicAction m_action;
-        private:
-            
         };
 
         template<typename elem>

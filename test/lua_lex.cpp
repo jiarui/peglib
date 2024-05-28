@@ -48,6 +48,8 @@ struct Token{
     Token() = default;
     Token(TokenID i) : id{i} {}
     Token(const std::string str) : id{TokenID::TK_NAME}, info{std::move(str)} {}
+    Token(int i) : id{TokenID::TK_INT}{ info.emplace<0>(i);}
+    Token(double d) : id{TokenID::TK_FLT}{ info.emplace<1>(d);}
     TokenID id;
     TokenInfo info;
 };
@@ -77,11 +79,21 @@ struct TokenizerTest {
 };
 
 BOOST_AUTO_TEST_CASE(test_token) {
-    TokenizerTest t;
-    t.run("if test");
-    BOOST_CHECK_EQUAL(t.m_token_buf.size(), 2);
-    BOOST_CHECK(t.m_token_buf[0].id == TokenID::TK_IF);
-    BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
+    {
+        TokenizerTest t;
+        t.run("if test");
+        BOOST_CHECK_EQUAL(t.m_token_buf.size(), 2);
+        BOOST_CHECK(t.m_token_buf[0].id == TokenID::TK_IF);
+        BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
+    }
+    {
+        TokenizerTest t;
+        t.run("if true here");
+        BOOST_CHECK_EQUAL(t.m_token_buf.size(), 2);
+        BOOST_CHECK(t.m_token_buf[0].id == TokenID::TK_IF);
+        BOOST_CHECK(t.m_token_buf[1].id == TokenID::TK_NAME);
+
+    }
 }
 
 
