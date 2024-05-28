@@ -255,7 +255,7 @@ namespace peg
         };
 
         template<typename Context, typename Child>
-        struct Repetition : ParsingExpr<Context, Repetition<Context, Child>> {
+        struct Repetition {
             Repetition(const Child& child, size_t min_r, ssize_t max_r = -1)
                 : m_child(child), min_rep(min_r), max_rep(max_r){
                     if (!((max_rep < 0) || ((max_rep > 0) && (min_rep <= max_rep)))) {
@@ -270,7 +270,7 @@ namespace peg
                 return {min_rep, max_rep};
             }
 
-            bool parse(Context &context) const override {
+            bool parse(Context &context) const {
                 auto initState = context.state();
                 bool result = true;
                 size_t loopCount = 0;
@@ -309,23 +309,39 @@ namespace peg
         };
 
         template<typename Context, typename Child>
-        struct ZeroOrMoreExpr : Repetition<Context, Child> {
+        struct ZeroOrMoreExpr : ParsingExpr<Context, ZeroOrMoreExpr<Context, Child>>, Repetition<Context, Child> {
             ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 0, -1) {}
+            using Repetition<Context, Child>::child;
+            bool parse(Context &context) const override {
+                return Repetition<Context, Child>::parse(context);
+            }
         };
 
         template<typename Context, typename Child>
-        struct OneOrMoreExpr : Repetition<Context, Child> {
+        struct OneOrMoreExpr : ParsingExpr<Context, OneOrMoreExpr<Context, Child>>, Repetition<Context, Child> {
             OneOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 1, -1) {}
+            using Repetition<Context, Child>::child;
+            bool parse(Context &context) const override {
+                return Repetition<Context, Child>::parse(context);
+            }
         };
 
         template<typename Context, typename Child>
-        struct NTimesExpr : Repetition<Context, Child> {
+        struct NTimesExpr : ParsingExpr<Context, NTimesExpr<Context, Child>>, Repetition<Context, Child> {
             NTimesExpr(const Child& child, size_t n_reps) : Repetition<Context, Child>(child, n_reps, n_reps) {}
+            using Repetition<Context, Child>::child;
+            bool parse(Context &context) const override {
+                return Repetition<Context, Child>::parse(context);
+            }
         };
 
         template<typename Context, typename Child>
-        struct OptionalExpr : Repetition<Context, Child> {
+        struct OptionalExpr : ParsingExpr<Context, OptionalExpr<Context, Child>>, Repetition<Context, Child> {
             OptionalExpr(const Child& child) : Repetition<Context, Child>(child, 0, 1) {}
+            using Repetition<Context, Child>::child;
+            bool parse(Context &context) const override {
+                return Repetition<Context, Child>::parse(context);
+            }
         };
 
         template<typename Context, typename Child>
