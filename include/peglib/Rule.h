@@ -46,9 +46,14 @@ namespace peg
         return TerminalSeqExpr<Context<std::span<const CharType>>, std::basic_string<CharType>>(std::basic_string<CharType>{str});
     }
 
-    template<typename elem>
+    template<typename Context>
     auto emtpy() {
-        return EmptyExpr<Context<elem>>();
+        return EmptyExpr<Context>();
+    }
+
+    template<typename Context>
+    auto cut() {
+        return CutExpr<Context>();
     }
 
     template<typename Context, typename ParsingExprType>

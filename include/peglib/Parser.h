@@ -13,6 +13,15 @@ namespace peg
 {
     namespace parsers
     {
+        struct ScopeGuard {
+            template<typename FuncType>
+            ScopeGuard(FuncType f) : m_cleanup{f} {}
+            ~ScopeGuard() { m_cleanup();}
+        protected:
+            ScopeGuard(const ScopeGuard&) = delete;
+            ScopeGuard& operator=(const ScopeGuard&) = delete;
+            std::function<void()> m_cleanup;
+        };
         
         template <typename Context>
         struct ParsingExprInterface {
@@ -235,6 +244,8 @@ namespace peg
                 return m_children;
             }
             bool parse(Context& context) const override {
+                context.init_cut();
+                ScopeGuard s{[&context](){ context.remove_cut(); }};
                 return parse<0>(context);
             }
         protected:
@@ -246,6 +257,9 @@ namespace peg
                         return true;
                     }
                     else {
+                        if(context.cut()){
+                            return false;
+                        }
                         return parse<Index+1>(context);
                     }
                 }
@@ -271,11 +285,14 @@ namespace peg
             }
 
             bool parse(Context &context) const {
+                context.init_cut();
+                ScopeGuard _{[&context](){context.remove_cut();}};
                 auto initState = context.state();
                 bool result = true;
                 size_t loopCount = 0;
                 while(true){
                     auto startState = context.state();
+                    context.cut(false);
                     result = m_child.parse(context);
                     if(result)
                         loopCount++;
@@ -294,11 +311,12 @@ namespace peg
                     return false;
                 }
                 else if (max_rep < 0 ){
-                    return true;
-                }
-                else if(loopCount < min_rep){
-                    context.state(initState);
-                    return false;
+                    if(context.cut()){
+                        return false;
+                    }
+                    else{
+                        return true;
+                    }
                 }
                 return true;
             }
@@ -376,6 +394,14 @@ namespace peg
             Child m_child;
             
 
+        };
+
+        template<typename Context>
+        struct CutExpr : ParsingExpr<Context, CutExpr<Context>> {
+            bool parse(Context& context) const override {
+                context.cut(true);
+                return true;
+            }
         };
         
     } // namespace parsers

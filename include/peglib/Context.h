@@ -6,6 +6,7 @@
 #include <iostream>
 #include <cassert>
 #include <functional>
+#include <stack>
 #include "FileReader.h"
 namespace peg
 {
@@ -23,7 +24,7 @@ namespace peg
         Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()} {
         }
 
-        Context(const std::string& path, size_t bufsize) : m_input{path, bufsize}, m_position{m_input.begin()} {}
+        Context(const std::string& path, size_t bufsize) : m_input{path, bufsize}, m_position{m_input.begin()}{}
 
         using IterType = typename InputRef::iterator;
         using ValueType = typename InputRef::value_type;
@@ -81,10 +82,34 @@ namespace peg
             return std::tuple<bool, RuleState&>{ok, iter->second};
         }
 
+        struct CutRecord {
+            IterType pos;
+            bool cut = false;
+            CutRecord(IterType i, bool c) : pos{i}, cut{c} {}
+        };
+
+        void cut(bool c) {
+            m_cut.top().cut = c;
+        }
+
+        bool cut() {
+            return m_cut.top().cut;
+        }
+
+        void init_cut() {
+            m_cut.emplace(mark(), false);
+        }
+
+        void remove_cut() {
+            m_cut.pop();
+            //TODO remove m_mem
+        }
+
     public:
         InputRef m_input;
         IterType m_position;
         std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
+        std::stack<CutRecord> m_cut;
     };
 
     template<typename InputRef>
