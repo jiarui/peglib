@@ -2,9 +2,8 @@
 #include "peglib.h"
 #include <cstddef>
 
-std::byte a;
 using namespace peg;
-using LuaRule = Rule<std::string::value_type>;
+using LuaRule = Rule<>;
 
 extern LuaRule expr;
 extern LuaRule namelist;

@@ -7,7 +7,7 @@ using namespace peg;
 auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
 auto linebreak = terminal('\n');
 auto not_linebreak = terminal<char>([](char c){return c!='\n';});
-Rule<std::string::value_type> names = terminal<char>([](char c){return std::isalpha(c) || c == '_';}) 
+Rule<> names = terminal<char>([](char c){return std::isalpha(c) || c == '_';}) 
         >> *terminal<char>([](char c){return std::isalnum(c) || c=='_';});
 auto digit = terminal('0', '9');
 auto xdigit = terminal<char>([](char c){return std::isxdigit(c);});
@@ -16,19 +16,19 @@ auto decimal = -(terminal('+') | '-') >> +digit;
 
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >> -(terminal('.') >> +xdigit) >> 
             -((terminal('p') | 'P') >> decimal);
-Rule<std::string::value_type> numeral = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
+Rule<> numeral = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
 
-Rule<std::string::value_type> comment = terminal('-') >> '-' >> *not_linebreak >> linebreak;
+Rule<> comment = terminal('-') >> '-' >> *not_linebreak >> linebreak;
 
 auto escape_single_quote = terminal('\\') >> (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | ('z' >> WS) | (3 * digit) | (2 * xdigit) | terminal('u') >> '{' >> *xdigit >> '}');
 auto string_content = terminal<char>([](char c){return c != '\'' && c != '\\' && c != '\r' && c!='\n';});
 auto string_single_quote = terminal('\'')>> *(string_content | escape_single_quote) >> terminal('\'');
-Rule<std::string::value_type> string_literal = string_single_quote;
+Rule<> string_literal = string_single_quote;
 
-Rule<std::string::value_type> ops = terminal('(') | terminal(')');
+Rule<> ops = terminal('(') | terminal(')');
 
-Rule<std::string::value_type> token = numeral | names | string_literal | ops | comment | WS;
-Rule<std::string::value_type> lexer = +token;
+Rule<> token = numeral | names | string_literal | ops | comment | WS;
+Rule<> lexer = +token;
 
 
 enum class TokenID : std::intmax_t {
@@ -58,7 +58,7 @@ struct TokenizerTest {
     std::vector<Token> m_token_buf;
     void run(const std::string& input) {
         names.setAction(
-            [this](Context<std::string::value_type>& context, Context<std::string::value_type>::MatchRange match) {
+            [this](Context<std::span<const std::string::value_type>>& context, Context<std::span<const std::string::value_type>>::MatchRange match) {
                 std::string m = std::string{match.begin(), match.end()};
                 if(m == "if"){
                     m_token_buf.emplace_back(TokenID::TK_IF);
@@ -100,12 +100,13 @@ BOOST_AUTO_TEST_CASE(test_token) {
 
 BOOST_AUTO_TEST_CASE(test_names) {
     {
-        names.setAction(([](Context<char>& c, std::span<const char> range){
-            BOOST_CHECK_EQUAL(std::string(range.begin(), range.end()), "print");
-        }));
         std::string input = R"(   print)";
         Context context(input);
-        Rule<std::string::value_type> ws = WS;
+        names.setAction(([](decltype(context)& c, decltype(context)::MatchRange range){
+            BOOST_CHECK_EQUAL(std::string(range.begin(), range.end()), "print");
+        }));
+        
+        Rule<> ws = WS;
         bool ok = ws(context);
         BOOST_TEST(ok);
         auto start = context.mark();
@@ -171,7 +172,7 @@ BOOST_AUTO_TEST_CASE(test_string) {
 BOOST_AUTO_TEST_CASE(test_tokens) {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    names.setAction([](Context<char>& c, std::span<const char> range){
+    names.setAction([](decltype(context)& c, decltype(context)::MatchRange range){
         });
     {
         auto start = context.mark();
@@ -204,7 +205,7 @@ namespace lexconv{
     auto not_linebreak = terminal<char>([](char c){return c!='\n';});
     auto name_start = terminal<char>([](char c){return std::isalpha(c) || c == '_';});
     auto name_cont = terminal<char>([](char c){return std::isalnum(c) || c=='_';});
-    Rule<std::string::value_type> name =  name_start >> *name_cont;
+    Rule<> name =  name_start >> *name_cont;
     auto linebreak = terminalSeq<char>("\r\n") | terminal('\n');
     auto digit = terminal('0', '9');
     auto xdigit = terminal<char>([](char c){return std::isxdigit(c);});
@@ -213,19 +214,19 @@ namespace lexconv{
     auto decimal = -pos_or_neg >> +digit;
     auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >> -('.' >> +xdigit) >> -((terminal('p') | 'P') >> +decimal);
     auto expotent = -pos_or_neg >> +digit;
-    Rule<std::string::value_type> numeral = hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
+    Rule<> numeral = hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
 
     auto common_escape_code = terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | (terminal('\\') >>'\\'>>'n')| ('z' >> WS) | (3 * digit) | (2 * xdigit) | (terminal('u') >> '{' >> *xdigit >> '}') ;
-    Rule<std::string::value_type> single_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
-    Rule<std::string::value_type> double_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
+    Rule<> single_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
+    Rule<> double_escape_code = terminal('\\') >> ( common_escape_code | '\'' );
     auto single_no_escape_code = terminal<char>([](char c){return c != '\'';});
     auto double_no_escape_code = terminal<char>([](char c){return c != '"';});
     auto string_single_quote = '\'' >> *(single_escape_code | single_no_escape_code) >> '\'';
     auto string_double_quote = '"' >> *(double_escape_code | double_no_escape_code) >> '"';
-    Rule<std::string::value_type> long_bracket_start = '[' >> *terminal('=') >> '[';
-    Rule<std::string::value_type> string_literal = string_single_quote | string_double_quote | long_bracket_start;
+    Rule<> long_bracket_start = '[' >> *terminal('=') >> '[';
+    Rule<> string_literal = string_single_quote | string_double_quote | long_bracket_start;
     
-    Rule<std::string::value_type> comment = terminal('-') >> '-' >> (long_bracket_start | (*not_linebreak >> linebreak));
-    Rule<std::string::value_type> token = numeral | name | string_literal | comment | WS;
+    Rule<> comment = terminal('-') >> '-' >> (long_bracket_start | (*not_linebreak >> linebreak));
+    Rule<> token = numeral | name | string_literal | comment | WS;
 };
 

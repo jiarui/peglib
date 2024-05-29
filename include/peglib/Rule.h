@@ -4,47 +4,50 @@
 namespace peg
 {
     using namespace parsers;
-    template<typename elem>
-    using Rule = NonTerminal<Context<elem>>;
 
-    template <typename elem>
-    TerminalExpr<Context<elem>, elem> terminal(elem value) {
-        return TerminalExpr<Context<elem>, elem>(value);
-    }
+    template<typename InputRef = std::string>
+    using Rule = NonTerminal<Context<std::span<const typename InputRef::value_type>>>;
 
     template <typename elem>
     auto terminal(const std::predicate<elem> auto& f) {
-        return TerminalExpr<Context<elem>, decltype(f)>(f);
+        return TerminalExpr<Context<std::span<const elem>>, decltype(f)>(f);
     }
 
     template <typename elem>
-    TerminalExpr<Context<elem>, std::set<elem>> terminal(const std::set<elem>& values) {
-        return TerminalExpr<Context<elem>, std::set<elem>>(values);
+    auto terminal(elem value) {
+        return TerminalExpr<Context<std::span<const elem>>, elem>(value);
+    }
+
+
+
+    template <typename elem>
+    auto terminal(const std::set<elem>& values) {
+        return TerminalExpr<Context<std::span<const elem>>, std::set<elem>>(values);
     }
 
     template <typename elem>
-    TerminalExpr<Context<elem>, std::array<elem, 2>> terminal(const std::array<elem, 2>& values) {
-        return TerminalExpr<Context<elem>, std::array<elem, 2>>(values);
+    auto terminal(const std::array<elem, 2>& values) {
+        return TerminalExpr<Context<std::span<const elem>>, std::array<elem, 2>>(values);
     }
 
     template <typename elem>
-    TerminalExpr<Context<elem>, std::array<elem,2>> terminal(const elem& value_min, const elem& value_max) {
+    auto terminal(const elem& value_min, const elem& value_max) {
         std::array<elem, 2> values = {value_min, value_max};
         return terminal(values);
     }
 
     template<typename SeqType>
-    TerminalSeqExpr<typename SeqType::value_type, SeqType> terminalSeq(const SeqType& valueSeq){
-        return TerminalSeqExpr<typename SeqType::value_type, SeqType>(valueSeq);
+    auto terminalSeq(const SeqType& valueSeq){
+        return TerminalSeqExpr<Context<std::span<const typename SeqType::value_type>>, SeqType>(valueSeq);
     }
 
     template<typename CharType>
-    TerminalSeqExpr<Context<CharType>, std::string> terminalSeq(const CharType* str){
-        return TerminalSeqExpr<Context<CharType>, std::basic_string<CharType>>(std::basic_string<CharType>{str});
+    auto terminalSeq(const CharType* str){
+        return TerminalSeqExpr<Context<std::span<const CharType>>, std::basic_string<CharType>>(std::basic_string<CharType>{str});
     }
 
     template<typename elem>
-    EmptyExpr<elem> emtpy() {
+    auto emtpy() {
         return EmptyExpr<Context<elem>>();
     }
 

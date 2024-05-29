@@ -59,10 +59,10 @@ namespace peg
             return f(v);
         }
         
-        template <typename Context, typename ValuesType>
-        struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, ValuesType>> {
-            using SematicAction = typename ParsingExpr<Context, TerminalExpr<Context, ValuesType>>::SematicAction;
-            TerminalExpr(const ValuesType& value, SematicAction action=nullptr) : m_terminalValue{value}, ParsingExpr<Context, TerminalExpr<Context, ValuesType>>(action) {}
+        template <typename Context, typename TerminalValueType>
+        struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>> {
+            using SematicAction = typename ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>::SematicAction;
+            TerminalExpr(const TerminalValueType& value, SematicAction action=nullptr) : m_terminalValue{value}, ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(action) {}
             bool parse(Context& context) const {
                 if(!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
                     context.next();
@@ -71,7 +71,7 @@ namespace peg
                 return false;
             }
         protected:
-            ValuesType m_terminalValue;
+            TerminalValueType m_terminalValue;
         };
 
         template <typename Context, typename SeqType>
@@ -95,7 +95,7 @@ namespace peg
             SeqType m_terminalValues;
         };
 
-        template<typename elem>
+        template<typename Context>
         struct NonTerminalRef;
         
         template<typename Context>

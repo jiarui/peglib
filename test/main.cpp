@@ -6,7 +6,7 @@
 using namespace peg;
 
 static void testAndExpr() {
-    const Rule<std::string::value_type> grammar = &terminal('a');
+    const Rule<> grammar = &terminal('a');
 
     {
         
@@ -27,7 +27,7 @@ static void testAndExpr() {
 }
 
 static void testAlternationExpr() {
-    const Rule<std::string::value_type> grammar = terminal('a') | 'b' | 'c';
+    const Rule<> grammar = terminal('a') | 'b' | 'c';
 
     {
         const std::string input = "a";
@@ -63,7 +63,7 @@ static void testAlternationExpr() {
 }
 
 static void testZeroOrMoreExpr() {
-    const Rule<std::string::value_type> grammar = *terminal('a');
+    const Rule<> grammar = *terminal('a');
 
     {
         const std::string input = "a";
@@ -123,7 +123,7 @@ static void testZeroOrMoreExpr() {
 }
 
 static void testOneOrMoreExpr() {
-    const Rule<std::string::value_type> grammar = +terminal('a');
+    const Rule<> grammar = +terminal('a');
 
     {
         const std::string input = "a";
@@ -185,7 +185,7 @@ static void testOneOrMoreExpr() {
 static void testNTimesExpr() {
 
     {
-        const Rule<std::string::value_type> grammar = 1 * terminal('a');
+        const Rule<> grammar = 1 * terminal('a');
 
         {
             const std::string input = "a";
@@ -205,7 +205,7 @@ static void testNTimesExpr() {
     }
 
     {
-        const Rule<std::string::value_type> grammar = 2 * terminal('a');
+        const Rule<> grammar = 2 * terminal('a');
 
         {
             const std::string input = "a";
@@ -226,7 +226,7 @@ static void testNTimesExpr() {
 }
 
 static void testNotExpr() {
-    const Rule<std::string::value_type> grammar = !terminal('a');
+    const Rule<> grammar = !terminal('a');
 
     {
         const std::string input = "b";
@@ -246,7 +246,7 @@ static void testNotExpr() {
 }
 
 static void testOptionalExpr() {
-    const Rule<std::string::value_type> grammar = -terminal('a');
+    const Rule<> grammar = -terminal('a');
 
     {
         const std::string input = "a";
@@ -266,7 +266,7 @@ static void testOptionalExpr() {
 }
 
 static void testNonTerminalExpr() {
-    const Rule<std::string::value_type> grammar = 'a' >> (grammar | 'b')
+    const Rule<> grammar = 'a' >> (grammar | 'b')
                       | 'b' >> ('a' | grammar);
 
     {
@@ -304,7 +304,7 @@ static void testNonTerminalExpr() {
 
 static void testSequenceExpr() {
     {
-        const Rule<std::string::value_type> grammar = terminal('a') >> 'b' >> 'c';
+        const Rule<> grammar = terminal('a') >> 'b' >> 'c';
 
         {
             const std::string input = "abc";
@@ -333,7 +333,7 @@ static void testSequenceExpr() {
 }
 
 static void testTerminalRangeExpr() {
-    const Rule<std::string::value_type> grammar = terminal('0', '9');
+    const Rule<> grammar = terminal('0', '9');
 
     {
         const std::string input = "0";
@@ -353,7 +353,7 @@ static void testTerminalRangeExpr() {
 }
 
 static void testTerminalSetExpr() {
-    const Rule<std::string::value_type> grammar = terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
+    const Rule<> grammar = terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
 
     {
         const std::string input = "0";
@@ -389,7 +389,7 @@ static void testTerminalSetExpr() {
 }
 
 static void testTerminalSeqExpr() {
-    const Rule<std::string::value_type> grammar = terminalSeq("int");
+    const Rule<> grammar = terminalSeq("int");
 
     {
         const std::string input = "int";
@@ -409,7 +409,7 @@ static void testTerminalSeqExpr() {
 }
 
 static void testTerminalPredExpr() {
-    const Rule<std::string::value_type> grammar = terminal<char>([](char c) { return c == 'a';});
+    const Rule<> grammar = terminal<char>([](char c) { return c == 'a';});
     {
         const std::string input = "a";
         Context context(input);
@@ -428,13 +428,14 @@ static void testTerminalPredExpr() {
 }
 
 static void testMatchExpr() {
-    Rule<std::string::value_type> grammar = terminal('a');
+    Rule<> grammar = terminal('a');
 
     {
         int matches = 0;
-        grammar.setAction([&matches](Context<char>& c, std::span<const std::string::value_type> range){matches++;});
         const std::string input = "a";
         Context context(input);
+        grammar.setAction([&matches](decltype(context)& c, decltype(context)::MatchRange range){matches++;});
+
         bool ok = grammar(context);
         assert(ok);
         assert(context.mark() == context.get_input().end());
@@ -453,7 +454,7 @@ static void testMatchExpr() {
 }
 
 static void testRecursion() {
-    const Rule<std::string::value_type> r = 'x' >> r >> 'b'
+    const Rule<> r = 'x' >> r >> 'b'
                    | 'a';
 
     {
@@ -481,7 +482,7 @@ static void testRecursion() {
     }
 }
 
-extern Rule<std::string::value_type> add;
+extern Rule<> add;
 
 
 static auto digit = terminal('0', '9');
@@ -494,12 +495,12 @@ static auto num = integer
                 | '(' >> add >> ')';
 
 
-static Rule<std::string::value_type> mul = (mul >> '*' >> num)
+static Rule<> mul = (mul >> '*' >> num)
                   | (mul >> '/' >> num)
                   | num;
 
 
-Rule<std::string::value_type> add = (add >> '+' >> mul)
+Rule<> add = (add >> '+' >> mul)
                   | (add >> '-' >> mul)
                   | mul;
 
@@ -529,7 +530,7 @@ static int eval(const MatchType& m) {
 
 static void testLeftRecursion() {
     {
-        Rule<std::string::value_type> r = (r >> 'b')
+        Rule<> r = (r >> 'b')
                  | (r >> 'c')
                  | terminal('a')
                  | terminal('d');

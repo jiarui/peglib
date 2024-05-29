@@ -6,6 +6,7 @@
 #include <iostream>
 #include <cassert>
 #include <functional>
+#include "FileReader.h"
 namespace peg
 {
     namespace parsers{
@@ -13,15 +14,22 @@ namespace peg
         template<typename Context> struct NonTerminal;
     }
 
-    template <typename elem>
+    //std::string std::vector file
+
+    template <typename InputRef>
     struct Context {
-    public:
-        using IterType = typename std::span<const elem>::iterator;
-        using ValueType = elem;
-        using Rule = peg::parsers::NonTerminal<Context<elem>>;
-        using Action = std::function<void(Context<elem>&)>;
-        using Expr = peg::parsers::ParsingExprInterface<elem>;
-        using MatchRange = typename std::span<const elem>;
+
+        template <typename InputType>
+        Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()} {
+        }
+
+        Context(const std::string& path, size_t bufsize) : m_input{path, bufsize}, m_position{m_input.begin()} {}
+
+        using IterType = typename InputRef::iterator;
+        using ValueType = typename InputRef::value_type;
+        using Rule = peg::parsers::NonTerminal<Context<InputRef>>;
+        using Action = std::function<void(Context<InputRef>&)>;
+        using MatchRange = typename std::span<const ValueType>;
 
         struct RuleState {
             RuleState(IterType pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
@@ -45,14 +53,6 @@ namespace peg
             m_position = state.m_pos;
         }
 
-        Context(std::span<const elem> input) :m_input(input), m_position(m_input.begin()) {}
-
-        template <typename InputType>
-        Context(const InputType& input) {
-            m_input = std::span(input);
-            m_position = m_input.begin();
-        }
-
         bool ended() {
             return m_position == m_input.end();
         }
@@ -67,17 +67,12 @@ namespace peg
             }
         }
 
-        void next(size_t forward) {
-            auto final_pos = m_position + forward;
-            m_position = (final_pos <= m_input.end()) ? final_pos : m_input.end();
-        }
-
         void reset(IterType pos) {
             assert(pos >= m_input.begin() && pos <= m_input.end());
             m_position = pos;
         }
 
-        std::span<const elem> get_input() {
+        InputRef get_input() {
             return m_input;
         }
 
@@ -86,13 +81,17 @@ namespace peg
             return std::tuple<bool, RuleState&>{ok, iter->second};
         }
 
-    private:
-        std::span<const elem> m_input;
+    public:
+        InputRef m_input;
         IterType m_position;
         std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
     };
 
-    template<typename InputType>
-    Context(const InputType&) -> Context<typename InputType::value_type>;
+    template<typename InputRef>
+    Context(InputRef) -> Context<std::span<const typename InputRef::value_type>>;
+
+    Context(const std::string& path, size_t ) -> Context<FileReader>;
+
+    
 
 } // namespace peg
