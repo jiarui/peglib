@@ -77,9 +77,39 @@ namespace peg
             return m_input;
         }
 
-        std::tuple<bool, RuleState&> ruleState(const Rule *rule, IterType pos) {
-            auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos});
-            return std::tuple<bool, RuleState&>{ok, iter->second};
+        std::tuple<bool, RuleState> ruleState(const Rule *rule, IterType pos) {
+            //auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos});
+            auto [iter_records, ins] = m_mem.emplace(pos, std::map<const Rule*, RuleState>{});
+            auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
+            return std::tuple<bool, RuleState>{ok, iter->second};
+        }
+
+        bool updateRuleState(const Rule* rule, IterType start_pos, IterType return_pos, bool return_value){
+            auto memos = m_mem.find(start_pos);
+            if(memos == m_mem.end()) {
+                return false;
+            }
+            auto memo = memos->second.find(rule);
+            if(memo == memos->second.end()){
+                return false;
+            }
+            memo->second.m_last_pos = return_pos;
+            memo->second.m_last_return = return_value;
+            return true;
+        }
+
+        bool updateRuleState(const Rule* rule, IterType start_pos, const RuleState& ruleState){
+            auto memos = m_mem.find(start_pos);
+            if(memos == m_mem.end()) {
+                return false;
+            }
+            auto memo = memos->second.find(rule);
+            if(memo == memos->second.end()){
+                return false;
+            }
+            memo->second.m_last_pos = ruleState.m_last_pos;
+            memo->second.m_last_return = ruleState.m_last_return;
+            return true;
         }
 
         struct CutRecord {
@@ -90,6 +120,7 @@ namespace peg
 
         void cut(bool c) {
             m_cut.top().cut = c;
+            m_cut.top().pos = mark();
         }
 
         bool cut() {
@@ -101,14 +132,21 @@ namespace peg
         }
 
         void remove_cut() {
+            if(cut()){
+                auto cut_pos = m_cut.top().pos;
+                std::erase_if(m_mem, [&cut_pos](const auto& item) {
+                    const auto& [pos, record] = item;
+                    return pos < cut_pos;
+                });
+            }
             m_cut.pop();
-            //TODO remove m_mem
         }
 
     public:
         InputRef m_input;
         IterType m_position;
-        std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
+        std::map<IterType, std::map<const Rule*, RuleState>> m_mem;
+        //std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
         std::stack<CutRecord> m_cut;
     };
 

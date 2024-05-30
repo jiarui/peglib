@@ -131,8 +131,8 @@ namespace peg
 
             bool parse(Context& context) const override {
                 auto start_pos = context.mark();
-                std::tuple<bool, typename Context::RuleState&> rs = context.ruleState(this, start_pos);
-                typename Context::RuleState& ruleState = std::get<1>(rs);
+                std::tuple<bool, typename Context::RuleState> rs = context.ruleState(this, start_pos);
+                typename Context::RuleState ruleState = std::get<1>(rs);
                 bool result = false;
                 if(!std::get<0>(rs)){
                     context.reset(ruleState.m_last_pos);
@@ -140,7 +140,7 @@ namespace peg
                     return result;
                 }
                 else {
-                    result = parseImpl(context, ruleState);
+                    result = parseImpl(context, start_pos, ruleState);
                     if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                         auto end_pos = context.mark();
                         ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::MatchRange(start_pos, end_pos));
@@ -151,23 +151,25 @@ namespace peg
 
         protected:
 
-            bool parseImpl(Context& context, typename Context::RuleState& ruleState) const {
+            bool parseImpl(Context& context, typename Context::IterType start_pos, typename Context::RuleState& ruleState) const {
                 auto current_pos = context.mark();
-                auto last_pos = context.mark();
-                bool last_return = false;
-                ruleState.m_last_pos = last_pos;
-                ruleState.m_last_return = last_return;
+                context.updateRuleState(this, start_pos, ruleState);
                 while(true) {
                     context.reset(current_pos);
                     bool res = m_rule->parse(context);
                     auto end_pos = context.mark();
                     if (res){
-                        if(end_pos > last_pos){
-                            ruleState.m_last_pos = (last_pos = end_pos);
-                            ruleState.m_last_return = (last_return = res);
+                        if(end_pos > ruleState.m_last_pos){
+                            ruleState.m_last_pos = end_pos;
+                            ruleState.m_last_return = res;
+                            bool update_res = context.updateRuleState(this, start_pos, ruleState);
+                            if(!update_res) {
+                                //cut operator may erase ruleState records
+                                return res;
+                            }
                         }
                         else {
-                            ruleState.m_last_return = (last_return = res);
+                            ruleState.m_last_return = res;
                             break;
                         }
                     }
@@ -175,9 +177,9 @@ namespace peg
                         break;
                     }
                 }
-                bool result = last_return;
-                context.reset(last_pos);
-                return result;
+                bool result = ruleState.m_last_return;
+                context.reset(ruleState.m_last_pos);
+                return ruleState.m_last_return;
             }
         protected:
             std::shared_ptr<ParsingExprInterface<Context>> m_rule;

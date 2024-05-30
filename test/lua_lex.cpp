@@ -27,7 +27,9 @@ Rule<> string_literal = string_single_quote;
 
 Rule<> ops = terminal('(') | terminal(')');
 
-Rule<> token = numeral | names | string_literal | ops | comment | WS;
+auto cut_ = cut<Context<std::span<const char>>>();
+
+Rule<> token = (numeral >> cut_) | (names >> cut_) | (string_literal >> cut_) | ops | comment | WS;
 Rule<> lexer = +token;
 
 
