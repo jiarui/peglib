@@ -21,10 +21,10 @@ namespace peg
     struct Context {
 
         template <typename InputType>
-        Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()} {
+        Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position} {
         }
 
-        Context(const std::string& path, size_t bufsize) : m_input{path, bufsize}, m_position{m_input.begin()}{}
+        Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
 
         using IterType = typename InputRef::iterator;
         using ValueType = typename InputRef::value_type;
@@ -69,7 +69,7 @@ namespace peg
         }
 
         void reset(IterType pos) {
-            assert(pos >= m_input.begin() && pos <= m_input.end());
+            assert(pos >= m_last_cut && pos <= m_input.end());
             m_position = pos;
         }
 
@@ -133,10 +133,10 @@ namespace peg
 
         void remove_cut() {
             if(cut()){
-                auto cut_pos = m_cut.top().pos;
-                std::erase_if(m_mem, [&cut_pos](const auto& item) {
+                m_last_cut = m_cut.top().pos;
+                std::erase_if(m_mem, [this](const auto& item) {
                     const auto& [pos, record] = item;
-                    return pos < cut_pos;
+                    return pos < m_last_cut;
                 });
             }
             m_cut.pop();
@@ -145,6 +145,7 @@ namespace peg
     public:
         InputRef m_input;
         IterType m_position;
+        IterType m_last_cut;
         std::map<IterType, std::map<const Rule*, RuleState>> m_mem;
         //std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
         std::stack<CutRecord> m_cut;
