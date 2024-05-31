@@ -7,7 +7,7 @@
 #include <cassert>
 #include <functional>
 #include <stack>
-#include "FileReader.h"
+#include "FileSource.h"
 namespace peg
 {
     namespace parsers{
@@ -34,23 +34,23 @@ namespace peg
 
         Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
 
-        using IterType = typename InputSource::iterator;
-        using ValueType = typename InputSource::value_type;
+        using iterator = typename InputSource::iterator;
+        using value_type = typename InputSource::value_type;
         using Rule = peg::parsers::NonTerminal<Context<InputSource>>;
-        using Action = std::function<void(Context<InputSource>&)>;
-        using MatchRange = typename std::span<const ValueType>;
+        using sematic_action = std::function<void(Context<InputSource>&)>;
+        using match_range = typename std::span<const value_type>;
 
         struct RuleState {
-            RuleState(IterType pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
+            RuleState(iterator pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
             RuleState(const RuleState&) = default;
             RuleState& operator=(const RuleState&) = default;
-            IterType m_last_pos;
+            iterator m_last_pos;
             bool m_last_return;
         };
 
         struct State {
-            State(IterType pos, size_t count) : m_pos(pos), m_matchCount(count) {}
-            IterType m_pos;
+            State(iterator pos, size_t count) : m_pos(pos), m_matchCount(count) {}
+            iterator m_pos;
             size_t m_matchCount;
         };
 
@@ -66,7 +66,7 @@ namespace peg
             return m_position == m_input.end();
         }
 
-        IterType mark() {
+        iterator mark() {
             return m_position;
         }
 
@@ -76,7 +76,7 @@ namespace peg
             }
         }
 
-        void reset(IterType pos) {
+        void reset(iterator pos) {
             assert(pos >= m_last_cut && pos <= m_input.end());
             m_position = pos;
         }
@@ -85,13 +85,13 @@ namespace peg
             return m_input;
         }
 
-        std::tuple<bool, RuleState> ruleState(const Rule *rule, IterType pos) {
+        std::tuple<bool, RuleState> ruleState(const Rule *rule, iterator pos) {
             auto [iter_records, ins] = m_mem.emplace(pos, std::map<const Rule*, RuleState>{});
             auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
             return std::tuple<bool, RuleState>{ok, iter->second};
         }
 
-        bool updateRuleState(const Rule* rule, IterType start_pos, IterType return_pos, bool return_value){
+        bool updateRuleState(const Rule* rule, iterator start_pos, iterator return_pos, bool return_value){
             auto memos = m_mem.find(start_pos);
             if(memos == m_mem.end()) {
                 return false;
@@ -105,7 +105,7 @@ namespace peg
             return true;
         }
 
-        bool updateRuleState(const Rule* rule, IterType start_pos, const RuleState& ruleState){
+        bool updateRuleState(const Rule* rule, iterator start_pos, const RuleState& ruleState){
             auto memos = m_mem.find(start_pos);
             if(memos == m_mem.end()) {
                 return false;
@@ -120,9 +120,9 @@ namespace peg
         }
 
         struct CutRecord {
-            IterType pos;
+            iterator pos;
             bool cut = false;
-            CutRecord(IterType i, bool c) : pos{i}, cut{c} {}
+            CutRecord(iterator i, bool c) : pos{i}, cut{c} {}
         };
 
         void cut(bool c) {
@@ -152,16 +152,17 @@ namespace peg
 
     public:
         InputSource m_input;
-        IterType m_position;
-        IterType m_last_cut;
-        std::map<IterType, std::map<const Rule*, RuleState>> m_mem;
+        iterator m_position;
+        iterator m_last_cut;
+        std::map<iterator, std::map<const Rule*, RuleState>> m_mem;
         std::stack<CutRecord> m_cut;
     };
 
     template<typename InputSource>
     Context(InputSource) -> Context<std::span<const typename InputSource::value_type>>;
 
-    Context(const std::string& path, size_t ) -> Context<FileSource>;
+    template<typename value_type>
+    Context(const std::string& path, size_t ) -> Context<FileSource<value_type>>;
 
     
 

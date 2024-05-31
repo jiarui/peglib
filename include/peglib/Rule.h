@@ -123,13 +123,13 @@ namespace peg
     }
 
     template<typename Context, typename ParsingExprType>
-    auto operator>>(const ParsingExpr<Context, ParsingExprType>& expr, const typename Context::ValueType& value) {
+    auto operator>>(const ParsingExpr<Context, ParsingExprType>& expr, const typename Context::value_type& value) {
         auto lhs = self(expr);
         return lhs >> terminal(value);
     }
 
     template<typename Context, typename ParsingExprType>
-    auto operator>>(const typename Context::ValueType& value, const ParsingExpr<Context, ParsingExprType>& expr) {
+    auto operator>>(const typename Context::value_type& value, const ParsingExpr<Context, ParsingExprType>& expr) {
         auto rhs = self(expr);
         return terminal(value) >> rhs;
     }
@@ -184,14 +184,14 @@ namespace peg
 
     template<typename Context, typename ParsingExprType>
     auto
-    operator|(const ParsingExpr<Context, ParsingExprType>& expr1, const typename Context::ValueType& value) {
+    operator|(const ParsingExpr<Context, ParsingExprType>& expr1, const typename Context::value_type& value) {
         auto lhs = self(expr1);
         return lhs | terminal(value);
     }
 
     template<typename Context, typename ParsingExprType>
     auto
-    operator|(const typename Context::ValueType& value, const ParsingExpr<Context, ParsingExprType>& expr2) {
+    operator|(const typename Context::value_type& value, const ParsingExpr<Context, ParsingExprType>& expr2) {
         auto rhs = self(expr2);
         return terminal(value) | rhs;
     }

@@ -5,6 +5,7 @@
 #include <optional>
 namespace peg
 {
+    template <typename value_type_ = char>
     struct FileSource {
         FileSource(size_t buffer_size, const std::string& path) : m_current_buf{0}, m_buffer_size(buffer_size)
         {
@@ -26,7 +27,7 @@ namespace peg
             fclose(m_fp);
         }
 
-        using value_type = char;
+        using value_type = value_type_;
 
         struct iterator;
 

@@ -26,7 +26,7 @@ namespace peg
         template <typename Context>
         struct ParsingExprInterface {
             friend NonTerminal<Context>;
-            using ElementType = typename Context::ValueType;
+            using ElementType = typename Context::value_type;
             virtual ~ParsingExprInterface() = default;
             virtual bool parse(Context& context) const = 0;
         };
@@ -35,7 +35,7 @@ namespace peg
         struct ParsingExpr : ParsingExprInterface<Context>{
             using ParseExprType = ExprType;
             using NodeType = NodeType_;
-            using SematicAction = std::function<NodeType(Context&, typename Context::MatchRange match_range)>;
+            using SematicAction = std::function<NodeType(Context&, typename Context::match_range match_range)>;
             void setAction(SematicAction action) {
                 m_action = action;
             }
@@ -143,7 +143,7 @@ namespace peg
                     result = parseImpl(context, start_pos, ruleState);
                     if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                         auto end_pos = context.mark();
-                        ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::MatchRange(start_pos, end_pos));
+                        ParsingExpr<Context, NonTerminal<Context>>::m_action(context, typename Context::match_range(start_pos, end_pos));
                     }
                     return result;
                 }
@@ -151,7 +151,7 @@ namespace peg
 
         protected:
 
-            bool parseImpl(Context& context, typename Context::IterType start_pos, typename Context::RuleState& ruleState) const {
+            bool parseImpl(Context& context, typename Context::iterator start_pos, typename Context::RuleState& ruleState) const {
                 auto current_pos = context.mark();
                 context.updateRuleState(this, start_pos, ruleState);
                 while(true) {

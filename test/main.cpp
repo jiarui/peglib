@@ -434,7 +434,7 @@ static void testMatchExpr() {
         int matches = 0;
         const std::string input = "a";
         Context context(input);
-        grammar.setAction([&matches](decltype(context)& c, decltype(context)::MatchRange range){matches++;});
+        grammar.setAction([&matches](decltype(context)& c, decltype(context)::match_range range){matches++;});
 
         bool ok = grammar(context);
         assert(ok);

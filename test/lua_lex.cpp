@@ -60,7 +60,7 @@ struct TokenizerTest {
     std::vector<Token> m_token_buf;
     void run(const std::string& input) {
         names.setAction(
-            [this](Context<std::span<const std::string::value_type>>& context, Context<std::span<const std::string::value_type>>::MatchRange match) {
+            [this](Context<std::span<const std::string::value_type>>& context, Context<std::span<const std::string::value_type>>::match_range match) {
                 std::string m = std::string{match.begin(), match.end()};
                 if(m == "if"){
                     m_token_buf.emplace_back(TokenID::TK_IF);
@@ -104,7 +104,7 @@ BOOST_AUTO_TEST_CASE(test_names) {
     {
         std::string input = R"(   print)";
         Context context(input);
-        names.setAction(([](decltype(context)& c, decltype(context)::MatchRange range){
+        names.setAction(([](decltype(context)& c, decltype(context)::match_range range){
             BOOST_CHECK_EQUAL(std::string(range.begin(), range.end()), "print");
         }));
         
@@ -174,7 +174,7 @@ BOOST_AUTO_TEST_CASE(test_string) {
 BOOST_AUTO_TEST_CASE(test_tokens) {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    names.setAction([](decltype(context)& c, decltype(context)::MatchRange range){
+    names.setAction([](decltype(context)& c, decltype(context)::match_range range){
         });
     {
         auto start = context.mark();
