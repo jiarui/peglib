@@ -5,8 +5,8 @@ namespace peg
 {
     using namespace parsers;
 
-    template<typename InputRef = std::string>
-    using Rule = NonTerminal<Context<std::span<const typename InputRef::value_type>>>;
+    template<typename InputSource = std::string>
+    using Rule = NonTerminal<Context<std::span<const typename InputSource::value_type>>>;
 
     template <typename elem>
     auto terminal(const std::predicate<elem> auto& f) {

@@ -5,7 +5,7 @@
 using namespace peg;
 BOOST_AUTO_TEST_CASE(test_file_io, * boost::unit_test::disabled()) {
     std::string file_name;
-    Context<FileReader> context{file_name, 4096};
+    Context<FileSource> context{file_name, 4096};
     auto fs = std::fstream(file_name);
 
     std::string file((std::istreambuf_iterator<char>(fs)),

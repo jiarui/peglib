@@ -5,8 +5,8 @@
 #include <optional>
 namespace peg
 {
-    struct FileReader {
-        FileReader(size_t buffer_size, const std::string& path) : m_current_buf{0}, m_buffer_size(buffer_size)
+    struct FileSource {
+        FileSource(size_t buffer_size, const std::string& path) : m_current_buf{0}, m_buffer_size(buffer_size)
         {
             int remider = buffer_size % sizeof(value_type);
             if(remider == 0) {
@@ -22,7 +22,7 @@ namespace peg
                 m_bufs[1].read(m_fp, m_buffer_size);
             }
         }
-        ~FileReader() {
+        ~FileSource() {
             fclose(m_fp);
         }
 
@@ -68,15 +68,15 @@ namespace peg
                 return iterator(m_freader, m_pos+1);
             }
 
-            typename FileReader::value_type operator*() {
+            typename FileSource::value_type operator*() {
                 return m_freader->get(*this);
             }
-            friend FileReader;
+            friend FileSource;
         protected:
-            iterator(FileReader* f) : m_freader{f}, m_pos{0} {};
-            iterator(FileReader* f, size_t pos) : m_freader{f}, m_pos{pos} {};
+            iterator(FileSource* f) : m_freader{f}, m_pos{0} {};
+            iterator(FileSource* f, size_t pos) : m_freader{f}, m_pos{pos} {};
             size_t m_pos; // in item index
-            FileReader* m_freader;
+            FileSource* m_freader;
         };
         
 

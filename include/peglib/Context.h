@@ -17,19 +17,27 @@ namespace peg
 
     //std::string std::vector file
 
-    template <typename InputRef>
+    template <typename T>
+    concept InputSourceType = requires ( T t) {
+        {t.begin()};
+        {t.end()};
+        typename T::value_type;
+        typename T::iterator;
+    };
+
+    template <InputSourceType InputSource>
     struct Context {
 
         template <typename InputType>
-        Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position} {
-        }
+        Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position} 
+        {}
 
         Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
 
-        using IterType = typename InputRef::iterator;
-        using ValueType = typename InputRef::value_type;
-        using Rule = peg::parsers::NonTerminal<Context<InputRef>>;
-        using Action = std::function<void(Context<InputRef>&)>;
+        using IterType = typename InputSource::iterator;
+        using ValueType = typename InputSource::value_type;
+        using Rule = peg::parsers::NonTerminal<Context<InputSource>>;
+        using Action = std::function<void(Context<InputSource>&)>;
         using MatchRange = typename std::span<const ValueType>;
 
         struct RuleState {
@@ -73,12 +81,11 @@ namespace peg
             m_position = pos;
         }
 
-        InputRef get_input() {
+        InputSource get_input() {
             return m_input;
         }
 
         std::tuple<bool, RuleState> ruleState(const Rule *rule, IterType pos) {
-            //auto [iter, ok] = m_mem.emplace(std::make_tuple(rule, pos), RuleState{pos});
             auto [iter_records, ins] = m_mem.emplace(pos, std::map<const Rule*, RuleState>{});
             auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
             return std::tuple<bool, RuleState>{ok, iter->second};
@@ -138,23 +145,23 @@ namespace peg
                     const auto& [pos, record] = item;
                     return pos < m_last_cut;
                 });
+                //TODO notify m_input to release elements before m_last_cut
             }
             m_cut.pop();
         }
 
     public:
-        InputRef m_input;
+        InputSource m_input;
         IterType m_position;
         IterType m_last_cut;
         std::map<IterType, std::map<const Rule*, RuleState>> m_mem;
-        //std::map<std::tuple<const Rule*, IterType>, RuleState> m_mem;
         std::stack<CutRecord> m_cut;
     };
 
-    template<typename InputRef>
-    Context(InputRef) -> Context<std::span<const typename InputRef::value_type>>;
+    template<typename InputSource>
+    Context(InputSource) -> Context<std::span<const typename InputSource::value_type>>;
 
-    Context(const std::string& path, size_t ) -> Context<FileReader>;
+    Context(const std::string& path, size_t ) -> Context<FileSource>;
 
     
 
