@@ -1,5 +1,5 @@
 # TODOs
 ## How to handle stream in context?
-### FileReader
-### 
+### from_stream
+### release buffer after cut
 ## Usablitly improvement

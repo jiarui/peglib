@@ -42,11 +42,6 @@ namespace peg
         Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position} 
         {}
 
-        template<typename value_type>
-        static auto from_file(const std::string& path, size_t bufsize) {
-            return Context<FileSource<value_type>>(path, bufsize);
-        }
-
         using iterator = typename InputSource::iterator;
         using value_type = typename InputSource::value_type;
         using Rule = peg::parsers::NonTerminal<Context<InputSource>>;
@@ -163,9 +158,11 @@ namespace peg
             m_cut.pop();
         }
 
+        template <typename value_type>
+        Context(FileSource<value_type>&& s) : m_input{std::move(s)}, m_position{m_input.begin()}, m_last_cut{m_position} {}
+
     protected:
-        Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
-        
+
         InputSource m_input;
         iterator m_position;
         iterator m_last_cut;
@@ -175,7 +172,7 @@ namespace peg
 
     template <typename value_type>
     auto from_file(const std::string& path, size_t bufsize) {
-        return Context<FileSource<value_type>>::template from_file<value_type>(path, bufsize);
+        return Context<FileSource<value_type>>(FileSource<value_type>(bufsize, path));
     }
 
     template<InputSourceType InputType>

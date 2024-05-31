@@ -23,8 +23,21 @@ namespace peg
                 m_bufs[1].read(m_fp, m_buffer_size);
             }
         }
+
+        FileSource(const FileSource&) = delete;
+        FileSource(FileSource&& rhs) : m_filesize{rhs.m_filesize},
+            m_buffer_size(rhs.m_buffer_size), m_current_buf{rhs.m_current_buf},
+            m_fp {rhs.m_fp}{
+                m_bufs[0] = std::move(rhs.m_bufs[0]);
+                m_bufs[1] = std::move(rhs.m_bufs[1]);
+                rhs.m_fp = nullptr;
+        }
+
+        
         ~FileSource() {
-            fclose(m_fp);
+            if(m_fp){
+                fclose(m_fp);
+            }
         }
 
         using value_type = value_type_;
@@ -90,6 +103,11 @@ namespace peg
         
     protected:
         struct buffer {
+            buffer() = default;
+            buffer(const buffer& rhs) = delete;
+            buffer(buffer&& rhs) = default;
+            buffer& operator=(const buffer&) = delete;
+            buffer& operator=(buffer&&) = default;
             std::vector<value_type> m_buf;
             size_t m_buf_from;
             size_t m_buf_to;
