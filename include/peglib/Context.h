@@ -25,6 +25,16 @@ namespace peg
         typename T::iterator;
     };
 
+    template <InputSourceType InputType>
+    struct ContextInputSource{
+        using type = std::span<const typename InputType::value_type>;
+    };
+
+    template <typename vt>
+    struct ContextInputSource<FileSource<vt>>{
+        using type = FileSource<vt>;
+    };
+
     template <InputSourceType InputSource>
     struct Context {
 
@@ -32,7 +42,10 @@ namespace peg
         Context(const InputType& t) : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position} 
         {}
 
-        Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
+        template<typename value_type>
+        static auto from_file(const std::string& path, size_t bufsize) {
+            return Context<FileSource<value_type>>(path, bufsize);
+        }
 
         using iterator = typename InputSource::iterator;
         using value_type = typename InputSource::value_type;
@@ -150,7 +163,9 @@ namespace peg
             m_cut.pop();
         }
 
-    public:
+    protected:
+        Context(const std::string& path, size_t bufsize) : m_input{bufsize, path}, m_position{m_input.begin()}, m_last_cut{m_position} {}
+        
         InputSource m_input;
         iterator m_position;
         iterator m_last_cut;
@@ -158,11 +173,13 @@ namespace peg
         std::stack<CutRecord> m_cut;
     };
 
-    template<typename InputSource>
-    Context(InputSource) -> Context<std::span<const typename InputSource::value_type>>;
+    template <typename value_type>
+    auto from_file(const std::string& path, size_t bufsize) {
+        return Context<FileSource<value_type>>::template from_file<value_type>(path, bufsize);
+    }
 
-    template<typename value_type>
-    Context(const std::string& path, size_t ) -> Context<FileSource<value_type>>;
+    template<InputSourceType InputType>
+    Context(const InputType&) -> Context<typename ContextInputSource<InputType>::type>;
 
     
 

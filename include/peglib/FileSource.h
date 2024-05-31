@@ -5,7 +5,7 @@
 #include <optional>
 namespace peg
 {
-    template <typename value_type_ = char>
+    template <typename value_type_>
     struct FileSource {
         FileSource(size_t buffer_size, const std::string& path) : m_current_buf{0}, m_buffer_size(buffer_size)
         {
