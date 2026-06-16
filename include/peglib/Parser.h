@@ -165,8 +165,11 @@ public:
             result = parseImpl(context, start_pos, ruleState);
             if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                 auto end_pos = context.mark();
+                // Brace-init works for both match_range instantiations:
+                //   std::span<const T>  {ptr, ptr}      (contiguous source)
+                //   std::pair<It, It>   {it, it}        (FileSource)
                 ParsingExpr<Context, NonTerminal<Context>>::m_action(
-                    context, typename Context::match_range(start_pos, end_pos));
+                    context, typename Context::match_range{start_pos, end_pos});
             }
             return result;
         }

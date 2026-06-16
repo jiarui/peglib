@@ -42,7 +42,9 @@ LuaRule label = terminalSeq("::") >> Name >> terminalSeq("::");
 LuaRule retstat = terminalSeq("return") >> -explist >> terminal(';');
 LuaRule attrib = -(terminal('<') >> Name >> terminal('.'));
 LuaRule attnamlist = Name >> attrib >> *(terminal(',') >> Name >> attrib);
-LuaRule stat = terminal(';') | (varlist >> terminal('=') >> explist) | functioncall | label |
+// Renamed from `stat` to `stat_rule` because Windows ucrt's <sys/stat.h>
+// declares a `stat` function, causing C2373 redefinition errors on MSVC.
+LuaRule stat_rule = terminal(';') | (varlist >> terminal('=') >> explist) | functioncall | label |
                terminalSeq("break") | (terminalSeq("goto") >> Name) |
                (terminalSeq("do") >> block >> terminalSeq("end")) |
                (terminalSeq("while") >> expr >> terminalSeq("do") >> block >> terminalSeq("end")) |
@@ -58,7 +60,7 @@ LuaRule stat = terminal(';') | (varlist >> terminal('=') >> explist) | functionc
                (terminalSeq("local") >> terminalSeq("function") >> Name >> funcbody) |
                (terminalSeq("local") >> attnamlist >> -(terminal('-') >> explist));
 
-LuaRule block = *stat >> -retstat;
+LuaRule block = *stat_rule >> -retstat;
 LuaRule chunk = block;
 
 LuaRule expr1 = (expr1 >> binop >> expr1) | Numeral;

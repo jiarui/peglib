@@ -41,6 +41,28 @@ struct ContextInputSource<FileSource<vt>>
     using type = FileSource<vt>;
 };
 
+// Trait that selects the `match_range` type for a given InputSource.
+//
+// For contiguous-range sources (std::span-backed) we use a matching
+// `std::span<const value_type>` so semantic actions get a flat view.
+//
+// For FileSource the underlying storage is paged and not contiguous,
+// so `std::span<const char>` cannot be constructed from a pair of
+// `FileSource::iterator`. Fall back to a pair-of-iterators range.
+// (Long-term: replace with a lazy view / subrange once FileSource
+// fully models std::input_iterator.)
+template<InputSourceType InputType>
+struct ContextMatchRange
+{
+    using type = std::span<const typename InputType::value_type>;
+};
+
+template<typename vt>
+struct ContextMatchRange<FileSource<vt>>
+{
+    using type = std::pair<typename FileSource<vt>::iterator, typename FileSource<vt>::iterator>;
+};
+
 template<InputSourceType InputSource>
 struct Context
 {
@@ -52,7 +74,7 @@ struct Context
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;
     using Rule = peg::parsers::NonTerminal<Context<InputSource>>;
-    using match_range = typename std::span<const value_type>;
+    using match_range = typename ContextMatchRange<InputSource>::type;
 
     struct RuleState
     {
