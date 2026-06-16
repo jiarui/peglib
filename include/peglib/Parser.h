@@ -2,6 +2,7 @@
 #include <array>
 #include <cassert>
 #include <concepts>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -295,7 +296,7 @@ protected:
 template<typename Context, typename Child>
 struct Repetition
 {
-    Repetition(const Child& child, size_t min_r, ssize_t max_r = -1)
+    Repetition(const Child& child, size_t min_r, std::int64_t max_r = -1)
         : m_child(child), min_rep(min_r), max_rep(max_r)
     {
         if (!((max_rep < 0) || ((max_rep >= 0) && (min_rep <= max_rep)))) {
@@ -304,7 +305,7 @@ struct Repetition
     }
 
     const Child& child() { return m_child; }
-    std::tuple<size_t, ssize_t> reps() const { return {min_rep, max_rep}; }
+    std::tuple<size_t, std::int64_t> reps() const { return {min_rep, max_rep}; }
 
     bool parse(Context& context) const
     {
@@ -345,7 +346,7 @@ struct Repetition
 protected:
     Child m_child;
     size_t min_rep;
-    ssize_t max_rep;
+    std::int64_t max_rep;
 };
 
 template<typename Context, typename Child>
