@@ -116,12 +116,14 @@ struct Repetition
         bool result = true;
         size_t loopCount = 0;
         bool exited_via_failure = false;
+        typename Context::State lastSuccessState = initState;
         while (true) {
             auto startState = context.state();
             context.cut(false);
             result = m_child.parse(context);
             if (result) {
                 loopCount++;
+                lastSuccessState = context.state();
             } else {
                 exited_via_failure = true;
                 break;
@@ -137,7 +139,14 @@ struct Repetition
         if (loopCount < min_rep) {
             context.state(initState);
             return false;
-        } else if (max_rep < 0) {
+        }
+        // If the loop exited via a child failure, restore the position to
+        // the boundary after the last successful iteration. This prevents
+        // a failed child from leaving the parser stranded mid-input.
+        if (exited_via_failure) {
+            context.state(lastSuccessState);
+        }
+        if (max_rep < 0) {
             // Only throw if the loop exited via a cut-committed child failure.
             // A successful no-progress iteration that happened to set cut
             // (e.g. via a lookahead) must NOT escalate to a hard error.

@@ -115,6 +115,11 @@ protected:
                     }
                 } else {
                     ruleState.m_last_return = res;
+                    // Seed matched but did not advance (e.g. zero-width match
+                    // like `*ws`). We must still persist the result to the
+                    // memo map, otherwise a second lookup at the same position
+                    // returns the stale initial state {pos, false}.
+                    context.updateRuleState(this, start_pos, ruleState);
                     break;
                 }
             } else {

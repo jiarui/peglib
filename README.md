@@ -8,8 +8,14 @@ structured error reporting, and a pluggable value stack for AST construction.
 
 Core combinators and infrastructure are stable and tested. Phase 1 (error
 reporting, SourceMap, value stack, concept-constrained Context) is complete.
-The Lua reference frontend (lexer → typed AST → evaluator) is under active
-development — see [TODO.md](TODO.md) for the roadmap.
+The roadmap now focuses on **generic PEG library features**: a textual grammar
+format, automatic whitespace skipping, error recovery, tracing/profiling, and
+parameterized rules — see [TODO.md](TODO.md).
+
+Application-specific work built on peglib lives in consumer projects.
+[yueshi](https://github.com/jiarui/yueshi) is a Lua 5.4 frontend (lexer → typed
+AST → evaluator) using peglib as its parsing engine and serves as the primary
+real-world case study.
 
 ## Features
 
@@ -162,8 +168,9 @@ include/peglib/      header-only library
   Macros.h           PEG_RULE, PEG_RULE_LABELED
 test/                unit tests (doctest)
   *_test.cpp         per-header test cases
-  lua_lex.cpp        Lua 5.4 lexer smoke tests
-  lua.cpp            Lua 5.4 grammar smoke tests
+  json_test.cpp      JSON grammar example (real-world PEG use case)
+  lua.cpp            Lua 5.4 grammar example (real-world PEG use case)
+  lua_lex.cpp        Lua 5.4 lexer example
 third_party/         vendored doctest (single header)
 ```
 
@@ -181,11 +188,21 @@ per-header:
 - `sourcemap_test.cpp` — byte offset ↔ (line, col) mapping
 - `value_stack_test.cpp` — value stack, PegContext concept
 - `error_test.cpp` — error reporting, expected set, Diagnostic format, ParseError
+- `json_test.cpp` — JSON grammar (real-world example of building a complete
+  language grammar with the operator DSL)
+- `lua_lex.cpp`, `lua.cpp` — Lua 5.4 lexer + grammar (another real-world
+  example; full Lua interpreter lives in
+  [yueshi](https://github.com/jiarui/yueshi))
 
 ## Roadmap
 
-The long-term goal is a complete Lua 5.4 frontend built on peglib. See
-[TODO.md](TODO.md) for the phased roadmap (lexer → typed AST → evaluator).
+The library targets generic PEG-authoring features: a textual grammar format
+(Phase 2), automatic whitespace handling (Phase 3), error recovery
+(Phase 4), tracing/profiling (Phase 5), and parameterized rules (Phase 6).
+See [TODO.md](TODO.md) for the full roadmap.
+
+For a real-world grammar built on peglib, see
+[yueshi](https://github.com/jiarui/yueshi) — a Lua 5.4 interpreter.
 
 ## License
 

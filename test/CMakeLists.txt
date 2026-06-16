@@ -43,3 +43,16 @@ target_compile_definitions(peglib_lua_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_test(NAME peglib_lua_test COMMAND peglib_lua_test)
+
+# ---------------------------------------------------------------------------
+# JSON grammar example tests
+# ---------------------------------------------------------------------------
+add_executable(peglib_json_test
+    json_test.cpp)
+
+target_link_libraries(peglib_json_test PRIVATE peglib peglib_test_main)
+target_include_directories(peglib_json_test PRIVATE ${doctest_include_dir})
+target_compile_definitions(peglib_json_test PRIVATE
+    PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME peglib_json_test COMMAND peglib_json_test)

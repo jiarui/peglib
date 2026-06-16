@@ -125,3 +125,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `symbolConsumable(std::array)` now asserts `min <= max`.
 - `test/file_test.cpp` hardcoded absolute path replaced with
   `CMAKE_CURRENT_SOURCE_DIR`.
+- **Zero-width match memoization bug** (`NonTerminal::parseImpl`): when a
+  rule's seed-grow loop produced a successful match that did not advance the
+  position (e.g. `*ws` matching zero characters), the result was stored in
+  the local `RuleState` copy but **not persisted to the memo map**. A second
+  lookup at the same position returned the stale initial state `{pos, false}`,
+  causing valid input to be rejected. Now calls `updateRuleState` before
+  breaking out of the no-progress branch.
+- **Repetition position restoration**: `Repetition::parse` did not restore
+  the parser position after a child failure in the optional/bounded case.
+  A failed child could leave the parser stranded mid-input, causing the next
+  sibling expression in a sequence to see corrupted state. Now saves and
+  restores `lastSuccessState` on child failure.

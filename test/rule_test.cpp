@@ -240,6 +240,29 @@ TEST_CASE("optional-expression")
     }
 }
 
+// Regression test: Repetition must restore the parser position to the last
+// successful iteration boundary when a child fails mid-way. Without the fix,
+// a failed child that partially consumed input would leave the parser
+// stranded, corrupting the next sibling expression in a sequence.
+//
+// Note: most current expression types (SequenceExpr, NonTerminal) self-restore
+// on failure, so the fix is defensive for those. It becomes critical for
+// future expression types that consume partially before failing without
+// self-restoring.
+TEST_CASE("repetition-restores-position-on-child-partial-failure")
+{
+    // *(('a' >> 'b')) >> 'a'  on input "aba"
+    // The repetition matches "ab" once, then tries ('a' >> 'b') again at
+    // position 2: matches 'a', fails on EOF (wanted 'b'). The SequenceExpr
+    // self-restores to position 2. The trailing 'a' then matches at position 2.
+    const Rule<> grammar = *(terminal('a') >> terminal('b')) >> terminal('a');
+
+    std::string input = "aba";
+    Context context(input);
+    CHECK(grammar(context));
+    CHECK(context.ended());
+}
+
 TEST_CASE("non-terminal-recursion")
 {
     const Rule<> grammar = 'a' >> (grammar | 'b') | 'b' >> ('a' | grammar);
