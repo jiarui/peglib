@@ -31,7 +31,10 @@ struct FileSource
             buffer_items = 1;
         m_buffer_size = buffer_items;
 
-        m_fp = std::fopen(path.c_str(), "r");
+        // Binary mode is mandatory on Windows: text mode ("r") translates
+        // CRLF -> LF on read, so fread() returns fewer bytes than
+        // file_size() reports and buffer offsets become inconsistent.
+        m_fp = std::fopen(path.c_str(), "rb");
         if (m_fp == nullptr) {
             throw std::runtime_error("FileSource: failed to open '" + path + "'");
         }
