@@ -403,7 +403,10 @@ TEST_CASE("semantic-action-fires-on-match")
     const std::string input = "a";
     Context context(input);
     grammar.setAction(
-        [&matches](decltype(context)&, decltype(context)::match_range) { matches++; });
+        [&matches](decltype(context)&, decltype(context)::match_range) -> std::monostate {
+            matches++;
+            return {};
+        });
     bool ok = grammar(context);
     CHECK(ok);
     CHECK(context.mark() == context.get_input().end());

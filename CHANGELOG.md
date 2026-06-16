@@ -6,7 +6,65 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
+### Added — Phase 1 (Core Infrastructure for Lua)
+- **`SourceMap`** (`include/peglib/SourceMap.h`): byte offset ↔ (line, col)
+  mapping. Supports both contiguous (`std::string_view`) and streaming
+  (`FileSource<char>`) input sources. O(n) prescan + lazy line re-read for
+  `FileSource`. Provides `locate()`, `offset_of()`, `line_view()` (contiguous
+  only, O(1)) and `line_content()` (both, O(line length)).
+- **`Diagnostic`** and **`ParseError`** (`include/peglib/ParseError.h`):
+  - `ExpectedItem` / `ExpectedKind`: structured "expected" set with
+    `RuleLabel`, `RuleName`, `Literal`, `Range` variants.
+  - `escape_char_for_expected` / `escape_string_for_expected`: printable forms
+    for control characters (`\t`, `\n`, `\r`, `\xNN`).
+  - `Diagnostic`: value object carrying the furthest-failure position and
+    expected set; `format(SourceMap, filename)` produces
+    `file:line:col: error: expected A or B` messages.
+  - `ParseError`: exception type (derives `std::runtime_error`) thrown on
+    cut-committed failure. Convertible to `Diagnostic` via `to_diagnostic()`.
+- **Error tracking in `Context`**: `record_failure()`, `furthest_failure_pos()`,
+  `expected()`, `has_error()`, `take_error()`. Furthest-wins / same-position-
+  accumulates / earlier-ignored update policy.
+- **`set_name` / `set_label`** on `NonTerminal`: named rules produce better
+  error messages. `PEG_RULE` and `PEG_RULE_LABELED` macros in `Macros.h`
+  auto-stringify the rule name.
+- **Cut-committed failures now throw `peg::ParseError`** instead of returning
+  false. Affects `AlternationExpr::parse` and unbounded `Repetition::parse`.
+- **Value stack in `Context`**: `push_node()`, `pop_node()`, `peek_node()`,
+  `node_count()`, `clear_stack()`. Semantic-action return values are now pushed
+  (previously discarded).
+- **`Context<InputSource, NodeType>` template**: second template parameter
+  defaults to `std::monostate` for backward compatibility. `Rule` typedef
+  carries the NodeType through.
+- **`PegContext` concept** (`include/peglib/Concepts.h`): compile-time
+  validation of the Context API (typedefs + position + value stack + error).
+- **`FileSource::release_before` wired**: cut-driven buffer eviction is now
+  invoked from `Context::remove_cut` via `is_context_releasable_v` trait
+  (was previously a TODO; only memo was released).
+- **`FileSource::seek`, `at`, `size` public API**: enables `SourceMap` and
+  other consumers to access file content by position without friendship.
+- **`Parser.h` split** into `ParserFwd.h`, `Terminals.h`, `Combinators.h`,
+  `NonTerminal.h`. `Parser.h` preserved as an umbrella for backward
+  compatibility.
+- New tests: `sourcemap_test.cpp` (8 cases), `value_stack_test.cpp` (10 cases),
+  expanded `error_test.cpp` (17 cases), `context_test.cpp` gained
+  `release_before` integration tests (2 cases).
+
+### Changed — Phase 1
+- **Breaking**: `ParsingExpr` template lost its third parameter (`NodeType_`);
+  `NodeType` is now derived from `Context::node_type` (defaults to
+  `std::monostate`).
+- **Breaking**: semantic-action lambdas must now return `Context::node_type`
+  (`std::monostate{}` by default) instead of `void`. Updated `lua.cpp`,
+  `lua_lex.cpp`, `rule_test.cpp` accordingly.
+- **Breaking**: cut-committed failures throw instead of returning false.
+  `parser_test.cpp`'s `cut-suppresses-alternatives` renamed to
+  `cut-committed-failure-throws-parse-error` and updated to `try/catch`.
+- `FileSource::iterator` gained a public `position()` method.
+- `Context::remove_cut` now invokes `m_input.release_before(m_last_cut)` for
+  `FileSource`-backed inputs via `if constexpr`.
+
+### Added — Phase 0 (pre-existing)
 - Vendored doctest 2.4.11 as the test framework (`third_party/doctest.h`).
 - Structured test suite split per header: `rule_test`, `parser_test`,
   `context_test`, `file_source_test`, `error_test` (placeholder).

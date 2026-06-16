@@ -35,7 +35,7 @@ TEST_CASE("terminalseq-rollback-on-partial-match")
     CHECK(context2.mark() == context2.get_input().begin());
 }
 
-TEST_CASE("cut-suppresses-alternatives")
+TEST_CASE("cut-committed-failure-throws-parse-error")
 {
     // `('a' >> cut) | 'b'` on input "b":
     // first alt fails to match 'a', so cut is never set; second alt matches.
@@ -45,12 +45,20 @@ TEST_CASE("cut-suppresses-alternatives")
     CHECK(g1(context1));
 
     // `('a' >> cut >> 'x') | 'a'` on input "ab":
-    // first alt matches 'a', sets cut, then fails on 'x'; cut suppresses
-    // the second alternative, so the overall parse fails.
+    // first alt matches 'a', sets cut, then fails on 'x'; cut-committed
+    // failure now throws peg::ParseError instead of returning false.
     std::string input2 = "ab";
     Context context2(input2);
     Rule<> g2 = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
-    CHECK_FALSE(g2(context2));
+    bool threw = false;
+    try {
+        g2(context2);
+    } catch (const ParseError& e) {
+        threw = true;
+        // Position should be 1 (where 'x' was expected, after matching 'a')
+        CHECK(e.position() == 1);
+    }
+    CHECK(threw);
 }
 
 TEST_CASE("repetition-stops-on-no-progress")
@@ -61,4 +69,47 @@ TEST_CASE("repetition-stops-on-no-progress")
     Rule<> g = *empty();
     CHECK(g(context));
     CHECK(*context.mark() == 'a');
+}
+
+TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
+{
+    // Regression: a successful no-progress iteration that sets cut
+    // (e.g. via a lookahead) must NOT throw ParseError when the loop
+    // exits via the no-progress branch. Only cut-committed child
+    // failures should throw.
+    //
+    // Grammar: *((&'a') >> cut()) on input "abc":
+    //   - Iteration 1: &'a' succeeds (lookahead, no consume), cut() sets cut,
+    //     no progress → loop breaks.
+    //   - Post-loop: cut is true but loop exited via no-progress, not failure.
+    //   - Must return true, NOT throw.
+    std::string input = "abc";
+    Context context(input);
+    Rule<> g = *((&terminal('a')) >> cut());
+    CHECK(g(context));
+    CHECK(*context.mark() == 'a');
+}
+
+TEST_CASE("terminalseq-records-expected-on-failure")
+{
+    // terminalSeq("foo") on input "xyz" should record "foo" as expected.
+    std::string input = "xyz";
+    Context context(input);
+    CHECK_FALSE(terminalSeq("foo").parse(context));
+    CHECK(context.has_error());
+    CHECK(context.expected().size() == 1);
+    CHECK(context.expected().begin()->kind == ExpectedKind::Literal);
+    CHECK(context.expected().begin()->text == "\"foo\"");
+}
+
+TEST_CASE("terminal-range-records-range-expected")
+{
+    // terminal('a', 'z') on input '0' should record "'a'..'z'" as expected.
+    std::string input = "0";
+    Context context(input);
+    CHECK_FALSE(terminal('a', 'z').parse(context));
+    CHECK(context.has_error());
+    CHECK(context.expected().size() == 1);
+    CHECK(context.expected().begin()->kind == ExpectedKind::Range);
+    CHECK(context.expected().begin()->text == "'a'..'z'");
 }

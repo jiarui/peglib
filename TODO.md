@@ -13,21 +13,25 @@
 - clang-format + clang-tidy configs
 - CI: GitHub Actions (Linux + Windows, GCC/Clang/MSVC matrix)
 
-## Next Up — Phase 1 (Core Infrastructure for Lua)
+## Phase 1 — Core Infrastructure for Lua (DONE)
 
-- [ ] **Error reporting**: furthest-failure position + expected-rule set
-- [ ] **`ParseError`** struct with source location and formatted message
-      (`file:line:col: error: expected ...`)
-- [ ] **`SourceMap`**: byte offset ↔ (line, col) mapping + `line_view(n)`
-- [ ] **`cut` → hard error**: when a cut-committed branch fails, escalate to a
-      thrown `parse_error` instead of returning false
-- [ ] **Value stack**: `Context` holds a stack of user-defined AST nodes;
-      semantic actions pop children and push parents
-- [ ] **Concept-constrained `PegContext` trait**: library is AST-agnostic;
-      users `typedef node_type` in their Context specialization
-- [ ] **`FileSource::release_before`**: wire cut-driven buffer release to the
-      input source (currently only memo is released)
-- [ ] Per-rule `node_type` typedef (default `std::monostate`)
+- [x] **Error reporting**: furthest-failure position + expected-rule set
+- [x] **`ParseError`** (exception type) and **`Diagnostic`** (value object) with
+      source location and formatted message (`file:line:col: error: expected ...`)
+- [x] **`SourceMap`**: byte offset ↔ (line, col) mapping + `line_view(n)` /
+      `line_content(n)` (works for both contiguous and `FileSource`-backed maps)
+- [x] **`cut` → hard error**: when a cut-committed branch fails, escalate to a
+      thrown `peg::ParseError` instead of returning false
+- [x] **Value stack**: `Context` holds a stack of user-defined AST nodes;
+      semantic actions push return values (reduce semantics deferred to Phase 3)
+- [x] **Concept-constrained `PegContext` trait**: library is AST-agnostic;
+      users pass `NodeType` as a template parameter (default `std::monostate`)
+- [x] **`FileSource::release_before`**: wired cut-driven buffer release to the
+      input source via `is_context_releasable_v` trait
+- [x] Per-rule `node_type` typedef via `Context<InputSource, NodeType>` template
+- [x] **`Parser.h` split**: `ParserFwd.h` / `Terminals.h` / `Combinators.h` /
+      `NonTerminal.h` (umbrella `Parser.h` preserved for backward compatibility)
+- [x] **`Macros.h`**: `PEG_RULE` and `PEG_RULE_LABELED` macros for named rules
 
 ## Lua Milestone
 
@@ -71,9 +75,16 @@
 
 | Decision | Choice | Rationale |
 | ---      | ---    | ---       |
-| AST node typing | Concept-constrained user trait | Library stays AST-agnostic; users `typedef node_type` |
+| AST node typing | `Context<InputSource, NodeType>` template | Library stays AST-agnostic; default `std::monostate` keeps backward compatibility |
+| Error model | Mixed (cut throws, normal returns false) | Cut-committed failures are programmer errors; regular parse failures are queryable |
+| `ParseError` vs `Diagnostic` | `ParseError` (exception, PascalCase) + `Diagnostic` (value object) | Exception type for throws; value object for queries/format |
+| SourceMap | O(n) prescan + lazy line re-read for FileSource | Phase 4 1 MB benchmark needs streaming; full load unacceptable |
+| Expected set | Hybrid: rule name / label / printable literal | Best error messages with fallback for unnamed rules |
 | Pass model | Double-pass (char → token → AST) | Cleaner lexer/parser separation; matches reference Lua |
 | Precedence | Explicit layering (14 levels) | PEG left-recursion is precedence-unaware |
 | Test framework | doctest (vendored) | Zero deps, fast compile, CI-friendly |
 | CI platforms | Linux + Windows only | macOS deferred (cost); platform coverage sufficient |
 | Sanitizers | master-only job | Slow (2-3x); not worth blocking every PR |
+| Parser.h structure | Split into ParserFwd/Terminals/Combinators/NonTerminal | Reduce compile times; umbrella preserved for backward compat |
+| Value stack reduce | Phase 1 only pushes; reduce deferred to Phase 3 | Reduce semantics need AST.h to be designed first to avoid rework |
+| `DiagnosticConsumer` | Not in Phase 1 (YAGNI) | Only one diagnostic kind today; revisit when multiple levels needed |

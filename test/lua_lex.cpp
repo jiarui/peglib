@@ -99,16 +99,17 @@ struct TokenizerTest
     std::vector<Token> m_token_buf;
     void run(const std::string& input)
     {
-        names.setAction(
-            [this](Context<std::span<const std::string::value_type>>& context,
-                   Context<std::span<const std::string::value_type>>::match_range match) {
-                std::string m = std::string{match.begin(), match.end()};
-                if (m == "if") {
-                    m_token_buf.emplace_back(TokenID::TK_IF);
-                } else if (match.size() > 0) {
-                    m_token_buf.emplace_back(m);
-                }
-            });
+        names.setAction([this](Context<std::span<const std::string::value_type>>& context,
+                               Context<std::span<const std::string::value_type>>::match_range match)
+                            -> std::monostate {
+            std::string m = std::string{match.begin(), match.end()};
+            if (m == "if") {
+                m_token_buf.emplace_back(TokenID::TK_IF);
+            } else if (match.size() > 0) {
+                m_token_buf.emplace_back(m);
+            }
+            return {};
+        });
         Context context(input);
         while (!context.ended()) {
             token(context);
@@ -141,9 +142,11 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        names.setAction(([](decltype(context)& c, decltype(context)::match_range range) {
-            CHECK(std::string(range.begin(), range.end()) == "print");
-        }));
+        names.setAction(
+            ([](decltype(context)& c, decltype(context)::match_range range) -> std::monostate {
+                CHECK(std::string(range.begin(), range.end()) == "print");
+                return {};
+            }));
 
         Rule<> ws = WS;
         bool ok = ws(context);
@@ -208,7 +211,8 @@ TEST_CASE("lua-lex-tokens")
 {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    names.setAction([](decltype(context)& c, decltype(context)::match_range range) {});
+    names.setAction([](decltype(context)& c,
+                       decltype(context)::match_range range) -> std::monostate { return {}; });
     {
         auto start = context.mark();
         CHECK(token(context));

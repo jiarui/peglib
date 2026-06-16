@@ -1,13 +1,15 @@
 # peglib
 
 Header-only Parsing Expression Grammar (PEG) library in C++20, featuring packrat
-memoization, left-recursion support, and a cut operator for committed choice.
+memoization, left-recursion support, a cut operator for committed choice,
+structured error reporting, and a pluggable value stack for AST construction.
 
 ## Status
 
-Early stage. Core combinators are stable and tested. Error reporting, typed AST
-infrastructure, and the Lua reference frontend are under active development —
-see [TODO.md](TODO.md) for the roadmap.
+Core combinators and infrastructure are stable and tested. Phase 1 (error
+reporting, SourceMap, value stack, concept-constrained Context) is complete.
+The Lua reference frontend (lexer → typed AST → evaluator) is under active
+development — see [TODO.md](TODO.md) for the roadmap.
 
 ## Features
 
@@ -17,10 +19,21 @@ see [TODO.md](TODO.md) for the roadmap.
   lookahead), `cut()` (committed choice).
 - **Packrat memoization** for linear-time parsing.
 - **Left-recursion** support via seed-grow.
-- **Cut operator** for Prolog-style committed choice with automatic memo
-  release.
+- **Cut operator** for Prolog-style committed choice. Cut-committed failures
+  throw `peg::ParseError` (a hard error); regular failures are queryable via
+  `Context::take_error()`.
+- **Structured error reporting**: `ExpectedItem` set records what was expected
+  at the furthest failure position. `Diagnostic::format()` produces
+  `file:line:col: error: expected A or B` messages.
+- **`SourceMap`**: byte offset ↔ (line, col) mapping, supports both contiguous
+  in-memory sources and streaming `FileSource`.
+- **Value stack**: `Context<InputSource, NodeType>` holds a stack of
+  user-defined AST nodes. Semantic actions push return values; reduction is
+  deferred to a later phase.
+- **Concept-constrained**: `PegContext<C>` concept validates the Context API at
+  compile time.
 - **Pluggable input sources**: in-memory (`std::string`, `std::vector`) and
-  streaming file I/O (`FileSource` with double buffering).
+  streaming file I/O (`FileSource` with double buffering + cut-driven eviction).
 
 ## Quick Start
 
@@ -41,9 +54,63 @@ int main() {
     if (list(context) && context.ended()) {
         std::cout << "parsed successfully\n";
     } else {
-        std::cout << "parse failed\n";
+        // On normal failure: query the diagnostic
+        if (auto err = context.take_error()) {
+            SourceMap map{std::string_view{input}};
+            std::cerr << err->format(map, "input") << "\n";
+        }
     }
 }
+```
+
+### Error reporting with cut
+
+```cpp
+// `('a' >> cut >> 'x') | 'a'` on input "ab":
+// first alt matches 'a', sets cut, fails on 'x' — cut-committed
+// failure throws peg::ParseError instead of falling through to alt 2.
+Rule<> g = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
+std::string input = "ab";
+Context context(input);
+
+try {
+    g(context);
+} catch (const ParseError& e) {
+    SourceMap map{std::string_view{input}};
+    std::cerr << e.to_diagnostic().format(map, "file.txt") << "\n";
+    // Prints: file.txt:1:2: error: expected 'x'
+}
+```
+
+### Custom AST node type
+
+```cpp
+struct IntNode { int value; };
+
+using MyContext = Context<std::span<const char>, IntNode>;
+using MyRule = MyContext::Rule;
+
+MyRule digit = ...; // construct a TerminalExpr<MyContext, ...>
+digit.setAction([](MyContext&, MyContext::match_range r) {
+    return IntNode{*r.begin() - '0'};
+});
+
+std::string input = "42";
+MyContext context(input);
+digit(context);
+digit(context);
+// context.node_count() == 2
+// context.peek_node().value == 2 (last pushed)
+```
+
+### Named rules with `PEG_RULE` macro
+
+```cpp
+PEG_RULE(MyContext, numeral, '0'-'9' >> +('0'-'9'));
+// equivalent to:
+//   MyContext::Rule numeral = ('0'-'9' >> +('0'-'9'));
+//   numeral.set_name("numeral");
+// "numeral" appears in error messages when the rule fails.
 ```
 
 ## Requirements
@@ -80,10 +147,19 @@ ctest --test-dir build --output-on-failure
 
 ```
 include/peglib/      header-only library
-  Context.h          parsing context (state, memo, cut)
-  Parser.h           expression types and parsing engine
-  Rule.h             operator DSL (>>, |, *, +, !, &, ...)
-  FileSource.h       streaming file-backed input
+  peglib.h           umbrella (includes everything)
+  Context.h          parsing context (state, memo, cut, error tracking, value stack)
+  ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
+  Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
+  Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr
+  NonTerminal.h      NonTerminal (named, memoizable rule), NonTerminalRef
+  Parser.h           umbrella for the 4 parser headers above
+  Rule.h             operator DSL (>>, |, *, +, !, &, ...) + factories
+  FileSource.h       streaming file-backed input with double buffering
+  SourceMap.h        byte offset <-> (line, col) mapping
+  ParseError.h       Diagnostic, ParseError, ExpectedItem, escape helpers
+  Concepts.h         PegContext concept
+  Macros.h           PEG_RULE, PEG_RULE_LABELED
 test/                unit tests (doctest)
   *_test.cpp         per-header test cases
   lua_lex.cpp        Lua 5.4 lexer smoke tests
@@ -98,10 +174,13 @@ Tests use [doctest](https://github.com/doctest/doctest) (vendored in
 per-header:
 
 - `rule_test.cpp` — operator DSL, recursion, left-recursion
-- `parser_test.cpp` — low-level expression and cut semantics
-- `context_test.cpp` — context state, position tracking, cut lifecycle
+- `parser_test.cpp` — low-level expression and cut-throw semantics
+- `context_test.cpp` — context state, position tracking, cut lifecycle,
+  release_before integration
 - `file_source_test.cpp` — streaming file I/O
-- `error_test.cpp` — error reporting (placeholder for Phase 1)
+- `sourcemap_test.cpp` — byte offset ↔ (line, col) mapping
+- `value_stack_test.cpp` — value stack, PegContext concept
+- `error_test.cpp` — error reporting, expected set, Diagnostic format, ParseError
 
 ## Roadmap
 

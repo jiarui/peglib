@@ -1,14 +1,19 @@
 #pragma once
 #include <cassert>
+#include <cstddef>
 #include <functional>
 #include <iostream>
 #include <map>
+#include <optional>
+#include <set>
 #include <span>
 #include <stack>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 #include "FileSource.h"
+#include "ParseError.h"
 namespace peg
 {
 namespace parsers
@@ -63,9 +68,20 @@ struct ContextMatchRange<FileSource<vt>>
     using type = std::pair<typename FileSource<vt>::iterator, typename FileSource<vt>::iterator>;
 };
 
-template<InputSourceType InputSource>
+// Does the given InputSource support `release_before` (i.e. cut-driven
+// buffer eviction)? Contiguous span-backed sources do not; only FileSource
+// does, because it owns the only paged/evictable storage.
+template<typename>
+inline constexpr bool is_context_releasable_v = false;
+
+template<typename vt>
+inline constexpr bool is_context_releasable_v<FileSource<vt>> = true;
+
+template<InputSourceType InputSource, typename NodeType = std::monostate>
 struct Context
 {
+    using node_type = NodeType;
+
     template<typename InputType>
     Context(const InputType& t)
         : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position}
@@ -73,7 +89,7 @@ struct Context
 
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;
-    using Rule = peg::parsers::NonTerminal<Context<InputSource>>;
+    using Rule = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
     using match_range = typename ContextMatchRange<InputSource>::type;
 
     struct RuleState
@@ -181,10 +197,104 @@ struct Context
                 const auto& [pos, record] = item;
                 return pos < m_last_cut;
             });
-            // TODO notify m_input to release elements before m_last_cut
+            if constexpr (is_context_releasable_v<InputSource>) {
+                m_input.release_before(m_last_cut);
+            }
         }
         m_cut.pop();
     }
+
+    // -----------------------------------------------------------------------
+    // Error tracking: furthest-failure position + expected set
+    // -----------------------------------------------------------------------
+
+    using expected_set = std::set<ExpectedItem>;
+
+    // Called by leaf expressions and NonTerminals when they fail.
+    // Updates m_furthest_failure_pos / m_expected according to the rule:
+    //   - If pos > m_furthest_failure_pos: clear, update, record.
+    //   - If pos == m_furthest_failure_pos: append (set deduplicates).
+    //   - If pos <  m_furthest_failure_pos: ignore.
+    void record_failure(std::size_t pos, ExpectedItem item)
+    {
+        if (!m_has_error || pos > m_furthest_failure_pos) {
+            m_furthest_failure_pos = pos;
+            m_expected.clear();
+            m_expected.insert(std::move(item));
+            m_has_error = true;
+        } else if (pos == m_furthest_failure_pos) {
+            m_expected.insert(std::move(item));
+        }
+        // else: pos < furthest — ignore
+    }
+
+    // Convenience overload: takes iterator, converts to offset automatically.
+    void record_failure(iterator pos_it, ExpectedItem item)
+    {
+        record_failure(offset_of(pos_it), std::move(item));
+    }
+
+    [[nodiscard]] std::size_t furthest_failure_pos() const noexcept
+    {
+        return m_furthest_failure_pos;
+    }
+
+    [[nodiscard]] const expected_set& expected() const noexcept { return m_expected; }
+
+    [[nodiscard]] bool has_error() const noexcept { return m_has_error; }
+
+    // Move the error out as a Diagnostic value-object. After this call,
+    // has_error() returns false (the Context is reset to "no error" state).
+    [[nodiscard]] std::optional<Diagnostic> take_error()
+    {
+        if (!m_has_error) {
+            return std::nullopt;
+        }
+        Diagnostic diag{m_furthest_failure_pos, std::move(m_expected)};
+        m_has_error = false;
+        m_expected.clear();
+        m_furthest_failure_pos = 0;
+        return diag;
+    }
+
+    // Convert an iterator to a byte offset. Works for both span-backed
+    // (random-access iterators) and FileSource-backed (custom iterators).
+    [[nodiscard]] std::size_t offset_of(iterator it) const noexcept
+    {
+        if constexpr (is_context_releasable_v<InputSource>) {
+            return it.position();
+        } else {
+            return static_cast<std::size_t>(it - m_input.begin());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Value stack: holds AST nodes pushed by semantic actions.
+    //
+    // Phase 1 contract: NonTerminal::parse pushes the action's return value
+    // onto the stack on success. Reduction (popping children to build parent
+    // nodes) is deferred to Phase 3 when AST.h is designed.
+    // -----------------------------------------------------------------------
+
+    void push_node(node_type n) { m_value_stack.push_back(std::move(n)); }
+
+    [[nodiscard]] node_type pop_node()
+    {
+        assert(!m_value_stack.empty() && "pop_node on empty value stack");
+        node_type n = std::move(m_value_stack.back());
+        m_value_stack.pop_back();
+        return n;
+    }
+
+    [[nodiscard]] const node_type& peek_node() const
+    {
+        assert(!m_value_stack.empty() && "peek_node on empty value stack");
+        return m_value_stack.back();
+    }
+
+    [[nodiscard]] std::size_t node_count() const noexcept { return m_value_stack.size(); }
+
+    void clear_stack() { m_value_stack.clear(); }
 
     template<typename value_type>
     Context(FileSource<value_type>&& s)
@@ -197,6 +307,14 @@ protected:
     iterator m_last_cut;
     std::map<iterator, std::map<const Rule*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
+
+    // Error tracking state
+    std::size_t m_furthest_failure_pos = 0;
+    expected_set m_expected;
+    bool m_has_error = false;
+
+    // Value stack
+    std::vector<node_type> m_value_stack;
 };
 
 template<typename value_type>

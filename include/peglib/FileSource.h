@@ -161,6 +161,9 @@ struct FileSource
 
         typename FileSource::value_type operator*() const { return m_freader->get(*this); }
 
+        // Byte position (item index for value_type == char).
+        std::size_t position() const { return m_pos; }
+
         friend FileSource;
 
     protected:
@@ -171,6 +174,16 @@ struct FileSource
 
     iterator end() const { return {this, m_filesize}; }
     iterator begin() const { return {this, 0}; }
+
+    // Public factory: construct an iterator at byte position `pos`.
+    // Equivalent to begin() + pos, but O(1) (no increment chain).
+    iterator seek(size_t pos) const { return {this, pos}; }
+
+    // Value at byte position `pos` (range-checked via assert).
+    value_type at(size_t pos) const { return get(seek(pos)); }
+
+    // Total number of items (== byte count for value_type == char).
+    size_t size() const { return m_filesize; }
 
 protected:
     struct buffer
