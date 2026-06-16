@@ -1,0 +1,41 @@
+# peglib clang-tidy config.
+#
+# Phase 0 scope: catch real bugs and suggest modern idioms, without
+# enforcing naming conventions (the codebase mixes snake_case and
+# camelCase; a naming pass is deferred to a dedicated cleanup commit).
+#
+# Run with: cmake -DPEGLIB_ENABLE_CLANG_TIDY=ON ...
+
+Checks: >
+  -*,
+  bugprone-*,
+  modernize-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-throwing-static-initialization,
+  -modernize-avoid-c-arrays,
+  -modernize-use-default-member-init,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-concat-nested-namespaces,
+  -readability-*,
+  +readability-container-data-pointer,
+  +readability-delete-null-pointer,
+  +readability-duplicate-conditional,
+  +readability-inconsistent-declaration-parameter-name,
+  +readability-non-const-parameter,
+  +readability-qualified-auto,
+  +readability-redundant-control-flow,
+  +readability-redundant-string-cstr,
+  +readability-redundant-string-init,
+  +readability-simplify-boolean-expr,
+  +readability-static-definition-in-anonymous-namespace,
+  +readability-string-compare,
+  +readability-uniqueptr-delete-release,
+  +readability-else-after-return
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: 'include/.*'
+
+FormatStyle: file

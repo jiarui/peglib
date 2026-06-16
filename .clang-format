@@ -1,0 +1,72 @@
+# peglib clang-format config.
+# Based on LLVM with project-specific tweaks (4-space indent, 100-col limit).
+BasedOnStyle: LLVM
+
+# Indentation & layout
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+
+# Line length
+ColumnLimit: 100
+
+# Braces
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: Never
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+
+# Pointers & references
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Includes
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Local headers (own project)
+  - Regex: '^"peglib/'
+    Priority: 1
+  - Regex: '^"peglib\.h"'
+    Priority: 1
+  - Regex: '^"doctest\.h"'
+    Priority: 2
+  # C++ standard library
+  - Regex: '^<[a-z_]+>$'
+    Priority: 3
+  # Everything else
+  - Regex: '.*'
+    Priority: 4
+SortIncludes: CaseSensitive
+
+# Misc
+AlignAfterOpenBracket: Align
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: false
+ConstructorInitializerIndentWidth: 4
+FixNamespaceComments: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+ReflowComments: true
+SpaceAfterCStyleCast: false
+SpaceAfterTemplateKeyword: false
+SpacesBeforeTrailingComments: 1
+Standard: c++20

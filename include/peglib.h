@@ -1,4 +1,4 @@
 #pragma once
 
-#include "peglib/Rule.h"
 #include "peglib/Parser.h"
+#include "peglib/Rule.h"

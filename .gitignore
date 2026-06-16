@@ -1,2 +1,30 @@
-.vscode
-build
+# Build artifacts
+build/
+build-*/
+out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.cmake
+!CMakeLists.txt
+!test/CMakeLists.txt
+
+# Test / coverage artifacts
+Testing/Temporary/
+*.gcov
+*.gcda
+*.gcno
+coverage/
+*.profdata
+*.profraw
+
+# IDE / editor
+.vscode/
+.idea/
+.cache/
+*.swp
+*~
+.DS_Store

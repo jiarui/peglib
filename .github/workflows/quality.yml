@@ -1,0 +1,124 @@
+name: quality
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  format-check:
+    name: clang-format check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find include test -name '*.h' -o -name '*.cpp' \
+            | grep -v doctest \
+            | xargs clang-format --style=file --dry-run -Werror
+
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-17
+      CXX: clang++-17
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-17 + clang-tidy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-17 clang++-17 clang-tidy-17
+
+      - name: Configure with clang-tidy
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPEGLIB_BUILD_TESTS=ON \
+            -DPEGLIB_ENABLE_CLANG_TIDY=ON
+
+      - name: Build (runs clang-tidy)
+        run: cmake --build build -j
+
+  coverage:
+    name: coverage (gcc-13)
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push'
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcc-13 + gcovr
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13 gcovr
+
+      - name: Configure with coverage
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPEGLIB_BUILD_TESTS=ON \
+            -DPEGLIB_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate coverage report + enforce threshold (>= 70% lines)
+        run: |
+          # --fail-under-line exits non-zero if line coverage is below 70%.
+          gcovr --root . --filter 'include/' \
+                --fail-under-line 70 \
+                --print-summary \
+                --html-details build/coverage.html \
+                --txt
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/coverage*.html
+
+  sanitizer:
+    name: ASan/UBSan (gcc-13)
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push'
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcc-13
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-13 g++-13
+
+      - name: Configure with sanitizers
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DPEGLIB_BUILD_TESTS=ON \
+            -DPEGLIB_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1
