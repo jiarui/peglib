@@ -23,10 +23,10 @@ Rule<> numeral = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E')
 
 Rule<> comment = terminal('-') >> '-' >> *not_linebreak >> linebreak;
 
-auto escape_single_quote =
-    terminal('\\') >>
-    (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | ('z' >> WS) | (3 * digit) |
-     (2 * xdigit) | terminal('u') >> '{' >> *xdigit >> '}');
+auto escape_single_quote = terminal('\\') >>
+                           (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' |
+                            ('z' >> WS) | (3 * digit) | (2 * xdigit) |
+                            terminal('u') >> '{' >> *xdigit >> '}');
 auto string_content =
     terminal<char>([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
 auto string_single_quote = terminal('\'') >> *(string_content | escape_single_quote) >>

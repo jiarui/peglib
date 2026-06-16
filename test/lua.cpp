@@ -44,21 +44,22 @@ LuaRule attrib = -(terminal('<') >> Name >> terminal('.'));
 LuaRule attnamlist = Name >> attrib >> *(terminal(',') >> Name >> attrib);
 // Renamed from `stat` to `stat_rule` because Windows ucrt's <sys/stat.h>
 // declares a `stat` function, causing C2373 redefinition errors on MSVC.
-LuaRule stat_rule = terminal(';') | (varlist >> terminal('=') >> explist) | functioncall | label |
-               terminalSeq("break") | (terminalSeq("goto") >> Name) |
-               (terminalSeq("do") >> block >> terminalSeq("end")) |
-               (terminalSeq("while") >> expr >> terminalSeq("do") >> block >> terminalSeq("end")) |
-               (terminalSeq("repeat") >> block >> terminalSeq("until") >> expr) |
-               (terminalSeq("if") >> expr >> terminalSeq("then") >> block >>
-                *(terminalSeq("elseif") >> expr >> terminalSeq("then") >> block) >>
-                -(terminalSeq("else") >> block) >> terminalSeq("end")) |
-               (terminalSeq("for") >> Name >> terminal('=') >> expr >> terminal(',') >> expr >>
-                -(terminal(',') >> expr) >> terminalSeq("do") >> block >> terminalSeq("end")) |
-               (terminalSeq("for") >> namelist >> terminalSeq("in") >> explist >>
-                terminalSeq("do") >> block >> terminalSeq("end")) |
-               (terminalSeq("function") >> funcname >> funcbody) |
-               (terminalSeq("local") >> terminalSeq("function") >> Name >> funcbody) |
-               (terminalSeq("local") >> attnamlist >> -(terminal('-') >> explist));
+LuaRule stat_rule =
+    terminal(';') | (varlist >> terminal('=') >> explist) | functioncall | label |
+    terminalSeq("break") | (terminalSeq("goto") >> Name) |
+    (terminalSeq("do") >> block >> terminalSeq("end")) |
+    (terminalSeq("while") >> expr >> terminalSeq("do") >> block >> terminalSeq("end")) |
+    (terminalSeq("repeat") >> block >> terminalSeq("until") >> expr) |
+    (terminalSeq("if") >> expr >> terminalSeq("then") >> block >>
+     *(terminalSeq("elseif") >> expr >> terminalSeq("then") >> block) >>
+     -(terminalSeq("else") >> block) >> terminalSeq("end")) |
+    (terminalSeq("for") >> Name >> terminal('=') >> expr >> terminal(',') >> expr >>
+     -(terminal(',') >> expr) >> terminalSeq("do") >> block >> terminalSeq("end")) |
+    (terminalSeq("for") >> namelist >> terminalSeq("in") >> explist >> terminalSeq("do") >> block >>
+     terminalSeq("end")) |
+    (terminalSeq("function") >> funcname >> funcbody) |
+    (terminalSeq("local") >> terminalSeq("function") >> Name >> funcbody) |
+    (terminalSeq("local") >> attnamlist >> -(terminal('-') >> explist));
 
 LuaRule block = *stat_rule >> -retstat;
 LuaRule chunk = block;

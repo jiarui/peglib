@@ -272,7 +272,9 @@ struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children.
     bool parse(Context& context) const override
     {
         context.init_cut();
-        ScopeGuard s{[&context]() { context.remove_cut(); }};
+        ScopeGuard s{[&context]() {
+            context.remove_cut();
+        }};
         return parse<0>(context);
     }
 
@@ -313,7 +315,9 @@ struct Repetition
     bool parse(Context& context) const
     {
         context.init_cut();
-        ScopeGuard _{[&context]() { context.remove_cut(); }};
+        ScopeGuard _{[&context]() {
+            context.remove_cut();
+        }};
         auto initState = context.state();
         bool result = true;
         size_t loopCount = 0;
