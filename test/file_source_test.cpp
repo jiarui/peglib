@@ -13,7 +13,10 @@ namespace
 {
 std::string read_all(const std::string& path)
 {
-    std::ifstream fs(path);
+    // Binary mode: do not translate CRLF on Windows. FileSource opens with
+    // "rb" for byte-accurate seeking, so the reference reader must see the
+    // same raw bytes or comparisons desync at every newline.
+    std::ifstream fs(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(fs), std::istreambuf_iterator<char>());
 }
 } // namespace
