@@ -19,46 +19,54 @@ jobs:
             os: ubuntu-24.04
             cc: gcc-11
             cxx: g++-11
+            packages: "gcc-11 g++-11"
           - name: "GCC 13 (ubuntu-24.04)"
             os: ubuntu-24.04
             cc: gcc-13
             cxx: g++-13
+            packages: "gcc-13 g++-13"
           - name: "GCC 15 (ubuntu-24.04)"
             os: ubuntu-24.04
             cc: gcc-15
             cxx: g++-15
+            packages: "gcc-15 g++-15"
           # --- Linux / Clang ---
+          # clang-XX package provides both clang-XX and clang++-XX binaries.
           - name: "Clang 14 (ubuntu-24.04)"
             os: ubuntu-24.04
             cc: clang-14
             cxx: clang++-14
+            packages: "clang-14"
           - name: "Clang 17 (ubuntu-24.04)"
             os: ubuntu-24.04
             cc: clang-17
             cxx: clang++-17
+            packages: "clang-17"
           # --- Windows / MSVC ---
           - name: "MSVC 19.30 (windows-2022)"
             os: windows-2022
             cc: cl
             cxx: cl
+            packages: ""
           - name: "MSVC latest (windows-2022)"
             os: windows-2022
             cc: cl
             cxx: cl
+            packages: ""
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install compilers (Linux)
+      - name: Install compiler (Linux)
         if: runner.os == 'Linux'
         run: |
+          # ubuntu-toolchain-r/test PPA provides gcc versions not in the
+          # base noble repo (gcc-11, gcc-15).
           sudo apt-get update
-          sudo apt-get install -y \
-            gcc-11 g++-11 \
-            gcc-13 g++-13 \
-            gcc-15 g++-15 \
-            clang-14 clang++-14 \
-            clang-17 clang++-17
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.config.packages }}
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
