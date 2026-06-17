@@ -22,6 +22,8 @@ template<typename Context>
 struct ParsingExprInterface;
 template<typename Context>
 struct NonTerminal;
+template<typename Context>
+struct Rule;
 } // namespace parsers
 
 // std::string std::vector file
@@ -89,7 +91,8 @@ struct Context
 
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;
-    using Rule = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
+    using Rule = peg::parsers::Rule<Context<InputSource, NodeType>>;
+    using NonTerminalType = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
     using match_range = typename ContextMatchRange<InputSource>::type;
 
     struct RuleState
@@ -134,15 +137,15 @@ struct Context
 
     const InputSource& get_input() const { return m_input; }
 
-    std::tuple<bool, RuleState> ruleState(const Rule* rule, iterator pos)
+    std::tuple<bool, RuleState> ruleState(const NonTerminalType* rule, iterator pos)
     {
-        auto [iter_records, ins] = m_mem.emplace(pos, std::map<const Rule*, RuleState>{});
+        auto [iter_records, ins] = m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
         auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
         return std::tuple<bool, RuleState>{ok, iter->second};
     }
 
     bool
-    updateRuleState(const Rule* rule, iterator start_pos, iterator return_pos, bool return_value)
+    updateRuleState(const NonTerminalType* rule, iterator start_pos, iterator return_pos, bool return_value)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -157,7 +160,7 @@ struct Context
         return true;
     }
 
-    bool updateRuleState(const Rule* rule, iterator start_pos, const RuleState& ruleState)
+    bool updateRuleState(const NonTerminalType* rule, iterator start_pos, const RuleState& ruleState)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -305,7 +308,7 @@ protected:
     InputSource m_input;
     iterator m_position;
     iterator m_last_cut;
-    std::map<iterator, std::map<const Rule*, RuleState>> m_mem;
+    std::map<iterator, std::map<const NonTerminalType*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
 
     // Error tracking state

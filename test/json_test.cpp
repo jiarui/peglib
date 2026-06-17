@@ -41,10 +41,7 @@ inline Rule<> number_rule;
 inline Rule<> keyword_rule;
 inline Rule<> ws;   // whitespace, optional
 inline Rule<> json; // top-level: optional-ws value optional-ws
-// Auxiliary rules used inside array/object. These must outlive the
-// static initializer lambda, so they're declared at namespace scope
-// (NOT as locals). NonTerminalRef holds a bare reference — a local
-// Rule<> would dangle after the lambda exits.
+// Auxiliary rules used inside array/object.
 inline Rule<> value_list;
 inline Rule<> member_list;
 inline Rule<> key_value;

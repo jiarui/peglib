@@ -56,7 +56,9 @@ struct ParsingExpr : ParsingExprInterface<Context>
     ParsingExpr() = default;
     ParsingExpr(SemanticAction action) : m_action(action) {}
     ParsingExpr(const ParsingExpr&) = default;
-    ParsingExpr(ParsingExpr&&) = delete;
+    ParsingExpr(ParsingExpr&&) = default;
+    ParsingExpr& operator=(const ParsingExpr&) = default;
+    ParsingExpr& operator=(ParsingExpr&&) = default;
 
 protected:
     SemanticAction m_action;

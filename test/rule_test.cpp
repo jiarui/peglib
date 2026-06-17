@@ -265,7 +265,8 @@ TEST_CASE("repetition-restores-position-on-child-partial-failure")
 
 TEST_CASE("non-terminal-recursion")
 {
-    const Rule<> grammar = 'a' >> (grammar | 'b') | 'b' >> ('a' | grammar);
+    Rule<> grammar;
+    grammar = 'a' >> (grammar | 'b') | 'b' >> ('a' | grammar);
 
     SUBCASE("ab")
     {
@@ -438,7 +439,8 @@ TEST_CASE("semantic-action-fires-on-match")
 
 TEST_CASE("right-recursion")
 {
-    const Rule<> r = 'x' >> r >> 'b' | 'a';
+    Rule<> r;
+    r = 'x' >> r >> 'b' | 'a';
 
     SUBCASE("a")
     {
@@ -468,7 +470,8 @@ TEST_CASE("right-recursion")
 // ---------------------------------------------------------------------------
 TEST_CASE("left-recursion-simple")
 {
-    Rule<> r = (r >> 'b') | (r >> 'c') | terminal('a') | terminal('d');
+    Rule<> r;
+    r = (r >> 'b') | (r >> 'c') | terminal('a') | terminal('d');
 
     auto checkOk = [&](const std::string& input, bool ended) {
         Context context(input);
@@ -539,4 +542,52 @@ TEST_CASE("left-recursion-arithmetic")
     checkOk("(1+2)*3");
     checkOk("1*(2+3)");
     checkOk("(1*(2+3))*4");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.0 regression: local Rule variables in a lambda must not dangle.
+//
+// In the old design, NonTerminalRef stored a bare const NonTerminal&. When
+// the referenced NonTerminal went out of scope (e.g. a local Rule<> in a
+// grammar-construction lambda), the reference dangled — causing "pure virtual
+// method called" crashes. With the shared_ptr-based Rule design, the
+// NonTerminal's lifetime is extended by all Rule copies that reference it.
+// ---------------------------------------------------------------------------
+TEST_CASE("local-rule-in-lambda-does-not-dangle")
+{
+    // Build a grammar inside a lambda using local Rule variables, then return
+    // the top-level Rule. The locals go out of scope, but the returned Rule
+    // (and its expression tree) keeps the NonTerminals alive.
+    auto build_grammar = []() -> Rule<> {
+        Rule<> digit = terminal('0', '9');
+        Rule<> number = +digit;
+        Rule<> ws = *terminal<char>([](char c) { return c == ' '; });
+        Rule<> expr;
+        expr = number >> *(ws >> terminal('+') >> ws >> number);
+        return expr;
+    };
+
+    Rule<> grammar = build_grammar();
+
+    SUBCASE("simple addition")
+    {
+        std::string input = "1+2";
+        Context context(input);
+        CHECK(grammar(context));
+        CHECK(context.ended());
+    }
+    SUBCASE("multiple additions with whitespace")
+    {
+        std::string input = "1 + 2 + 3";
+        Context context(input);
+        CHECK(grammar(context));
+        CHECK(context.ended());
+    }
+    SUBCASE("single number")
+    {
+        std::string input = "42";
+        Context context(input);
+        CHECK(grammar(context));
+        CHECK(context.ended());
+    }
 }

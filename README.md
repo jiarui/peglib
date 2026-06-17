@@ -119,6 +119,39 @@ PEG_RULE(MyContext, numeral, '0'-'9' >> +('0'-'9'));
 // "numeral" appears in error messages when the rule fails.
 ```
 
+### Recursive rules
+
+Self-referential or mutually-recursive rules cannot use copy-initialization
+(`Rule<> r = r >> ...`) because the expression is evaluated before `r` is
+constructed. Use default-construct + assign instead:
+
+```cpp
+// Function scope — direct assignment works:
+Rule<> expr;
+expr = expr >> '+' >> expr | number;
+
+// Namespace scope — wrap assignments in a static initializer lambda:
+Rule<> expr;
+Rule<> number = +terminal('0', '9');   // non-recursive: copy-init is fine
+
+const bool init = [] {
+    expr = expr >> '+' >> expr | number;  // modifies the existing NonTerminal
+    return true;
+}();
+```
+
+For convenience, `PEG_RULE_DEF` combines forward-declare + assign + name:
+
+```cpp
+PEG_RULE_DEF(MyContext, expr, expr >> '+' >> expr | number);
+```
+
+Why not `Rule<> r = r >> ...`? C++ evaluates the initializer expression before
+constructing `r`. With shared ownership, copying an uninitialized `shared_ptr`
+causes a crash. This is a fundamental C++ language constraint — see
+[Spirit X3's `BOOST_SPIRIT_DEFINE](https://www.boost.org/doc/libs/release/libs/spirit/doc/x3/html/spirit_x3/tutorials/semantic_actions.html)
+for the same pattern in another C++ parser library.
+
 ## Requirements
 
 | Toolchain          | Minimum version |
@@ -158,7 +191,7 @@ include/peglib/      header-only library
   ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
   Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
   Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr
-  NonTerminal.h      NonTerminal (named, memoizable rule), NonTerminalRef
+  NonTerminal.h      NonTerminal (internal node), Rule (shared_ptr handle)
   Parser.h           umbrella for the 4 parser headers above
   Rule.h             operator DSL (>>, |, *, +, !, &, ...) + factories
   FileSource.h       streaming file-backed input with double buffering

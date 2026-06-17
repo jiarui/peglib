@@ -36,6 +36,26 @@ void peg_rule_label(Rule& rule, std::string label)
 //   over name in error messages).
 //
 //   PEG_RULE_LABELED(MyContext, Numeral, "a number", '0'-'9' >> +('0'-'9'));
+//
+// PEG_RULE_DEF(Context, NAME, EXPR)
+//   For recursive rules — where EXPR references NAME itself. Uses
+//   default-construct + assign (forward-declare pattern) instead of
+//   copy-initialization. This is required because:
+//
+//     Rule<> r = r >> 'b' | 'a';   // CRASHES: r.m_impl is uninitialized
+//     Rule<> r; r = r >> 'b' | 'a'; // OK: r.m_impl valid before assignment
+//
+//   PEG_RULE_DEF(MyContext, expr, expr >> '+' >> expr | term);
+//   // expands to:
+//   //   MyContext::Rule expr;
+//   //   expr = (expr >> '+' >> expr | term);
+//   //   expr.set_name("expr");
+//
+// PEG_RULE_DEF_LABELED(Context, NAME, LABEL, EXPR)
+//   Same as PEG_RULE_DEF but also sets a human-readable label.
+//
+// PEG_RULE_RECURSIVE(Context, NAME, EXPR)
+//   Alias for PEG_RULE_DEF. Use whichever reads better in context.
 // ---------------------------------------------------------------------------
 
 #define PEG_RULE(CTXT, NAME, EXPR)                                                                 \
@@ -46,3 +66,16 @@ void peg_rule_label(Rule& rule, std::string label)
     typename CTXT::Rule NAME = (EXPR);                                                             \
     ::peg::peg_rule_name(NAME, #NAME);                                                             \
     ::peg::peg_rule_label(NAME, LABEL)
+
+#define PEG_RULE_DEF(CTXT, NAME, EXPR)                                                             \
+    typename CTXT::Rule NAME;                                                                      \
+    NAME = (EXPR);                                                                                 \
+    ::peg::peg_rule_name(NAME, #NAME)
+
+#define PEG_RULE_DEF_LABELED(CTXT, NAME, LABEL, EXPR)                                              \
+    typename CTXT::Rule NAME;                                                                      \
+    NAME = (EXPR);                                                                                 \
+    ::peg::peg_rule_name(NAME, #NAME);                                                             \
+    ::peg::peg_rule_label(NAME, LABEL)
+
+#define PEG_RULE_RECURSIVE(CTXT, NAME, EXPR) PEG_RULE_DEF(CTXT, NAME, EXPR)

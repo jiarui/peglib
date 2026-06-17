@@ -4,7 +4,19 @@
 #include "Parser.h"
 namespace peg
 {
-using namespace parsers;
+using parsers::ParsingExpr;
+using parsers::SequenceExpr;
+using parsers::AlternationExpr;
+using parsers::ZeroOrMoreExpr;
+using parsers::OneOrMoreExpr;
+using parsers::NTimesExpr;
+using parsers::OptionalExpr;
+using parsers::NotExpr;
+using parsers::AndExpr;
+using parsers::TerminalExpr;
+using parsers::TerminalSeqExpr;
+using parsers::EmptyExpr;
+using parsers::CutExpr;
 
 template<typename C = Context<std::span<const std::string::value_type>>>
 using Rule = typename C::Rule;
@@ -66,48 +78,39 @@ auto cut()
     return CutExpr<C>();
 }
 
-template<typename Context, typename ParsingExprType>
-auto self(const ParsingExpr<Context, ParsingExprType>& expr)
-{
-    if constexpr (std::is_same_v<ParsingExprType, NonTerminal<Context>>) {
-        return NonTerminalRef<Context>(static_cast<const ParsingExprType&>(expr));
-    } else {
-        return static_cast<const ParsingExprType&>(expr);
-    }
-}
-
-template<typename Context, typename ParsingExprType>
-auto expr_children(const ParsingExpr<Context, ParsingExprType>& expr)
-{
-    return static_cast<const ParsingExprType&>(expr).children();
-}
+// ---------------------------------------------------------------------------
+// Operator overloads for building expression trees.
+//
+// With Phase 2.0, Rule is a shared_ptr<NonTerminal> handle. Copying a Rule
+// is shallow and preserves identity, so no special wrapping (self()/NonTerminalRef)
+// is needed — all operands are handled uniformly via static_cast to the CRTP
+// derived type.
+// ---------------------------------------------------------------------------
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>
 auto operator>>(const ParsingExpr<Context, ParsingExprType1>& expr1,
                 const ParsingExpr<Context, ParsingExprType2>& expr2)
 {
-    auto lhs = self(expr1);
-    auto rhs = self(expr2);
-    return SequenceExpr<Context, decltype(lhs), decltype(rhs)>(std::make_tuple(lhs, rhs));
+    return SequenceExpr<Context, ParsingExprType1, ParsingExprType2>(
+        std::make_tuple(static_cast<const ParsingExprType1&>(expr1),
+                        static_cast<const ParsingExprType2&>(expr2)));
 }
 
 template<typename Context, typename ParsingExprType, typename... Children1>
 auto operator>>(const SequenceExpr<Context, Children1...>& expr1,
                 const ParsingExpr<Context, ParsingExprType>& expr2)
 {
-    auto rhs = self(expr2);
-    return SequenceExpr<Context, Children1..., decltype(rhs)>(
+    return SequenceExpr<Context, Children1..., ParsingExprType>(
         std::tuple_cat(static_cast<const SequenceExpr<Context, Children1...>>(expr1).children(),
-                       std::make_tuple(rhs)));
+                       std::make_tuple(static_cast<const ParsingExprType&>(expr2))));
 }
 
 template<typename Context, typename ParsingExprType, typename... Children2>
 auto operator>>(const ParsingExpr<Context, ParsingExprType>& expr1,
                 const SequenceExpr<Context, Children2...>& expr2)
 {
-    auto lhs = self(expr1);
-    return SequenceExpr<Context, decltype(lhs), Children2...>(
-        std::tuple_cat(std::make_tuple(lhs),
+    return SequenceExpr<Context, ParsingExprType, Children2...>(
+        std::tuple_cat(std::make_tuple(static_cast<const ParsingExprType&>(expr1)),
                        static_cast<const SequenceExpr<Context, Children2...>>(expr2).children()));
 }
 
@@ -124,44 +127,40 @@ template<typename Context, typename ParsingExprType>
 auto operator>>(const ParsingExpr<Context, ParsingExprType>& expr,
                 const typename Context::value_type& value)
 {
-    auto lhs = self(expr);
-    return lhs >> terminal(value);
+    return expr >> terminal(value);
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator>>(const typename Context::value_type& value,
                 const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto rhs = self(expr);
-    return terminal(value) >> rhs;
+    return terminal(value) >> expr;
 }
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>
 auto operator|(const ParsingExpr<Context, ParsingExprType1>& expr1,
                const ParsingExpr<Context, ParsingExprType2>& expr2)
 {
-    auto lhs = self(expr1);
-    auto rhs = self(expr2);
-    return AlternationExpr<Context, decltype(lhs), decltype(rhs)>(std::make_tuple(lhs, rhs));
+    return AlternationExpr<Context, ParsingExprType1, ParsingExprType2>(
+        std::make_tuple(static_cast<const ParsingExprType1&>(expr1),
+                        static_cast<const ParsingExprType2&>(expr2)));
 }
 
 template<typename Context, typename ParsingExprType, typename... Children1>
 auto operator|(const AlternationExpr<Context, Children1...>& expr1,
                const ParsingExpr<Context, ParsingExprType>& expr2)
 {
-    auto rhs = self(expr2);
-    return AlternationExpr<Context, Children1..., decltype(rhs)>(
+    return AlternationExpr<Context, Children1..., ParsingExprType>(
         std::tuple_cat(static_cast<const AlternationExpr<Context, Children1...>>(expr1).children(),
-                       std::make_tuple(rhs)));
+                       std::make_tuple(static_cast<const ParsingExprType&>(expr2))));
 }
 
 template<typename Context, typename ParsingExprType, typename... Children2>
 auto operator|(const ParsingExpr<Context, ParsingExprType>& expr1,
                const AlternationExpr<Context, Children2...>& expr2)
 {
-    auto lhs = self(expr1);
-    return AlternationExpr<Context, decltype(lhs), Children2...>(std::tuple_cat(
-        std::make_tuple(lhs),
+    return AlternationExpr<Context, ParsingExprType, Children2...>(std::tuple_cat(
+        std::make_tuple(static_cast<const ParsingExprType&>(expr1)),
         static_cast<const AlternationExpr<Context, Children2...>>(expr2).children()));
 }
 
@@ -178,23 +177,21 @@ template<typename Context, typename ParsingExprType>
 auto operator|(const ParsingExpr<Context, ParsingExprType>& expr1,
                const typename Context::value_type& value)
 {
-    auto lhs = self(expr1);
-    return lhs | terminal(value);
+    return expr1 | terminal(value);
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator|(const typename Context::value_type& value,
                const ParsingExpr<Context, ParsingExprType>& expr2)
 {
-    auto rhs = self(expr2);
-    return terminal(value) | rhs;
+    return terminal(value) | expr2;
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator*(const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return ZeroOrMoreExpr<Context, decltype(n)>(n);
+    return ZeroOrMoreExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr));
 }
 
 template<typename Context, typename ParsingExprType>
@@ -206,15 +203,15 @@ auto operator*(const ZeroOrMoreExpr<Context, ParsingExprType>& n)
 template<typename Context, typename ParsingExprType>
 auto operator*(size_t n_rep, const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return NTimesExpr<Context, decltype(n)>(n, n_rep);
+    return NTimesExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr), n_rep);
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator+(const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return OneOrMoreExpr<Context, decltype(n)>(n);
+    return OneOrMoreExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr));
 }
 
 template<typename Context, typename ParsingExprType>
@@ -226,8 +223,8 @@ auto operator+(const OneOrMoreExpr<Context, ParsingExprType>& n)
 template<typename Context, typename ParsingExprType>
 auto operator-(const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return OptionalExpr<Context, decltype(n)>(n);
+    return OptionalExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr));
 }
 
 template<typename Context, typename ParsingExprType>
@@ -239,8 +236,8 @@ auto operator-(const OptionalExpr<Context, ParsingExprType>& n)
 template<typename Context, typename ParsingExprType>
 auto operator!(const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return NotExpr<Context, decltype(n)>(n);
+    return NotExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr));
 }
 
 template<typename Context, typename ParsingExprType>
@@ -252,8 +249,8 @@ auto operator!(const NotExpr<Context, ParsingExprType>& n)
 template<typename Context, typename ParsingExprType>
 auto operator&(const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    auto n = self(expr);
-    return AndExpr<Context, decltype(n)>(n);
+    return AndExpr<Context, ParsingExprType>(
+        static_cast<const ParsingExprType&>(expr));
 }
 
 template<typename Context, typename ParsingExprType>

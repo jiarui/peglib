@@ -11,12 +11,13 @@ namespace peg
 namespace parsers
 {
 
-template<typename Context>
-struct NonTerminalRef;
-
 // ---------------------------------------------------------------------------
-// NonTerminal: a named, memoizable rule. Supports packrat memoization
-// and left-recursion (seed-grow algorithm).
+// NonTerminal: internal grammar-tree node with stable identity.
+//
+// Supports packrat memoization and left-recursion (seed-grow algorithm).
+// NonTerminal is non-copyable — identity (the `this` pointer) is the memo
+// key and seed-grow anchor. Users interact via Rule (a shared_ptr handle),
+// never directly with NonTerminal.
 //
 // Error reporting:
 //   set_name("foo")    — records "foo" as an expected item on failure.
@@ -26,15 +27,15 @@ template<typename Context>
 struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>>
 {
 public:
-    // Default construction leaves the rule unassigned. Useful for
-    // forward-declared mutually-recursive rules; calling parse() on
-    // an unassigned NonTerminal is undefined (asserted).
     NonTerminal() = default;
 
     template<typename ExprType>
     NonTerminal(const ParsingExpr<Context, ExprType>& rhs)
         : m_rule(std::make_shared<ExprType>(static_cast<const ExprType&>(rhs)))
     {}
+
+    NonTerminal(const NonTerminal&) = delete;
+    NonTerminal& operator=(const NonTerminal&) = delete;
 
     template<typename ExprType>
     NonTerminal& operator=(const ParsingExpr<Context, ExprType>& rhs)
@@ -43,13 +44,9 @@ public:
         return *this;
     }
 
-    // Set the rule name (used for error reporting). Usually called via
-    // the PEG_RULE macro, which expands to `rule.set_name(#rule)`.
     void set_name(std::string name) { m_name = std::move(name); }
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
 
-    // Set a human-readable label (takes priority over name in error messages).
-    // Use when the rule name is not user-friendly (e.g. an auto-generated name).
     void set_label(std::string label) { m_label = std::move(label); }
     [[nodiscard]] const std::string& label() const noexcept { return m_label; }
 
@@ -69,17 +66,11 @@ public:
             result = parseImpl(context, start_pos, ruleState);
             if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                 auto end_pos = context.mark();
-                // Brace-init works for both match_range instantiations:
-                //   std::span<const T>  {ptr, ptr}      (contiguous source)
-                //   std::pair<It, It>   {it, it}        (FileSource)
                 auto node = ParsingExpr<Context, NonTerminal<Context>>::m_action(
                     context, typename Context::match_range{start_pos, end_pos});
                 context.push_node(std::move(node));
             }
             if (!result) {
-                // Record expected item for error reporting: prefer label
-                // over name. If neither is set, record nothing (leaf-level
-                // terminals below will provide more specific expectations).
                 if (!m_label.empty()) {
                     context.record_failure(
                         start_pos, ExpectedItem{.kind = ExpectedKind::RuleLabel, .text = m_label});
@@ -110,15 +101,10 @@ protected:
                     ruleState.m_last_return = res;
                     bool update_res = context.updateRuleState(this, start_pos, ruleState);
                     if (!update_res) {
-                        // cut operator may erase ruleState records
                         return res;
                     }
                 } else {
                     ruleState.m_last_return = res;
-                    // Seed matched but did not advance (e.g. zero-width match
-                    // like `*ws`). We must still persist the result to the
-                    // memo map, otherwise a second lookup at the same position
-                    // returns the stale initial state {pos, false}.
                     context.updateRuleState(this, start_pos, ruleState);
                     break;
                 }
@@ -138,16 +124,58 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// NonTerminalRef: wraps a reference to a NonTerminal for use in expressions.
+// Rule: user-facing handle wrapping shared_ptr<NonTerminal>.
+//
+// Copy is shallow (shared ownership) — multiple Rule objects can point to the
+// same NonTerminal identity. This is essential for:
+//   - Memo key stability (m_mem[pos][const NonTerminal*])
+//   - Left-recursion seed identity (seed-grow writes to a specific NonTerminal)
+//   - Semantic action sharing (m_action lives on the NonTerminal entity)
+//
+// Reference cycles: self-referential rules (e.g. r = r >> 'b' | 'a') create a
+// shared_ptr cycle (Rule → NonTerminal → expression tree → Rule → NonTerminal).
+// This is intentional — grammar rules are long-lived and the "leak" is bounded
+// by the grammar size. Local non-self-referential Rule variables are reclaimed
+// normally when the last handle goes out of scope.
 // ---------------------------------------------------------------------------
 template<typename Context>
-struct NonTerminalRef : ParsingExpr<Context, NonTerminalRef<Context>>
+struct Rule : ParsingExpr<Context, Rule<Context>>
 {
-    NonTerminalRef(const NonTerminal<Context>& rhs) : m_nonterm{rhs} {}
-    bool parse(Context& context) const override { return m_nonterm.parse(context); }
+public:
+    using Impl = NonTerminal<Context>;
+    using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
+
+    Rule() : m_impl(std::make_shared<Impl>()) {}
+
+    template<typename ExprType>
+    Rule(const ParsingExpr<Context, ExprType>& rhs)
+        : m_impl(std::make_shared<Impl>(rhs))
+    {}
+
+    Rule(const Rule&) = default;
+    Rule& operator=(const Rule&) = default;
+
+    template<typename ExprType>
+    Rule& operator=(const ParsingExpr<Context, ExprType>& rhs)
+    {
+        *m_impl = rhs;
+        return *this;
+    }
+
+    void set_name(std::string name) { m_impl->set_name(std::move(name)); }
+    [[nodiscard]] const std::string& name() const noexcept { return m_impl->name(); }
+
+    void set_label(std::string label) { m_impl->set_label(std::move(label)); }
+    [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
+
+    void setAction(SemanticAction action) { m_impl->setAction(std::move(action)); }
+
+    bool operator()(Context& context) const { return parse(context); }
+
+    bool parse(Context& context) const override { return m_impl->parse(context); }
 
 protected:
-    const NonTerminal<Context>& m_nonterm;
+    std::shared_ptr<Impl> m_impl;
 };
 
 } // namespace parsers

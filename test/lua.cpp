@@ -7,12 +7,24 @@
 using namespace peg;
 using LuaRule = Rule<>;
 
-extern LuaRule expr;
-extern LuaRule namelist;
-extern LuaRule block;
-extern LuaRule explist;
-extern LuaRule prefixexp;
-extern LuaRule var;
+// ---------------------------------------------------------------------------
+// Lua 5.4 grammar (subset) — example grammar for peglib.
+//
+// Rules referenced before their definition (mutually / self-recursive) are
+// default-constructed first; their shared_ptr is valid (points to an empty
+// NonTerminal). Other rules copy that shared_ptr. The recursive rules are
+// assigned later in a static initializer lambda, which modifies the existing
+// NonTerminal in-place (*m_impl = rhs) — all copies see the update.
+// ---------------------------------------------------------------------------
+
+LuaRule expr;       // self-referential + forward-referenced
+LuaRule namelist;   // forward-referenced by parlist
+LuaRule block;      // forward-referenced by funcbody, stat_rule
+LuaRule explist;    // forward-referenced by args, retstat
+LuaRule prefixexp;  // forward-referenced by functioncall
+LuaRule var;        // forward-referenced by prefixexp
+LuaRule expr1;      // self-referential
+
 LuaRule Name = terminal('a');
 LuaRule LiteralString = terminalSeq("\"hello\"");
 LuaRule Numeral = terminalSeq("10");
@@ -28,14 +40,6 @@ LuaRule funcbody = terminal('(') >> -(parlist) >> terminal(')') >> block >> term
 LuaRule functiondef = terminalSeq("function") >> funcbody;
 LuaRule args = (terminal('(') >> -explist >> terminal(')')) | tableconstructor | LiteralString;
 LuaRule functioncall = (prefixexp >> args) | (prefixexp >> terminal(':') >> Name >> args);
-LuaRule prefixexp = var | functioncall | (terminal('(') >> expr >> terminal(')'));
-LuaRule expr = terminalSeq("nil") | terminalSeq("false") | terminalSeq("true") |
-               terminalSeq("...") | functiondef | prefixexp | tableconstructor |
-               (expr >> binop >> expr) | (unop >> expr) | Numeral | LiteralString;
-LuaRule explist = expr >> *(terminal(',') >> expr);
-LuaRule namelist = Name >> *(terminal(',') >> Name);
-LuaRule var = Name | (prefixexp >> terminal('[') >> expr >> terminal(']')) |
-              (prefixexp >> terminal('.') >> Name);
 LuaRule varlist = var >> *(terminal(',') >> var);
 LuaRule funcname = Name >> *(terminal('.') >> Name) >> -(terminal(':') >> Name);
 LuaRule label = terminalSeq("::") >> Name >> terminalSeq("::");
@@ -61,10 +65,24 @@ LuaRule stat_rule =
     (terminalSeq("local") >> terminalSeq("function") >> Name >> funcbody) |
     (terminalSeq("local") >> attnamlist >> -(terminal('-') >> explist));
 
-LuaRule block = *stat_rule >> -retstat;
 LuaRule chunk = block;
 
-LuaRule expr1 = (expr1 >> binop >> expr1) | Numeral;
+// Assign the forward-declared recursive rules. Order does not matter —
+// each assignment modifies the NonTerminal in-place, so copies already
+// stored in other rules' expression trees resolve correctly at parse time.
+[[maybe_unused]] const bool lua_grammar_init = [] {
+    expr = terminalSeq("nil") | terminalSeq("false") | terminalSeq("true") |
+           terminalSeq("...") | functiondef | prefixexp | tableconstructor |
+           (expr >> binop >> expr) | (unop >> expr) | Numeral | LiteralString;
+    explist = expr >> *(terminal(',') >> expr);
+    namelist = Name >> *(terminal(',') >> Name);
+    var = Name | (prefixexp >> terminal('[') >> expr >> terminal(']')) |
+          (prefixexp >> terminal('.') >> Name);
+    prefixexp = var | functioncall | (terminal('(') >> expr >> terminal(')'));
+    block = *stat_rule >> -retstat;
+    expr1 = (expr1 >> binop >> expr1) | Numeral;
+    return true;
+}();
 
 TEST_CASE("lua-test-start")
 {

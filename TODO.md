@@ -39,27 +39,27 @@ top of peglib.
       `NonTerminal.h` (umbrella `Parser.h` preserved for backward compatibility)
 - [x] **`Macros.h`**: `PEG_RULE` and `PEG_RULE_LABELED` macros for named rules
 
-## Phase 2.0 — Rule Lifetime Redesign (BLOCKER)
+## Phase 2.0 — Rule Lifetime Redesign (DONE)
 
-**This is the highest-priority design fix. It blocks all other Phase 2 work.**
+**This was the highest-priority design fix. It blocked all other Phase 2 work.**
 
 ### Problem
 
-`Rule<>` is currently a type alias for `NonTerminal<Context>` — users hold the
-NonTerminal *entity* directly, not a handle. NonTerminal has two conflicting
+`Rule<>` was a type alias for `NonTerminal<Context>` — users held the
+NonTerminal *entity* directly, not a handle. NonTerminal had two conflicting
 roles:
 
 1. **Grammar tree node** — needs a stable `this` pointer for:
-   - Packrat memo key (`m_mem[pos][const Rule*]`)
+   - Packrat memo key (`m_mem[pos][const NonTerminal*]`)
    - Left-recursion seed identity (seed-grow writes to a specific `this`)
    - Semantic action storage (`m_action` lives on the entity)
 2. **User-facing value type** — users copy, assign, and pass `Rule<>` by value
 
-Copying a NonTerminal creates a new `this`, breaking memo caching, left-recursion,
-and action sharing. To avoid this, `self()` wraps NonTerminal references in
-`NonTerminalRef` (a bare `const NonTerminal&`). But `NonTerminalRef` doesn't
-extend lifetime — when the referenced NonTerminal goes out of scope (e.g. a
-local `Rule<>` in a grammar-construction lambda), the reference dangles,
+Copying a NonTerminal created a new `this`, breaking memo caching, left-recursion,
+and action sharing. To avoid this, `self()` wrapped NonTerminal references in
+`NonTerminalRef` (a bare `const NonTerminal&`). But `NonTerminalRef` didn't
+extend lifetime — when the referenced NonTerminal went out of scope (e.g. a
+local `Rule<>` in a grammar-construction lambda), the reference dangled,
 causing "pure virtual method called" crashes.
 
 ### Root Cause
@@ -72,20 +72,36 @@ NonTerminal = internal node (needs stable identity, shared ownership)
 
 ### Fix
 
-Make `Rule` a **handle** wrapping `shared_ptr<NonTerminal>`:
+Made `Rule` a **handle** wrapping `shared_ptr<NonTerminal>`:
 
-- [ ] `Rule` holds `shared_ptr<NonTerminalImpl>`; copy is shallow (shared ownership)
-- [ ] Delete `NonTerminalRef` entirely — `Rule` itself IS the reference
-- [ ] Delete `self()` — `operator>>`/`|`/etc. handle all operands uniformly
-- [ ] Memo key changes from `const Rule*` to `NonTerminalImpl*` (via `get()`)
-- [ ] Left-recursion: seed-grow uses the shared NonTerminalImpl, not the Rule copy
-- [ ] `Rule::operator=` modifies the underlying NonTerminalImpl (not rebind)
-- [ ] `Rule::setAction` / `set_name` / `set_label` delegate to NonTerminalImpl
-- [ ] Default-constructed `Rule` creates a new NonTerminalImpl (forward-declared rule)
-- [ ] Update all operator overloads in `Rule.h` (no more `self()` dispatch)
-- [ ] Update `PEG_RULE` / `PEG_RULE_LABELED` macros
-- [ ] All existing tests pass (72 core + 8 Lua + JSON)
-- [ ] Local `Rule<>` variables in lambda/function scope work without dangling
+- [x] `Rule` holds `shared_ptr<NonTerminal>`; copy is shallow (shared ownership)
+- [x] Delete `NonTerminalRef` entirely — `Rule` itself IS the reference
+- [x] Delete `self()` — `operator>>`/`|`/etc. handle all operands uniformly
+- [x] Memo key changes from `const Rule*` to `const NonTerminalType*`
+- [x] Left-recursion: seed-grow uses the shared NonTerminal, not the Rule copy
+- [x] `Rule::operator=` modifies the underlying NonTerminal in-place (not rebind)
+- [x] `Rule::setAction` / `set_name` / `set_label` delegate to NonTerminal
+- [x] Default-constructed `Rule` creates a new NonTerminal (forward-declared rule)
+- [x] Update all operator overloads in `Rule.h` (no more `self()` dispatch)
+- [x] Add `PEG_RULE_DEF` / `PEG_RULE_DEF_LABELED` / `PEG_RULE_RECURSIVE` macros
+- [x] All existing tests pass (74 core + 8 Lua + 12 JSON)
+- [x] Local `Rule<>` variables in lambda/function scope work without dangling
+
+### Constraint: Self-Referential Copy-Init
+
+`Rule<> r = r >> 'b' | 'a'` (self-referential copy-init) is not supported.
+C++ evaluates the initializer expression before constructing `r`; copying
+an uninitialized `shared_ptr` is undefined behavior. Use forward-declare +
+assign instead:
+
+```cpp
+Rule<> r;
+r = r >> 'b' | 'a';
+// or: PEG_RULE_DEF(Context, r, r >> 'b' | 'a');
+```
+
+For namespace-scope recursive rules, wrap assignments in a static initializer
+lambda. Non-recursive rules continue to work with copy-init as before.
 
 ### Non-Goals (deferred)
 

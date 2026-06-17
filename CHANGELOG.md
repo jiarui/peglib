@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 2.0 (Rule Lifetime Redesign)
+- **`PEG_RULE_DEF`** and **`PEG_RULE_DEF_LABELED`** macros for recursive rules
+  (forward-declare + assign + name in one line).
+- **`PEG_RULE_RECURSIVE`** alias for `PEG_RULE_DEF`.
+- **Recursive rules** documentation section in README.
+- Regression test: `local-rule-in-lambda-does-not-dangle` — verifies that
+  Rule variables created inside a lambda survive after the lambda exits.
+
+### Changed — Phase 2.0
+- **Breaking**: `Rule` is now a `shared_ptr<NonTerminal>` handle, not a
+  `NonTerminal` alias. This fixes the dangling-reference crash when local
+  Rule variables go out of scope. Copy is shallow (shared ownership) —
+  multiple Rule objects can point to the same NonTerminal identity.
+- **Breaking**: `Rule<> r = r >> 'b' | 'a'` (self-referential copy-init) no
+  longer works and will crash. Use `Rule<> r; r = r >> 'b' | 'a';` instead,
+  or `PEG_RULE_DEF(Context, r, r >> 'b' | 'a')`. This is a C++ language
+  constraint — the initializer expression is evaluated before `r` is
+  constructed, and copying an uninitialized `shared_ptr` is undefined behavior.
+- **Breaking**: `NonTerminal` is now non-copyable. Users interact exclusively
+  through `Rule` (the handle).
+- `ParsingExpr` move constructor/assignment now defaulted (was `= delete`),
+  enabling derived types (including `Rule`) to be copy-assigned.
+
+### Removed — Phase 2.0
+- **`NonTerminalRef`** deleted entirely. `Rule` itself is now the reference
+  (via shared ownership).
+- **`self()`** helper deleted. All operator overloads in `Rule.h` handle
+  operands uniformly via `static_cast<const ParsingExprType&>(expr)`.
+
 ### Added — Phase 1 (Core Infrastructure for Lua)
 - **`SourceMap`** (`include/peglib/SourceMap.h`): byte offset ↔ (line, col)
   mapping. Supports both contiguous (`std::string_view`) and streaming
