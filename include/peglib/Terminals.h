@@ -22,14 +22,14 @@ struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueTy
         : m_terminalValue{value},
           ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(action)
     {}
-    bool parse(Context& context) const
+    typename Context::ParseResult parse(Context& context) const override
     {
         if (!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
             context.next();
-            return true;
+            return {true, nullptr};
         }
         record_expected(context);
-        return false;
+        return {false, nullptr};
     }
 
 protected:
@@ -90,7 +90,7 @@ template<typename Context, typename SeqType>
 struct TerminalSeqExpr : ParsingExpr<Context, TerminalSeqExpr<Context, SeqType>>
 {
     TerminalSeqExpr(const SeqType& value) : m_terminalValues{value} {}
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         auto initState = context.state();
         for (const auto& i : m_terminalValues) {
@@ -99,10 +99,10 @@ struct TerminalSeqExpr : ParsingExpr<Context, TerminalSeqExpr<Context, SeqType>>
             } else {
                 context.state(initState);
                 record_expected(context);
-                return false;
+                return {false, nullptr};
             }
         }
-        return true;
+        return {true, nullptr};
     }
 
 protected:
@@ -132,7 +132,7 @@ template<typename Context>
 struct EmptyExpr : ParsingExpr<Context, EmptyExpr<Context>>
 {
     EmptyExpr() {}
-    bool parse(Context& context) const override { return true; }
+    typename Context::ParseResult parse(Context& context) const override { return {true, nullptr}; }
 };
 
 } // namespace parsers

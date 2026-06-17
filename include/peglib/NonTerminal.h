@@ -4,7 +4,6 @@
 #include <cassert>
 #include <memory>
 #include <string>
-#include <tuple>
 
 namespace peg
 {
@@ -19,14 +18,26 @@ namespace parsers
 // key and seed-grow anchor. Users interact via Rule (a shared_ptr handle),
 // never directly with NonTerminal.
 //
-// Error reporting:
-//   set_name("foo")    — records "foo" as an expected item on failure.
-//   set_label("a foo") — records "a foo" instead (takes priority over name).
+// Post-parse action model (Phase 2 refactor):
+//   parse() returns ParseResult { success, tree }. On the first successful
+//   match at a given position, a ParseTreeNode is built from the body's
+//   result tree, the semantic action is invoked (receiving the node so it
+//   can read children->value), and the complete ParseResult is cached in
+//   RuleState::m_cached_result. Subsequent memo hits return the cached
+//   result directly — no action re-execution, no value stack, no conflict.
+//
+// Transparent rules: if the action returns a null value (for pointer-like
+//   NodeTypes), the tree is set to nullptr so the rule does not appear in
+//   its parent's children list. This replaces the old Marker-sentinel hack.
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>>
 {
 public:
+    using ParseResult = typename ParsingExpr<Context, NonTerminal<Context>>::ParseResult;
+    using ParseTreeNodePtr = typename ParsingExpr<Context, NonTerminal<Context>>::ParseTreeNodePtr;
+    using NodeType = typename Context::node_type;
+
     NonTerminal() = default;
 
     template<typename ExprType>
@@ -52,61 +63,94 @@ public:
 
     [[nodiscard]] bool is_defined() const noexcept { return m_rule != nullptr; }
 
-    bool operator()(Context& context) const { return parse(context); }
-
-    bool parse(Context& context) const override
+    ParseResult parse(Context& context) const override
     {
         auto start_pos = context.mark();
-        std::tuple<bool, typename Context::RuleState> rs = context.rule_state(this, start_pos);
-        typename Context::RuleState rule_state = std::get<1>(rs);
-        bool result = false;
-        if (!std::get<0>(rs)) {
+        auto [ok, rule_state] = context.rule_state(this, start_pos);
+
+        if (!ok) {
+            // Memo hit: return the cached result (tree + action value).
             context.reset(rule_state.m_last_pos);
-            result = rule_state.m_last_return;
-            return result;
-        } else {
-            result = parseImpl(context, start_pos, rule_state);
-            if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
-                auto end_pos = context.mark();
-                auto node = ParsingExpr<Context, NonTerminal<Context>>::m_action(
-                    context, typename Context::match_range{start_pos, end_pos});
-                context.push_node(std::move(node));
+            return rule_state.m_cached_result;
+        }
+
+        // First-time parse: seed-grow loop to find the longest match.
+        auto inner = parseImpl(context, start_pos, rule_state);
+
+        if (!inner.success) {
+            if (!m_label.empty()) {
+                context.record_failure(
+                    start_pos, ExpectedItem{.kind = ExpectedKind::RuleLabel, .text = m_label});
+            } else if (!m_name.empty()) {
+                context.record_failure(
+                    start_pos, ExpectedItem{.kind = ExpectedKind::RuleName, .text = m_name});
             }
-            if (!result) {
-                if (!m_label.empty()) {
-                    context.record_failure(
-                        start_pos, ExpectedItem{.kind = ExpectedKind::RuleLabel, .text = m_label});
-                } else if (!m_name.empty()) {
-                    context.record_failure(
-                        start_pos, ExpectedItem{.kind = ExpectedKind::RuleName, .text = m_name});
+            ParseResult fail{false, nullptr};
+            rule_state.m_last_return = false;
+            rule_state.m_cached_result = fail;
+            context.update_rule_state(this, start_pos, rule_state);
+            return fail;
+        }
+
+        // Build a named node from the body's anonymous result tree.
+        auto node = inner.tree;
+        if (!node) {
+            node = std::make_shared<typename Context::ParseTreeNode>();
+        }
+        node->name = m_name;
+        node->start_offset = context.offset_of(start_pos);
+        node->end_offset = context.offset_of(context.mark());
+
+        // Execute semantic action (if any). The action receives the node
+        // and can read node->children[i]->value to access sub-rule results.
+        ParseResult result{true, node};
+        if (this->m_action) {
+            node->value = this->m_action(context, node);
+            // Transparent: action returned null for pointer-like NodeTypes.
+            // The rule succeeds but does not contribute a tree node to its
+            // parent's children list.
+            if constexpr (requires(NodeType v) { v == nullptr; }) {
+                if (node->value == nullptr) {
+                    result.tree = nullptr;
                 }
             }
-            return result;
         }
+
+        rule_state.m_cached_result = result;
+        context.update_rule_state(this, start_pos, rule_state);
+        return result;
     }
 
 protected:
-    bool parseImpl(Context& context,
-                   typename Context::iterator start_pos,
-                   typename Context::RuleState& rule_state) const
+    ParseResult parseImpl(Context& context,
+                          typename Context::iterator start_pos,
+                          typename Context::RuleState& rule_state) const
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");
         auto current_pos = context.mark();
         context.update_rule_state(this, start_pos, rule_state);
+
+        ParseResult best{false, nullptr};
+
         while (true) {
             context.reset(current_pos);
-            bool res = m_rule->parse(context);
+            auto result = m_rule->parse(context);
             auto end_pos = context.mark();
-            if (res) {
+            if (result.success) {
                 if (end_pos > rule_state.m_last_pos) {
                     rule_state.m_last_pos = end_pos;
-                    rule_state.m_last_return = res;
-                    bool update_res = context.update_rule_state(this, start_pos, rule_state);
-                    if (!update_res) {
-                        return res;
+                    rule_state.m_last_return = true;
+                    best = result;
+                    // Cache intermediate result so recursive memo hits
+                    // during seed-grow see the latest successful match.
+                    rule_state.m_cached_result = result;
+                    if (!context.update_rule_state(this, start_pos, rule_state)) {
+                        break;
                     }
                 } else {
-                    rule_state.m_last_return = res;
+                    rule_state.m_last_return = true;
+                    best = std::move(result);
+                    rule_state.m_cached_result = best;
                     context.update_rule_state(this, start_pos, rule_state);
                     break;
                 }
@@ -114,9 +158,8 @@ protected:
                 break;
             }
         }
-        bool result = rule_state.m_last_return;
         context.reset(rule_state.m_last_pos);
-        return rule_state.m_last_return;
+        return best;
     }
 
 protected:
@@ -128,23 +171,18 @@ protected:
 // ---------------------------------------------------------------------------
 // Rule: user-facing handle wrapping shared_ptr<NonTerminal>.
 //
-// Copy is shallow (shared ownership) — multiple Rule objects can point to the
-// same NonTerminal identity. This is essential for:
+// Copy is shallow (shared ownership) — multiple Rule objects can point to
+// the same NonTerminal identity. This is essential for:
 //   - Memo key stability (m_mem[pos][const NonTerminal*])
 //   - Left-recursion seed identity (seed-grow writes to a specific NonTerminal)
 //   - Semantic action sharing (m_action lives on the NonTerminal entity)
-//
-// Reference cycles: self-referential rules (e.g. r = r >> 'b' | 'a') create a
-// shared_ptr cycle (Rule → NonTerminal → expression tree → Rule → NonTerminal).
-// This is intentional — grammar rules are long-lived and the "leak" is bounded
-// by the grammar size. Local non-self-referential Rule variables are reclaimed
-// normally when the last handle goes out of scope.
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct Rule : ParsingExpr<Context, Rule<Context>>
 {
 public:
     using Impl = NonTerminal<Context>;
+    using ParseResult = typename ParsingExpr<Context, Rule<Context>>::ParseResult;
     using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
 
     Rule() : m_impl(std::make_shared<Impl>()) {}
@@ -174,9 +212,7 @@ public:
 
     void set_action(SemanticAction action) { m_impl->set_action(std::move(action)); }
 
-    bool operator()(Context& context) const { return parse(context); }
-
-    bool parse(Context& context) const override { return m_impl->parse(context); }
+    ParseResult parse(Context& context) const override { return m_impl->parse(context); }
 
 protected:
     std::shared_ptr<Impl> m_impl;
@@ -187,13 +223,13 @@ protected:
 //
 // Carries the rule name (for auto-naming on assignment). Copy is shallow —
 // the underlying Rule (shared_ptr<NonTerminal>) is shared. Expression trees
-// store RuleProxy copies (~40 bytes per node: Rule + name string). This is
-// acceptable for typical grammars.
+// store RuleProxy copies (~40 bytes per node: Rule + name string).
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
 {
     using Impl = Rule<Context>;
+    using ParseResult = typename ParsingExpr<Context, RuleProxy<Context>>::ParseResult;
     using SemanticAction = typename ParsingExpr<Context, RuleProxy<Context>>::SemanticAction;
 
     RuleProxy(Impl rule, std::string name)
@@ -202,16 +238,7 @@ struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
 
     RuleProxy(const RuleProxy&) = default;
     RuleProxy(RuleProxy&&) = default;
-    // No copy/move assignment operators — all assignment goes through the
-    // operator= overloads below, which forward to the underlying NonTerminal.
-    // A defaulted copy/move assignment would just copy/move members without
-    // updating the NonTerminal, breaking g["y"] = g["z"].
 
-    // Assignment from any ParsingExpr (including RuleProxy from another rule).
-    // This modifies the underlying NonTerminal in-place and auto-names it.
-    // Note: when rhs is a RuleProxy, the defaulted copy assignment would
-    // normally win (better match). We constrain this template to exclude
-    // RuleProxy itself, then provide a separate RuleProxy overload below.
     template<typename ExprType>
         requires (!std::same_as<std::remove_cvref_t<ExprType>, RuleProxy<Context>>)
     RuleProxy& operator=(const ParsingExpr<Context, ExprType>& rhs)
@@ -221,9 +248,6 @@ struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
         return *this;
     }
 
-    // RuleProxy-to-RuleProxy assignment: treat as forwarding to the underlying
-    // NonTerminal. This makes g["y"] = g["z"] define y's NonTerminal to
-    // reference z's expression tree. Handles both lvalue and rvalue RHS.
     RuleProxy& operator=(RuleProxy rhs)
     {
         m_rule = rhs;
@@ -243,9 +267,7 @@ struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
         return *this;
     }
 
-    bool operator()(Context& context) const { return parse(context); }
-
-    bool parse(Context& context) const override { return m_rule.parse(context); }
+    ParseResult parse(Context& context) const override { return m_rule.parse(context); }
 
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
 

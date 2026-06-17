@@ -103,12 +103,14 @@ struct TokenizerTest
     {
         g["names"].set_action(
             [this](Context<std::span<const std::string::value_type>>& context,
-                   Context<std::span<const std::string::value_type>>::match_range match)
+                   Context<std::span<const std::string::value_type>>::ParseTreeNodePtr node)
                 -> std::monostate {
-                std::string m = std::string{match.begin(), match.end()};
+                auto& input = context.get_input();
+                std::string m = std::string{input.begin() + node->start_offset,
+                                            input.begin() + node->end_offset};
                 if (m == "if") {
                     m_token_buf.emplace_back(TokenID::TK_IF);
-                } else if (match.size() > 0) {
+                } else if (node->end_offset > node->start_offset) {
                     m_token_buf.emplace_back(m);
                 }
                 return {};
@@ -145,9 +147,11 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        g["names"].set_action(([](decltype(context)& c, decltype(context)::match_range range)
+        g["names"].set_action(([](decltype(context)& c, decltype(context)::ParseTreeNodePtr node)
                                    -> std::monostate {
-            CHECK(std::string(range.begin(), range.end()) == "print");
+            auto& input = c.get_input();
+            CHECK(std::string(input.begin() + node->start_offset,
+                              input.begin() + node->end_offset) == "print");
             return {};
         }));
 
@@ -215,7 +219,7 @@ TEST_CASE("lua-lex-tokens")
     std::string input = R"(print('hello world'))";
     Context context(input);
     g["names"].set_action([](decltype(context)& c,
-                             decltype(context)::match_range range) -> std::monostate {
+                             decltype(context)::ParseTreeNodePtr node) -> std::monostate {
         return {};
     });
     {

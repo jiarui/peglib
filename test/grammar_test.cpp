@@ -185,8 +185,8 @@ TEST_CASE("[grammar] semantic-action")
     g["digit"] = terminal('0', '9');
 
     int value = -1;
-    g["digit"].set_action([&value](Ctx& ctx, Ctx::match_range r) -> std::monostate {
-        value = *r.begin() - '0';
+    g["digit"].set_action([&value](Ctx& ctx, Ctx::ParseTreeNodePtr node) -> std::monostate {
+        value = ctx.get_input()[node->start_offset] - '0';
         return {};
     });
 
@@ -205,7 +205,7 @@ TEST_CASE("[grammar] proxy-chaining")
     Grammar<> g;
     int count = 0;
     g["token"] = terminal('a');
-    g["token"].set_action([&count](Ctx&, Ctx::match_range) -> std::monostate {
+    g["token"].set_action([&count](Ctx&, Ctx::ParseTreeNodePtr) -> std::monostate {
         count++;
         return {};
     });

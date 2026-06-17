@@ -37,21 +37,32 @@ struct ParsingExprInterface
 {
     friend NonTerminal<Context>;
     using ElementType = typename Context::value_type;
+    using ParseResult = typename Context::ParseResult;
     virtual ~ParsingExprInterface() = default;
-    virtual bool parse(Context& context) const = 0;
+    virtual ParseResult parse(Context& context) const = 0;
 };
 
 // ---------------------------------------------------------------------------
 // ParsingExpr: CRTP base providing semantic-action storage.
 // NodeType is derived from the Context (defaults to std::monostate).
+//
+// Post-parse action model (Phase 2 refactor):
+//   The action receives the ParseTreeNodePtr for this rule's match. The
+//   node's children contain the sub-rule results (each child's ->value
+//   is already computed by the child's action). The action returns a
+//   NodeType which is stored in node->value. If the action returns a
+//   null value (for pointer-like NodeTypes), the rule is transparent:
+//   its node is not added to the parent's children.
 // ---------------------------------------------------------------------------
 template<typename Context, typename ExprType>
 struct ParsingExpr : ParsingExprInterface<Context>
 {
     using ParseExprType = ExprType;
     using NodeType = typename Context::node_type;
+    using ParseResult = typename Context::ParseResult;
+    using ParseTreeNodePtr = typename Context::ParseTreeNodePtr;
     using SemanticAction =
-        std::function<NodeType(Context&, typename Context::match_range match_range)>;
+        std::function<NodeType(Context&, ParseTreeNodePtr)>;
     void set_action(SemanticAction action) { m_action = action; }
     ParsingExpr() = default;
     ParsingExpr(SemanticAction action) : m_action(action) {}

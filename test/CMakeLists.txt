@@ -21,7 +21,9 @@ add_executable(peglib_test
     file_source_test.cpp
     sourcemap_test.cpp
     value_stack_test.cpp
-    error_test.cpp)
+    error_test.cpp
+    dynexpr_test.cpp
+    meta_grammar_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})

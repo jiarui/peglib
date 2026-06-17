@@ -131,7 +131,7 @@ TEST_CASE("error-terminal-records-expected-on-failure")
     Context context(input);
 
     auto rule = Ctxt::Rule{peg::terminal('x')};
-    CHECK_FALSE(rule(context));
+    CHECK_FALSE(rule.parse(context));
     CHECK(context.has_error());
     CHECK(context.furthest_failure_pos() == 0);
     CHECK(context.expected().size() == 1);
@@ -146,7 +146,7 @@ TEST_CASE("error-named-rule-records-rulename-on-failure")
 
     auto rule = Ctxt::Rule{peg::terminal('x')};
     rule.set_name("MyRule");
-    CHECK_FALSE(rule(context));
+    CHECK_FALSE(rule.parse(context));
     CHECK(context.has_error());
     // The NonTerminal adds RuleName (label takes priority, but we only set name)
     bool found_rule_name = false;
@@ -166,7 +166,7 @@ TEST_CASE("error-labeled-rule-records-rulelabel-on-failure")
     auto rule = Ctxt::Rule{peg::terminal('x')};
     rule.set_name("MyRule");
     rule.set_label("a specific thing");
-    CHECK_FALSE(rule(context));
+    CHECK_FALSE(rule.parse(context));
     CHECK(context.has_error());
     bool found_label = false;
     for (const auto& item : context.expected()) {
@@ -185,7 +185,7 @@ TEST_CASE("error-alternatives-accumulate-expected")
     Context context(input);
 
     auto rule = Ctxt::Rule{peg::terminal('a') | peg::terminal('b')};
-    CHECK_FALSE(rule(context));
+    CHECK_FALSE(rule.parse(context));
     CHECK(context.has_error());
     // Both 'a' and 'b' should be in the expected set at position 0
     CHECK(context.expected().size() >= 1);

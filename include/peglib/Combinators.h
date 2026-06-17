@@ -13,88 +13,100 @@ namespace parsers
 
 // ---------------------------------------------------------------------------
 // SequenceExpr: matches child expressions in order; all must succeed.
+// On success, returns an anonymous grouping node whose children are the
+// non-null trees produced by each child expression.
 // ---------------------------------------------------------------------------
 template<typename Context, typename... Children>
 struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
 {
+    using ParseResult = typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseResult;
+    using ParseTreeNodePtr = typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseTreeNodePtr;
+
     SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {}
 
     const std::tuple<Children...>& children() const { return m_children; }
-    bool parse(Context& context) const override
+
+    ParseResult parse(Context& context) const override
     {
         auto state = context.state();
-        bool result = parseSeq<0>(context);
-        if (!result) {
-            context.state(state);
+        auto node = std::make_shared<typename Context::ParseTreeNode>();
+        node->start_offset = context.offset_of(context.mark());
+        if (parseSeq<0>(context, node)) {
+            node->end_offset = context.offset_of(context.mark());
+            return {true, node};
         }
-        return result;
+        context.state(state);
+        return {false, nullptr};
     }
 
 protected:
     template<size_t Index>
-    bool parseSeq(Context& context) const
+    bool parseSeq(Context& context, ParseTreeNodePtr& node) const
     {
         if constexpr (Index < sizeof...(Children)) {
-            bool result = std::get<Index>(m_children).parse(context);
-            if (result) {
-                return parseSeq<Index + 1>(context);
-            } else {
-                return false;
+            auto result = std::get<Index>(m_children).parse(context);
+            if (result.success) {
+                if (result.tree) node->children.push_back(result.tree);
+                return parseSeq<Index + 1>(context, node);
             }
-        } else {
-            return true;
+            return false;
         }
+        return true;
     }
     std::tuple<Children...> m_children;
 };
 
 // ---------------------------------------------------------------------------
 // AlternationExpr: tries each alternative in order; first success wins.
+// Returns the successful branch's ParseResult directly (including its tree).
 // Cut-committed failure throws peg::ParseError (hard error).
 // ---------------------------------------------------------------------------
 template<typename Context, typename... Children>
 struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children...>>
 {
+    using ParseResult = typename ParsingExpr<Context, AlternationExpr<Context, Children...>>::ParseResult;
+
     AlternationExpr(const std::tuple<Children...>& children) : m_children(children) {}
     const std::tuple<Children...>& children() const { return m_children; }
-    bool parse(Context& context) const override
+
+    ParseResult parse(Context& context) const override
     {
         context.init_cut();
-        ScopeGuard s{[&context]() {
-            context.remove_cut();
-        }};
-        return parse<0>(context);
+        ScopeGuard s{[&context]() { context.remove_cut(); }};
+        return parseAlt<0>(context);
     }
 
 protected:
     template<size_t Index>
-    bool parse(Context& context) const
+    ParseResult parseAlt(Context& context) const
     {
         if constexpr (Index < sizeof...(Children)) {
-            bool result = std::get<Index>(m_children).parse(context);
-            if (result) {
-                return true;
-            } else {
-                if (context.cut()) {
-                    // Cut-committed branch failed: escalate to a hard error.
-                    // The caller (user code) catches peg::ParseError.
-                    throw ParseError{context.furthest_failure_pos(), context.expected()};
-                }
-                return parse<Index + 1>(context);
+            auto result = std::get<Index>(m_children).parse(context);
+            if (result.success) {
+                return result;
             }
+            if (context.cut()) {
+                throw ParseError{context.furthest_failure_pos(), context.expected()};
+            }
+            return parseAlt<Index + 1>(context);
         }
-        return false;
+        return {false, nullptr};
     }
     std::tuple<Children...> m_children;
 };
 
 // ---------------------------------------------------------------------------
 // Repetition: matches a child expression between min_rep and max_rep times.
+// On success, returns an anonymous grouping node whose children are the
+// non-null trees from each successful iteration.
 // Cut-committed failure in unbounded repetition throws peg::ParseError.
 // ---------------------------------------------------------------------------
 template<typename Context, typename Child>
 struct Repetition
 {
+    using ParseResult = typename Context::ParseResult;
+    using ParseTreeNodePtr = typename Context::ParseTreeNodePtr;
+
     Repetition(const Child& child, size_t min_r, std::int64_t max_r = -1)
         : m_child(child), min_rep(min_r), max_rep(max_r)
     {
@@ -106,29 +118,31 @@ struct Repetition
     const Child& child() { return m_child; }
     std::tuple<size_t, std::int64_t> reps() const { return {min_rep, max_rep}; }
 
-    bool parse(Context& context) const
+    ParseResult parse(Context& context) const
     {
         context.init_cut();
-        ScopeGuard _{[&context]() {
-            context.remove_cut();
-        }};
+        ScopeGuard _{[&context]() { context.remove_cut(); }};
         auto initState = context.state();
-        bool result = true;
+        auto node = std::make_shared<typename Context::ParseTreeNode>();
+        node->start_offset = context.offset_of(context.mark());
+
         size_t loopCount = 0;
         bool exited_via_failure = false;
         typename Context::State lastSuccessState = initState;
+
         while (true) {
             auto startState = context.state();
             context.cut(false);
-            result = m_child.parse(context);
-            if (result) {
+            auto result = m_child.parse(context);
+            if (result.success) {
                 loopCount++;
                 lastSuccessState = context.state();
+                if (result.tree) node->children.push_back(result.tree);
             } else {
                 exited_via_failure = true;
                 break;
             }
-            if ((max_rep > 0) && (loopCount >= max_rep)) {
+            if ((max_rep > 0) && (loopCount >= static_cast<size_t>(max_rep))) {
                 break;
             }
             // Not advancing, stop
@@ -136,27 +150,23 @@ struct Repetition
                 break;
             }
         }
+
         if (loopCount < min_rep) {
             context.state(initState);
-            return false;
+            return {false, nullptr};
         }
-        // If the loop exited via a child failure, restore the position to
-        // the boundary after the last successful iteration. This prevents
-        // a failed child from leaving the parser stranded mid-input.
         if (exited_via_failure) {
             context.state(lastSuccessState);
+            // Trim children to only the successful iterations.
+            node->children.resize(loopCount);
         }
         if (max_rep < 0) {
-            // Only throw if the loop exited via a cut-committed child failure.
-            // A successful no-progress iteration that happened to set cut
-            // (e.g. via a lookahead) must NOT escalate to a hard error.
             if (exited_via_failure && context.cut()) {
                 throw ParseError{context.furthest_failure_pos(), context.expected()};
-            } else {
-                return true;
             }
         }
-        return true;
+        node->end_offset = context.offset_of(context.mark());
+        return {true, node};
     }
 
 protected:
@@ -171,7 +181,7 @@ struct ZeroOrMoreExpr : ParsingExpr<Context, ZeroOrMoreExpr<Context, Child>>,
 {
     ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 0, -1) {}
     using Repetition<Context, Child>::child;
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
     }
@@ -183,7 +193,7 @@ struct OneOrMoreExpr : ParsingExpr<Context, OneOrMoreExpr<Context, Child>>,
 {
     OneOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 1, -1) {}
     using Repetition<Context, Child>::child;
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
     }
@@ -196,7 +206,7 @@ struct NTimesExpr : ParsingExpr<Context, NTimesExpr<Context, Child>>, Repetition
         : Repetition<Context, Child>(child, n_reps, n_reps)
     {}
     using Repetition<Context, Child>::child;
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
     }
@@ -207,7 +217,7 @@ struct OptionalExpr : ParsingExpr<Context, OptionalExpr<Context, Child>>, Repeti
 {
     OptionalExpr(const Child& child) : Repetition<Context, Child>(child, 0, 1) {}
     using Repetition<Context, Child>::child;
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
     }
@@ -221,12 +231,13 @@ struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>
 {
     NotExpr(const Child& child) : m_child(child) {}
     const Child& child() { return m_child; }
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         auto initState = context.state();
-        bool result = !m_child.parse(context);
+        auto result = m_child.parse(context);
         context.state(initState);
-        return result;
+        // Predicate: no tree, no consumed input.
+        return {!result.success, nullptr};
     }
 
 protected:
@@ -241,12 +252,13 @@ struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>
 {
     AndExpr(const Child& child) : m_child(child) {}
     const Child& child() { return m_child; }
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         auto initState = context.state();
-        bool result = m_child.parse(context);
+        auto result = m_child.parse(context);
         context.state(initState);
-        return result;
+        // Predicate: no tree, no consumed input.
+        return {result.success, nullptr};
     }
 
 protected:
@@ -260,10 +272,10 @@ protected:
 template<typename Context>
 struct CutExpr : ParsingExpr<Context, CutExpr<Context>>
 {
-    bool parse(Context& context) const override
+    typename Context::ParseResult parse(Context& context) const override
     {
         context.cut(true);
-        return true;
+        return {true, nullptr};
     }
 };
 

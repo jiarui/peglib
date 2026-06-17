@@ -77,7 +77,7 @@ public:
     void set_start(std::string name) { m_start = std::move(name); }
     [[nodiscard]] const std::string& start_rule() const noexcept { return m_start; }
 
-    // Parse using the start rule
+    // Parse using the start rule. Returns true on success.
     bool parse(Context& ctx) const
     {
         if (m_start.empty()) {
@@ -86,14 +86,20 @@ public:
         return parse(m_start, ctx);
     }
 
-    // Parse using an explicit rule name
+    // Parse using an explicit rule name. Returns true on success.
     bool parse(std::string_view rule, Context& ctx) const
     {
-        return at(rule).parse(ctx);
+        return at(rule).parse(ctx).success;
+    }
+
+    // Parse and return the parse tree (nullptr on failure or if the start
+    // rule is transparent). Useful for AST construction.
+    typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
+    {
+        return at(rule).parse(ctx).tree;
     }
 
     // Convenience: parse a string input using the start rule.
-    // Creates a fresh Context internally.
     bool parse_string(std::string_view input) const
     {
         std::string s{input};

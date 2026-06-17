@@ -95,6 +95,36 @@ struct Context
     using NonTerminalType = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
     using match_range = typename ContextMatchRange<InputSource>::type;
 
+    // -------------------------------------------------------------------
+    // ParseTreeNode: immutable record of a successful match.
+    //
+    // Produced by parse() and carried in ParseResult. The tree structure
+    // mirrors the grammar: each NonTerminal that succeeds creates a node
+    // named after the rule; combinator nodes (Sequence, Choice, etc.) are
+    // anonymous grouping nodes. Semantic actions read children->value to
+    // build parent values — no value stack involved.
+    // -------------------------------------------------------------------
+    struct ParseTreeNode
+    {
+        std::string name;                 // rule name (empty for anonymous)
+        std::size_t start_offset = 0;     // byte offset of match start
+        std::size_t end_offset = 0;       // byte offset past match end
+        std::vector<std::shared_ptr<ParseTreeNode>> children;
+        NodeType value{};                 // filled by semantic action
+    };
+    using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
+
+    // Result of every parse() call: success flag + optional tree node.
+    // On failure, tree is nullptr. On success, tree may still be nullptr
+    // for transparent rules (action returned a null value) or for leaf
+    // expressions that don't create named nodes.
+    struct ParseResult
+    {
+        bool success = false;
+        ParseTreeNodePtr tree;
+        explicit operator bool() const { return success; }
+    };
+
     struct RuleState
     {
         RuleState(iterator pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
@@ -102,6 +132,12 @@ struct Context
         RuleState& operator=(const RuleState&) = default;
         iterator m_last_pos;
         bool m_last_return;
+        // Cached ParseResult from the first successful parse at this
+        // (position, rule) pair. On a memo hit, the caller receives this
+        // cached result — including the tree and action value — without
+        // re-executing the action. This is what makes packrat memoization
+        // safe with semantic actions.
+        ParseResult m_cached_result;
     };
 
     struct State
@@ -170,8 +206,10 @@ struct Context
         if (memo == memos->second.end()) {
             return false;
         }
-        memo->second.m_last_pos = rule_state.m_last_pos;
-        memo->second.m_last_return = rule_state.m_last_return;
+        // Copy all fields, including m_cached_result. This is how
+        // NonTerminal::parse writes the final ParseResult back into the
+        // memo map after a successful first-time parse.
+        memo->second = rule_state;
         return true;
     }
 
@@ -271,34 +309,6 @@ struct Context
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Value stack: holds AST nodes pushed by semantic actions.
-    //
-    // Phase 1 contract: NonTerminal::parse pushes the action's return value
-    // onto the stack on success. Reduction (popping children to build parent
-    // nodes) is deferred to Phase 3 when AST.h is designed.
-    // -----------------------------------------------------------------------
-
-    void push_node(node_type n) { m_value_stack.push_back(std::move(n)); }
-
-    [[nodiscard]] node_type pop_node()
-    {
-        assert(!m_value_stack.empty() && "pop_node on empty value stack");
-        node_type n = std::move(m_value_stack.back());
-        m_value_stack.pop_back();
-        return n;
-    }
-
-    [[nodiscard]] const node_type& peek_node() const
-    {
-        assert(!m_value_stack.empty() && "peek_node on empty value stack");
-        return m_value_stack.back();
-    }
-
-    [[nodiscard]] std::size_t node_count() const noexcept { return m_value_stack.size(); }
-
-    void clear_stack() { m_value_stack.clear(); }
-
     template<typename value_type>
     Context(FileSource<value_type>&& s)
         : m_input{std::move(s)}, m_position{m_input.begin()}, m_last_cut{m_position}
@@ -315,9 +325,6 @@ protected:
     std::size_t m_furthest_failure_pos = 0;
     expected_set m_expected;
     bool m_has_error = false;
-
-    // Value stack
-    std::vector<node_type> m_value_stack;
 };
 
 template<typename value_type>

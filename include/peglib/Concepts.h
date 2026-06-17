@@ -14,10 +14,10 @@ namespace peg
 // PegContext: concept constraining a well-formed Context specialization.
 //
 // A type satisfying PegContext must provide:
-//   - Required typedefs: input_source_type, iterator, value_type, node_type, match_range
+//   - Required typedefs: iterator, value_type, node_type, match_range,
+//     ParseTreeNode, ParseTreeNodePtr, ParseResult
 //   - Position / state API: mark(), next(), reset(iterator), ended()
-//   - Value stack API: push_node(node_type), pop_node(), peek_node(), node_count(),
-//                      clear_stack()
+//   - Memo API: rule_state(), update_rule_state()
 //   - Error tracking API: record_failure(size_t, ExpectedItem),
 //                          furthest_failure_pos(), take_error()
 //
@@ -27,26 +27,21 @@ namespace peg
 template<typename C>
 concept PegContext =
     requires {
-        // Required typedefs
         typename C::iterator;
         typename C::value_type;
         typename C::node_type;
         typename C::match_range;
+        typename C::ParseTreeNode;
+        typename C::ParseTreeNodePtr;
+        typename C::ParseResult;
     } &&
     requires(
-        C c, typename C::iterator it, typename C::node_type n, ExpectedItem ei, std::size_t pos) {
+        C c, typename C::iterator it, ExpectedItem ei, std::size_t pos) {
         // Position / state
         { c.mark() } -> std::same_as<typename C::iterator>;
         { c.next() } -> std::same_as<void>;
         { c.reset(it) } -> std::same_as<void>;
         { c.ended() } -> std::convertible_to<bool>;
-
-        // Value stack
-        { c.push_node(std::move(n)) } -> std::same_as<void>;
-        { c.pop_node() } -> std::same_as<typename C::node_type>;
-        { c.peek_node() } -> std::same_as<const typename C::node_type&>;
-        { c.node_count() } -> std::convertible_to<std::size_t>;
-        { c.clear_stack() } -> std::same_as<void>;
 
         // Error tracking
         { c.record_failure(pos, std::move(ei)) } -> std::same_as<void>;
