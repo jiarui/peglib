@@ -2,55 +2,89 @@
 // Meta-grammar tests — W2 of Phase 2 textual grammar format.
 //
 // Verifies that the C++ reference meta-grammar (MetaGrammar.h) correctly
-// parses PEG text into PegAstNode trees. The shape of these trees is what
-// GrammarCompiler (W3) will walk to build a runtime Grammar.
+// parses PEG text into PegAstNode trees via the post-parse action model.
+// The shape of these trees is what GrammarCompiler (W3) will walk to build
+// a runtime Grammar.
 //
-// NOTE: MetaGrammar.h is currently a placeholder (empty Grammar). These
-// tests previously inspected the value stack after a parse; the
-// post-parse-action refactor removed the value stack and MetaGrammar.h
-// has not yet been rewritten to build trees through actions. All test
-// bodies are disabled until MetaGrammar.h is re-implemented.
+// Post-parse model: the Grammar rule's ParseTreeNode has a child for each
+// Definition. Each Definition child's ->value is the PegAstNode for that
+// rule. The tests extract nodes from the tree rather than from a value stack.
 // ---------------------------------------------------------------------------
 
 #include "peglib.h"
 
 #include "doctest.h"
 
+#include <functional>
 #include <string>
 
 using namespace peg;
 
-#if 0
-
 namespace
 {
-// Parse `text` with the meta-grammar and return the top-of-stack node.
-// Assumes parse succeeds and stack has exactly one node (the Grammar rule's
-// Definition children are popped by the caller of this helper when needed).
-PegAstNodePtr parse_peg(std::string_view text)
+// Parse PEG text and return the root tree node.
+PegParseCtx::ParseTreeNodePtr parse_peg_tree(std::string_view text)
 {
     auto& mg = meta_grammar();
     std::string input{text};
     PegParseCtx ctx{input};
-    REQUIRE(mg.parse(ctx));
-    REQUIRE(ctx.node_count() >= 1);
-    return ctx.pop_node();
+    auto tree = mg.parse_tree("Grammar", ctx);
+    REQUIRE(tree != nullptr);
+    return tree;
+}
+
+// Get the n-th Definition's AST value from the Grammar tree.
+// Definitions are nested inside OneOrMoreExpr's anonymous node.
+// Get the n-th Definition's AST value from the Grammar tree.
+// Definitions are nested inside combinator wrapper nodes.
+PegAstNodePtr get_def(const PegParseCtx::ParseTreeNodePtr& tree, std::size_t idx)
+{
+    std::size_t count = 0;
+    std::function<PegAstNodePtr(const PegParseCtx::ParseTreeNodePtr&)> extract =
+        [&](const PegParseCtx::ParseTreeNodePtr& node) -> PegAstNodePtr {
+            if (!node) return nullptr;
+            if (node->name == "Definition" && node->value) {
+                if (count == idx) return node->value;
+                count++;
+                return nullptr;
+            }
+            for (auto& child : node->children) {
+                if (auto r = extract(child)) return r;
+            }
+            return nullptr;
+        };
+    return extract(tree);
+}
+
+// Convenience: parse and get the first (or only) definition's body.
+PegAstNodePtr parse_peg_body(std::string_view text)
+{
+    auto tree = parse_peg_tree(text);
+    auto def = get_def(tree, 0);
+    REQUIRE(def);
+    REQUIRE(def->children.size() >= 1);
+    return def->children[0];
+}
+
+// Convenience: parse and get the first definition node.
+PegAstNodePtr parse_peg_def(std::string_view text)
+{
+    auto tree = parse_peg_tree(text);
+    return get_def(tree, 0);
 }
 } // namespace
 
 // ---------------------------------------------------------------------------
 // Single bare definition: A <- 'a'
-// Stack after parse: [Definition("A", [Literal("a")])]
-// (Grammar rule is transparent, so only Definition pushes.)
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] single-literal-definition")
 {
-    auto root = parse_peg("A <- 'a'");
-    REQUIRE(root);
-    CHECK(root->kind == NodeKind::Definition);
-    CHECK(root->text == "A");
-    REQUIRE(root->children.size() == 1);
-    auto body = root->children[0];
+    auto def = parse_peg_def("A <- 'a'");
+    REQUIRE(def);
+    CHECK(def->kind == NodeKind::Definition);
+    CHECK(def->text == "A");
+    REQUIRE(def->children.size() == 1);
+    auto body = def->children[0];
     CHECK(body->kind == NodeKind::Literal);
     CHECK(body->text == "a");
 }
@@ -60,10 +94,8 @@ TEST_CASE("[meta_grammar] single-literal-definition")
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] sequence-with-ruleref")
 {
-    auto root = parse_peg("A <- B 'x'");
-    REQUIRE(root->kind == NodeKind::Definition);
-    REQUIRE(root->children.size() == 1);
-    auto body = root->children[0];
+    auto body = parse_peg_body("A <- B 'x'");
+    REQUIRE(body);
     CHECK(body->kind == NodeKind::Sequence);
     REQUIRE(body->children.size() == 2);
     CHECK(body->children[0]->kind == NodeKind::RuleRef);
@@ -77,8 +109,8 @@ TEST_CASE("[meta_grammar] sequence-with-ruleref")
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] choice-of-literals")
 {
-    auto root = parse_peg("A <- 'a' / 'b' / 'c'");
-    auto body = root->children[0];
+    auto body = parse_peg_body("A <- 'a' / 'b' / 'c'");
+    REQUIRE(body);
     CHECK(body->kind == NodeKind::Choice);
     REQUIRE(body->children.size() == 3);
     CHECK(body->children[0]->text == "a");
@@ -93,24 +125,21 @@ TEST_CASE("[meta_grammar] postfix-operators")
 {
     SUBCASE("star")
     {
-        auto root = parse_peg("A <- 'a'*");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- 'a'*");
         CHECK(body->kind == NodeKind::Star);
         REQUIRE(body->children.size() == 1);
         CHECK(body->children[0]->text == "a");
     }
     SUBCASE("plus")
     {
-        auto root = parse_peg("A <- 'a'+");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- 'a'+");
         CHECK(body->kind == NodeKind::Plus);
         REQUIRE(body->children.size() == 1);
         CHECK(body->children[0]->text == "a");
     }
     SUBCASE("optional")
     {
-        auto root = parse_peg("A <- 'a'?");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- 'a'?");
         CHECK(body->kind == NodeKind::Optional);
         REQUIRE(body->children.size() == 1);
         CHECK(body->children[0]->text == "a");
@@ -124,16 +153,14 @@ TEST_CASE("[meta_grammar] prefix-operators")
 {
     SUBCASE("and-predicate")
     {
-        auto root = parse_peg("A <- &'a'");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- &'a'");
         CHECK(body->kind == NodeKind::AndPred);
         REQUIRE(body->children.size() == 1);
         CHECK(body->children[0]->text == "a");
     }
     SUBCASE("not-predicate")
     {
-        auto root = parse_peg("A <- !'a'");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- !'a'");
         CHECK(body->kind == NodeKind::NotPred);
         REQUIRE(body->children.size() == 1);
         CHECK(body->children[0]->text == "a");
@@ -141,27 +168,24 @@ TEST_CASE("[meta_grammar] prefix-operators")
 }
 
 // ---------------------------------------------------------------------------
-// Dot (any-char) and character class
+// Dot and character class
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] dot-and-class")
 {
     SUBCASE("dot")
     {
-        auto root = parse_peg("A <- .");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- .");
         CHECK(body->kind == NodeKind::Dot);
     }
     SUBCASE("class")
     {
-        auto root = parse_peg("A <- [a-z]");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- [a-z]");
         CHECK(body->kind == NodeKind::CharClass);
         CHECK(body->text == "[a-z]");
     }
     SUBCASE("negated-class")
     {
-        auto root = parse_peg("A <- [^0-9]");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- [^0-9]");
         CHECK(body->kind == NodeKind::CharClass);
         CHECK(body->text == "[^0-9]");
     }
@@ -169,19 +193,62 @@ TEST_CASE("[meta_grammar] dot-and-class")
 
 // ---------------------------------------------------------------------------
 // Grouping: A <- ('a' 'b') 'c'
-// The group's inner Sequence is transparently passed through.
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] grouping")
 {
-    auto root = parse_peg("A <- ('a' 'b') 'c'");
-    auto body = root->children[0];
-    // Outer sequence has two children: the inner sequence and 'c'.
+    auto body = parse_peg_body("A <- ('a' 'b') 'c'");
+    REQUIRE(body);
     CHECK(body->kind == NodeKind::Sequence);
     REQUIRE(body->children.size() == 2);
+    // Child 0: the group's inner sequence (transparently passed through)
     CHECK(body->children[0]->kind == NodeKind::Sequence);
     REQUIRE(body->children[0]->children.size() == 2);
     CHECK(body->children[1]->kind == NodeKind::Literal);
     CHECK(body->children[1]->text == "c");
+}
+
+// ---------------------------------------------------------------------------
+// Operators inside groups must not leak to the outer level.
+// Regression test for has_named searching too broadly.
+// ---------------------------------------------------------------------------
+TEST_CASE("[meta_grammar] operators-inside-groups-do-not-leak")
+{
+    SUBCASE("inner-question-outer-star")
+    {
+        // ('a'?)*  →  Star(Literal("a")), NOT Optional
+        auto body = parse_peg_body("A <- ('a'?)*");
+        REQUIRE(body);
+        CHECK(body->kind == NodeKind::Star);
+        REQUIRE(body->children.size() == 1);
+        // Inner: Optional(Literal("a"))
+        CHECK(body->children[0]->kind == NodeKind::Optional);
+    }
+    SUBCASE("inner-star-outer-plus")
+    {
+        // ('a'*)+  →  Plus(Literal("a")), NOT Star
+        auto body = parse_peg_body("A <- ('a'*)+");
+        REQUIRE(body);
+        CHECK(body->kind == NodeKind::Plus);
+        REQUIRE(body->children.size() == 1);
+        CHECK(body->children[0]->kind == NodeKind::Star);
+    }
+    SUBCASE("inner-not-outer-and")
+    {
+        // !('a' &b)  →  NotPred(...), NOT AndPred
+        auto body = parse_peg_body("A <- !('a' &b)");
+        REQUIRE(body);
+        CHECK(body->kind == NodeKind::NotPred);
+        REQUIRE(body->children.size() == 1);
+    }
+    SUBCASE("group-with-star-no-outer-op")
+    {
+        // ('a'*)  →  Star(Literal("a")), not double-wrapped
+        auto body = parse_peg_body("A <- ('a'*)");
+        REQUIRE(body);
+        CHECK(body->kind == NodeKind::Star);
+        REQUIRE(body->children.size() == 1);
+        CHECK(body->children[0]->kind == NodeKind::Literal);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,22 +258,19 @@ TEST_CASE("[meta_grammar] literal-escapes")
 {
     SUBCASE("newline")
     {
-        auto root = parse_peg("A <- '\\n'");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- '\\n'");
         CHECK(body->kind == NodeKind::Literal);
         CHECK(body->text == std::string("\n", 1));
     }
     SUBCASE("escaped-quote")
     {
-        auto root = parse_peg("A <- '\\''");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- '\\''");
         CHECK(body->kind == NodeKind::Literal);
         CHECK(body->text == std::string("'", 1));
     }
     SUBCASE("double-quoted-with-escape")
     {
-        auto root = parse_peg("A <- \"a\\tb\"");
-        auto body = root->children[0];
+        auto body = parse_peg_body("A <- \"a\\tb\"");
         CHECK(body->kind == NodeKind::Literal);
         CHECK(body->text == "a\tb");
     }
@@ -217,29 +281,27 @@ TEST_CASE("[meta_grammar] literal-escapes")
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] comments-and-whitespace")
 {
-    auto root = parse_peg("# leading comment\n  A <- 'a'  # trailing\n");
-    REQUIRE(root);
-    CHECK(root->kind == NodeKind::Definition);
-    CHECK(root->text == "A");
-    REQUIRE(root->children.size() == 1);
-    CHECK(root->children[0]->kind == NodeKind::Literal);
-    CHECK(root->children[0]->text == "a");
+    auto def = parse_peg_def("# leading comment\n  A <- 'a'  # trailing\n");
+    REQUIRE(def);
+    CHECK(def->kind == NodeKind::Definition);
+    CHECK(def->text == "A");
+    REQUIRE(def->children.size() == 1);
+    CHECK(def->children[0]->kind == NodeKind::Literal);
+    CHECK(def->children[0]->text == "a");
 }
 
 // ---------------------------------------------------------------------------
-// Multiple definitions: stack contains one Definition node per rule
+// Multiple definitions
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] multiple-definitions")
 {
-    auto& mg = meta_grammar();
-    std::string input = "A <- 'a'\nB <- A 'b'\nC <- A / B";
-    PegParseCtx ctx{input};
-    CHECK(mg.parse(ctx));
-    // Three Definition nodes on the stack.
-    CHECK(ctx.node_count() == 3);
-    auto c = ctx.pop_node();
-    auto b = ctx.pop_node();
-    auto a = ctx.pop_node();
+    auto tree = parse_peg_tree("A <- 'a'\nB <- A 'b'\nC <- A / B");
+    auto a = get_def(tree, 0);
+    auto b = get_def(tree, 1);
+    auto c = get_def(tree, 2);
+    REQUIRE(a);
+    REQUIRE(b);
+    REQUIRE(c);
     CHECK(a->text == "A");
     CHECK(b->text == "B");
     CHECK(c->text == "C");
@@ -248,10 +310,7 @@ TEST_CASE("[meta_grammar] multiple-definitions")
 }
 
 // ---------------------------------------------------------------------------
-// Recursive grammar (mutual): classic arithmetic
-//   Expr <- Term ('+' Term)*
-//   Term <- Factor ('*' Factor)*
-//   Factor <- [0-9]+ / '(' Expr ')'
+// Recursive arithmetic grammar
 // ---------------------------------------------------------------------------
 TEST_CASE("[meta_grammar] recursive-arithmetic")
 {
@@ -260,13 +319,13 @@ TEST_CASE("[meta_grammar] recursive-arithmetic")
         Term   <- Factor ('*' Factor)*
         Factor <- [0-9]+ / '(' Expr ')'
     )";
-    auto& mg = meta_grammar();
-    PegParseCtx ctx{input};
-    CHECK(mg.parse(ctx));
-    REQUIRE(ctx.node_count() == 3);
-    auto factor = ctx.pop_node();
-    auto term = ctx.pop_node();
-    auto expr = ctx.pop_node();
+    auto tree = parse_peg_tree(input);
+    auto expr = get_def(tree, 0);
+    auto term = get_def(tree, 1);
+    auto factor = get_def(tree, 2);
+    REQUIRE(expr);
+    REQUIRE(term);
+    REQUIRE(factor);
     CHECK(expr->text == "Expr");
     CHECK(term->text == "Term");
     CHECK(factor->text == "Factor");
@@ -287,19 +346,19 @@ TEST_CASE("[meta_grammar] rejects-malformed-input")
     auto& mg = meta_grammar();
     SUBCASE("missing-arrow")
     {
-        std::string input = "A 'a'";  // missing <-
+        std::string input = "A 'a'";
         PegParseCtx ctx{input};
         CHECK_FALSE(mg.parse(ctx));
     }
     SUBCASE("unclosed-literal")
     {
-        std::string input = "A <- 'a";  // missing closing quote
+        std::string input = "A <- 'a";
         PegParseCtx ctx{input};
         CHECK_FALSE(mg.parse(ctx));
     }
     SUBCASE("unclosed-group")
     {
-        std::string input = "A <- ('a'";  // missing )
+        std::string input = "A <- ('a'";
         PegParseCtx ctx{input};
         CHECK_FALSE(mg.parse(ctx));
     }
@@ -307,8 +366,6 @@ TEST_CASE("[meta_grammar] rejects-malformed-input")
     {
         std::string input = "";
         PegParseCtx ctx{input};
-        CHECK_FALSE(mg.parse(ctx));  // Grammar requires at least one Definition
+        CHECK_FALSE(mg.parse(ctx));
     }
 }
-
-#endif // 0 — disabled pending MetaGrammar.h re-implementation

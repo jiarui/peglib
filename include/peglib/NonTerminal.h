@@ -26,9 +26,8 @@ namespace parsers
 //   RuleState::m_cached_result. Subsequent memo hits return the cached
 //   result directly — no action re-execution, no value stack, no conflict.
 //
-// Transparent rules: if the action returns a null value (for pointer-like
-//   NodeTypes), the tree is set to nullptr so the rule does not appear in
-//   its parent's children list. This replaces the old Marker-sentinel hack.
+// Tree retention: the tree node is always kept (even if the action returns
+//   a null value). Parent actions skip children whose ->value is null.
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>>
@@ -92,7 +91,9 @@ public:
             return fail;
         }
 
-        // Build a named node from the body's anonymous result tree.
+        // Use the body's tree directly as this rule's tree. If the body
+        // produced no tree (e.g. only predicates/terminals), create a fresh
+        // node. The action can read body sub-results from node->children.
         auto node = inner.tree;
         if (!node) {
             node = std::make_shared<typename Context::ParseTreeNode>();
@@ -106,15 +107,11 @@ public:
         ParseResult result{true, node};
         if (this->m_action) {
             node->value = this->m_action(context, node);
-            // Transparent: action returned null for pointer-like NodeTypes.
-            // The rule succeeds but does not contribute a tree node to its
-            // parent's children list.
-            if constexpr (requires(NodeType v) { v == nullptr; }) {
-                if (node->value == nullptr) {
-                    result.tree = nullptr;
-                }
-            }
         }
+        // Note: even if the action returns null (transparent rule), we keep
+        // the tree node. This lets parent actions reliably access children
+        // by position. Parents that build user-facing AST skip children
+        // whose ->value is null.
 
         rule_state.m_cached_result = result;
         context.update_rule_state(this, start_pos, rule_state);
