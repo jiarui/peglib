@@ -52,7 +52,7 @@ struct ParsingExpr : ParsingExprInterface<Context>
     using NodeType = typename Context::node_type;
     using SemanticAction =
         std::function<NodeType(Context&, typename Context::match_range match_range)>;
-    void setAction(SemanticAction action) { m_action = action; }
+    void set_action(SemanticAction action) { m_action = action; }
     ParsingExpr() = default;
     ParsingExpr(SemanticAction action) : m_action(action) {}
     ParsingExpr(const ParsingExpr&) = default;

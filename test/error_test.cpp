@@ -7,7 +7,7 @@
 
 using namespace peg;
 
-// Concrete Context type alias for PEG_RULE macros (which need a type name).
+// Concrete Context type alias for Grammar template argument.
 using Ctxt = Context<std::span<const char>>;
 
 // ---------------------------------------------------------------------------
@@ -277,30 +277,30 @@ TEST_CASE("error-parseerror-caught-as-runtime-error")
     CHECK(caught);
 }
 
-TEST_CASE("error-peg-rule-macro-sets-name")
+TEST_CASE("grammar-auto-names-rules")
 {
     std::string input = "x";
     Context context(input);
 
-    // The macro should declare a rule and set its name.
-    PEG_RULE(Ctxt, my_digit, peg::terminal('0') | peg::terminal('1'));
-    // Silence unused warning
-    (void)my_digit;
+    // Grammar::operator[] auto-names the rule from the map key.
+    Grammar<Ctxt> g;
+    g["my_digit"] = peg::terminal('0') | peg::terminal('1');
     (void)context;
 
-    // my_digit is a Ctxt::Rule, with name "my_digit"
-    CHECK(my_digit.name() == "my_digit");
-    CHECK(my_digit.label().empty());
+    CHECK(g["my_digit"].name() == "my_digit");
+    CHECK(g["my_digit"].rule().label().empty());
 }
 
-TEST_CASE("error-peg-rule-labeled-macro-sets-both")
+TEST_CASE("grammar-set-label-works")
 {
     std::string input = "x";
     Context context(input);
 
-    PEG_RULE_LABELED(Ctxt, my_thing, "a specific thing", peg::terminal('z'));
+    Grammar<Ctxt> g;
+    g["my_thing"] = peg::terminal('z');
+    g["my_thing"].set_label("a specific thing");
     (void)context;
 
-    CHECK(my_thing.name() == "my_thing");
-    CHECK(my_thing.label() == "a specific thing");
+    CHECK(g["my_thing"].name() == "my_thing");
+    CHECK(g["my_thing"].rule().label() == "a specific thing");
 }

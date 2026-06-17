@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 2 (Grammar API)
+- **`Grammar<Ctx>`** class (`include/peglib/Grammar.h`): the primary user-facing
+  API. Container of named rules with lazy creation, auto-naming, and parse
+  convenience methods.
+- **`RuleProxy<Context>`**: transient handle returned by `Grammar::operator[]`.
+  Supports assignment (auto-names the rule), chaining (`set_action`, `set_label`),
+  and participates in operator DSL expressions.
+- **`parse_string(input)`**: convenience method that creates a Context internally.
+- **`set_start(rule)`**: designates the entry-point rule for `parse(ctx)`.
+- **`undefined_rules()`**: validation helper listing rules that were accessed
+  but never assigned a definition.
+- **`rule_names()`, `has_rule()`, `at()`**: introspection methods.
+- New test file: `grammar_test.cpp` (10 test cases covering basic grammar,
+  recursion, auto-naming, forward references, semantic actions, introspection,
+  reusability).
+
+### Changed — Phase 2 (Grammar API)
+- **Grammar is the primary API**. `Rule<>` is now an internal implementation
+  detail (still accessible in `peg::parsers::` for advanced use, but not
+  advertised in documentation or examples).
+- **Rules are auto-named** from the Grammar map key — no more `set_name()`
+  or `PEG_RULE` macros needed.
+- **Recursive rules are trivial**: `g["expr"] = g["expr"] >> '+' >> g["number"]`
+  works directly. No forward declarations, no static-initializer lambdas.
+- **`PegContext` concept**: removed `typename C::Rule` requirement (Rule is
+  no longer a Context member in the public API).
+
+### Removed — Phase 2 (Grammar API)
+- **`PEG_RULE`, `PEG_RULE_LABELED`, `PEG_RULE_DEF`, `PEG_RULE_DEF_LABELED`,
+  `PEG_RULE_RECURSIVE`** macros — superseded by Grammar auto-naming.
+- `peg_rule_name`, `peg_rule_label` helper functions.
+
+### Migrated — Phase 2
+- All test files (`rule_test.cpp`, `parser_test.cpp`, `error_test.cpp`,
+  `value_stack_test.cpp`, `json_test.cpp`, `lua.cpp`, `lua_lex.cpp`,
+  `main.cpp`) migrated from `Rule<>` to `Grammar<>` API.
+
 ### Added — Phase 2.0 (Rule Lifetime Redesign)
 - **`PEG_RULE_DEF`** and **`PEG_RULE_DEF_LABELED`** macros for recursive rules
   (forward-declare + assign + name in one line).
@@ -159,7 +196,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   position (e.g. `*ws` matching zero characters), the result was stored in
   the local `RuleState` copy but **not persisted to the memo map**. A second
   lookup at the same position returned the stale initial state `{pos, false}`,
-  causing valid input to be rejected. Now calls `updateRuleState` before
+  causing valid input to be rejected. Now calls `update_rule_state` before
   breaking out of the no-progress branch.
 - **Repetition position restoration**: `Repetition::parse` did not restore
   the parser position after a child failure in the optional/bounded case.

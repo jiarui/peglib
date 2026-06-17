@@ -80,7 +80,7 @@ Made `Rule` a **handle** wrapping `shared_ptr<NonTerminal>`:
 - [x] Memo key changes from `const Rule*` to `const NonTerminalType*`
 - [x] Left-recursion: seed-grow uses the shared NonTerminal, not the Rule copy
 - [x] `Rule::operator=` modifies the underlying NonTerminal in-place (not rebind)
-- [x] `Rule::setAction` / `set_name` / `set_label` delegate to NonTerminal
+- [x] `Rule::set_action` / `set_name` / `set_label` delegate to NonTerminal
 - [x] Default-constructed `Rule` creates a new NonTerminal (forward-declared rule)
 - [x] Update all operator overloads in `Rule.h` (no more `self()` dispatch)
 - [x] Add `PEG_RULE_DEF` / `PEG_RULE_DEF_LABELED` / `PEG_RULE_RECURSIVE` macros
@@ -108,7 +108,21 @@ lambda. Non-recursive rules continue to work with copy-init as before.
 - `Context` ownership of input data (separate issue, deferred)
 - Textual grammar format (Phase 2, after this is stable)
 
-## Phase 2 — Textual Grammar Format
+## Phase 2 — Grammar API (PARTIAL: Grammar container done, textual format pending)
+
+The `Grammar<>` class is now the primary user-facing API. Rules are defined
+via `g["name"] = expr`, auto-named, and support recursive/mutually-recursive
+references without forward declarations.
+
+### Done (Grammar Container)
+- [x] `Grammar<Ctx>` class with `operator[]`, `set_start`, `parse`, `parse_string`
+- [x] `RuleProxy` for assignment chaining and auto-naming
+- [x] Lazy rule creation (forward references work automatically)
+- [x] `undefined_rules()` validation helper
+- [x] Introspection: `rule_names()`, `has_rule()`, `at()`
+- [x] All tests migrated to Grammar API
+
+### Pending (Textual Grammar Format)
 
 The biggest gap separating peglib from feature-complete PEG libraries (yhirose
 cpp-peglib, pest, peggy). Once shipped, users can author grammars declaratively
@@ -125,10 +139,8 @@ without writing C++ combinators.
       - `.` any-char, `[a-z]` char class, `'lit'` / `"lit"` literals
       - `(...)` grouping
       - Comments (`# ...` to end of line)
-- [ ] Named rules auto-registered into the `Grammar` (queryable, surface in
-      error messages)
-- [ ] **Grammar validation**: undefined rule references, unreachable rules,
-      left-recursion detection (warning, not error — we support it)
+- [ ] **Grammar validation**: unreachable rules, left-recursion detection
+      (warning, not error — we support it)
 - [ ] Hooks for semantic actions per named rule (lambdas attached after
       `from_string`)
 - [ ] Round-trip: `Grammar::to_dot()` for visualization
@@ -219,3 +231,5 @@ Reduce grammar duplication.
 | Textual grammar format | Canonical PEG syntax (Ford 2004) + yhirose-style extensions | Maximally familiar to existing PEG users; deviations only where they add clear value |
 | Whitespace model | Opt-in `set_skipper` + `lexeme()` escape hatch | pest/yhirose show that auto-skip is the right default; but library users must be able to disable |
 | Rule ownership | `Rule` as `shared_ptr` handle (Phase 2.0) | NonTerminal identity must be stable for memo/seed-grow; Rule must be copyable for ergonomics. Shared ownership reconciles both. |
+| Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |
+| Grammar-Context relationship | Grammar typed to Context, no Context owned (Level 1) | Same Grammar reusable across many parses; fresh Context per parse (fresh memo, position, value stack). |

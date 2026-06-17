@@ -15,6 +15,7 @@ target_include_directories(peglib_test_main PRIVATE ${doctest_include_dir})
 add_executable(peglib_test
     main.cpp
     rule_test.cpp
+    grammar_test.cpp
     parser_test.cpp
     context_test.cpp
     file_source_test.cpp

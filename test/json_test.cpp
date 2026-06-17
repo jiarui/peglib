@@ -1,12 +1,13 @@
 // ---------------------------------------------------------------------------
 // JSON grammar — a real-world example of building a complete language grammar
-// with peglib's operator DSL.
+// with peglib's Grammar API.
 //
 // This demonstrates:
-//   - Mutually recursive rules (value → object/array → value)
-//   - Forward-declared Rule<> objects assigned via a static initializer
-//   - Whitespace handling (manual; auto-skipper arrives in Phase 3)
-//   - Error reporting integration (Diagnostic on parse failure)
+//   - Mutually recursive rules (value → object/array → value) — no forward
+//     declaration needed; Grammar::operator[] lazily creates rules.
+//   - Auto-naming — rule names come from the map key (for error reporting).
+//   - Whitespace handling (manual; auto-skipper arrives in Phase 3).
+//   - Error reporting integration (Diagnostic on parse failure).
 //
 // The grammar uses the default Context (NodeType = std::monostate). AST
 // construction from match ranges is shown in the test code itself — this is
@@ -25,26 +26,14 @@ using namespace peg;
 // ---------------------------------------------------------------------------
 // Grammar definition.
 //
-// Mutual recursion (value → object/array → value) means the rules need forward
-// declaration before assignment. We use the same static-initializer pattern
-// documented in rule_test.cpp:480-501.
+// With the Grammar API, mutual recursion is natural — g["value"] creates the
+// rule on first access (lazily), and assignment modifies it in-place. No
+// forward declarations, no static-initializer lambdas.
 // ---------------------------------------------------------------------------
 
 namespace json_grammar
 {
-// Forward-declared rules. Default-constructed; assigned in init_grammar().
-inline Rule<> value;
-inline Rule<> object;
-inline Rule<> array;
-inline Rule<> string_rule;
-inline Rule<> number_rule;
-inline Rule<> keyword_rule;
-inline Rule<> ws;   // whitespace, optional
-inline Rule<> json; // top-level: optional-ws value optional-ws
-// Auxiliary rules used inside array/object.
-inline Rule<> value_list;
-inline Rule<> member_list;
-inline Rule<> key_value;
+inline Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
     auto cut_ = cut<Context<std::span<const char>>>();
@@ -52,7 +41,7 @@ inline Rule<> key_value;
     // Whitespace: space, tab, newline, carriage return. (Phase 3 will
     // introduce Context::set_skipper so users won't need to thread this
     // manually.)
-    ws = *terminal<char>([](char c) {
+    g["ws"] = *terminal<char>([](char c) {
         return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     });
 
@@ -64,7 +53,7 @@ inline Rule<> key_value;
     auto string_char = terminal<char>([](char c) {
         return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20;
     });
-    string_rule = terminal('"') >> *(escape_seq | string_char) >> terminal('"');
+    g["string"] = terminal('"') >> *(escape_seq | string_char) >> terminal('"');
 
     // ----- number -----
     // JSON number grammar:
@@ -78,33 +67,34 @@ inline Rule<> key_value;
     auto integer = (-terminal('-')) >> (terminal('0') | (nonzero_digit >> *digit));
     auto frac = terminal('.') >> +digit;
     auto exp = (terminal('e') | 'E') >> -sign >> +digit;
-    number_rule = integer >> -frac >> -exp;
+    g["number"] = integer >> -frac >> -exp;
 
     // ----- keyword (true/false/null) -----
-    keyword_rule = terminalSeq("true") | terminalSeq("false") | terminalSeq("null");
+    g["keyword"] = terminalSeq("true") | terminalSeq("false") | terminalSeq("null");
 
     // ----- array -----
     // array = '[' ws ( value (ws ',' ws value)* )? ws ']'
-    auto comma_sep = ws >> terminal(',') >> ws;
-    value_list = value >> *(comma_sep >> value);
-    array = terminal('[') >> ws >> -value_list >> ws >> terminal(']');
+    auto comma_sep = g["ws"] >> terminal(',') >> g["ws"];
+    g["value_list"] = g["value"] >> *(comma_sep >> g["value"]);
+    g["array"] = terminal('[') >> g["ws"] >> -g["value_list"] >> g["ws"] >> terminal(']');
 
     // ----- object -----
     // object = '{' ws ( string ws ':' ws value (ws ',' ws string ws ':' ws value)* )? ws '}'
-    key_value = string_rule >> ws >> terminal(':') >> ws >> value;
-    member_list = key_value >> *(comma_sep >> key_value);
-    object = terminal('{') >> ws >> -member_list >> ws >> terminal('}');
+    g["key_value"] = g["string"] >> g["ws"] >> terminal(':') >> g["ws"] >> g["value"];
+    g["member_list"] = g["key_value"] >> *(comma_sep >> g["key_value"]);
+    g["object"] = terminal('{') >> g["ws"] >> -g["member_list"] >> g["ws"] >> terminal('}');
 
     // ----- value -----
     // Each alternative commits with `cut` after a successful match: once we
     // know it's a number, we don't backtrack into trying it as an object.
     // The cut must live inside this AlternationExpr so the cut stack frame
     // is provided by the alternation, not by the individual rules.
-    value = (keyword_rule >> cut_) | (number_rule >> cut_) |
-            (object >> cut_) | (array >> cut_) | (string_rule >> cut_);
+    g["value"] = (g["keyword"] >> cut_) | (g["number"] >> cut_) |
+                 (g["object"] >> cut_) | (g["array"] >> cut_) | (g["string"] >> cut_);
 
     // ----- top-level -----
-    json = ws >> value >> ws;
+    g["json"] = g["ws"] >> g["value"] >> g["ws"];
+    g.set_start("json");
 
     return true;
 }();
@@ -119,7 +109,7 @@ TEST_CASE("[json] keyword-rule")
     using namespace json_grammar;
     for (const std::string& s : {"true", "false", "null"}) {
         Context ctx(s);
-        CHECK(keyword_rule(ctx));
+        CHECK(g.parse("keyword", ctx));
         CHECK(ctx.ended());
     }
 }
@@ -132,7 +122,7 @@ TEST_CASE("[json] number-rule")
                                  "-123.456e+789"}) {
         Context ctx(s);
         CAPTURE(s);
-        CHECK(number_rule(ctx));
+        CHECK(g.parse("number", ctx));
         CHECK(ctx.ended());
     }
 }
@@ -143,7 +133,7 @@ TEST_CASE("[json] number-rule-rejects-invalid")
     for (const std::string& s : {"01", "1.", "+5", ".5", "--1"}) {
         Context ctx(s);
         CAPTURE(s);
-        bool matched = number_rule(ctx);
+        bool matched = g.parse("number", ctx);
         CHECK(!(matched && ctx.ended()));
     }
 }
@@ -156,7 +146,7 @@ TEST_CASE("[json] string-rule")
                                  "\"slash\\/end\""}) {
         Context ctx(s);
         CAPTURE(s);
-        CHECK(string_rule(ctx));
+        CHECK(g.parse("string", ctx));
         CHECK(ctx.ended());
     }
 }
@@ -166,7 +156,7 @@ TEST_CASE("[json] string-rule-rejects-unterminated")
     using namespace json_grammar;
     std::string input = "\"unterminated";
     Context ctx(input);
-    CHECK_FALSE(string_rule(ctx));
+    CHECK_FALSE(g.parse("string", ctx));
 }
 
 TEST_CASE("[json] whitespace-tolerance")
@@ -180,7 +170,7 @@ TEST_CASE("[json] whitespace-tolerance")
          }) {
         Context ctx(input);
         CAPTURE(input);
-        CHECK(json(ctx));
+        CHECK(g.parse(ctx));
         CHECK(ctx.ended());
     }
 }
@@ -192,35 +182,35 @@ TEST_CASE("[json] array-rule")
     {
         std::string input = "[]";
         Context ctx(input);
-        CHECK(array(ctx));
+        CHECK(g.parse("array", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("with-whitespace")
     {
         std::string input = "[  ]";
         Context ctx(input);
-        CHECK(array(ctx));
+        CHECK(g.parse("array", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("numbers")
     {
         std::string input = "[1, 2, 3]";
         Context ctx(input);
-        CHECK(array(ctx));
+        CHECK(g.parse("array", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("mixed-types")
     {
         std::string input = "[\"a\", true, null, 42]";
         Context ctx(input);
-        CHECK(array(ctx));
+        CHECK(g.parse("array", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("trailing-comma-invalid")
     {
         std::string input = "[1, 2,]";
         Context ctx(input);
-        bool matched = array(ctx);
+        bool matched = g.parse("array", ctx);
         CHECK(!(matched && ctx.ended()));
     }
 }
@@ -232,28 +222,28 @@ TEST_CASE("[json] object-rule")
     {
         std::string input = "{}";
         Context ctx(input);
-        CHECK(object(ctx));
+        CHECK(g.parse("object", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("simple")
     {
         std::string input = "{\"name\": \"value\", \"n\": 42}";
         Context ctx(input);
-        CHECK(object(ctx));
+        CHECK(g.parse("object", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("nested")
     {
         std::string input = "{\"outer\": {\"inner\": true}}";
         Context ctx(input);
-        CHECK(object(ctx));
+        CHECK(g.parse("object", ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("missing-colon-invalid")
     {
         std::string input = "{\"key\" \"value\"}";
         Context ctx(input);
-        bool matched = object(ctx);
+        bool matched = g.parse("object", ctx);
         CHECK(!(matched && ctx.ended()));
     }
 }
@@ -265,21 +255,21 @@ TEST_CASE("[json] deeply-nested-structures")
     {
         std::string input = "[[[[[42]]]]]";
         Context ctx(input);
-        CHECK(json(ctx));
+        CHECK(g.parse(ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("mixed-nesting")
     {
         std::string input = R"({"a": [1, {"b": 2}, true], "c": null})";
         Context ctx(input);
-        CHECK(json(ctx));
+        CHECK(g.parse(ctx));
         CHECK(ctx.ended());
     }
     SUBCASE("deep-object")
     {
         std::string input = R"({"l1": {"l2": {"l3": {"l4": "deep"}}}})";
         Context ctx(input);
-        CHECK(json(ctx));
+        CHECK(g.parse(ctx));
         CHECK(ctx.ended());
     }
 }
@@ -300,7 +290,7 @@ TEST_CASE("[json] complex-realistic-document")
         "empty_object": {}
     })";
     Context ctx(input);
-    CHECK(json(ctx));
+    CHECK(g.parse(ctx));
     CHECK(ctx.ended());
 }
 
@@ -309,7 +299,7 @@ TEST_CASE("[json] error-on-malformed-reports-position")
     using namespace json_grammar;
     std::string input = "[1, 2,]"; // trailing comma is invalid JSON
     Context ctx(input);
-    bool matched = json(ctx);
+    bool matched = g.parse(ctx);
     CHECK(!(matched && ctx.ended()));
 
     // Phase 1 error tracking: a Diagnostic should be available.
@@ -328,6 +318,6 @@ TEST_CASE("[json] value-leaves-residual-input")
     // unconsumed — value only consumes what it needs, not the entire input.
     std::string input = "truex";
     Context ctx(input);
-    CHECK(value(ctx));
+    CHECK(g.parse("value", ctx));
     CHECK_FALSE(ctx.ended());
 }

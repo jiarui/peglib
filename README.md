@@ -94,63 +94,45 @@ try {
 struct IntNode { int value; };
 
 using MyContext = Context<std::span<const char>, IntNode>;
-using MyRule = MyContext::Rule;
 
-MyRule digit = ...; // construct a TerminalExpr<MyContext, ...>
-digit.setAction([](MyContext&, MyContext::match_range r) {
+Grammar<MyContext> g;
+g["digit"] = ...; // construct a TerminalExpr<MyContext, ...>
+g["digit"].set_action([](MyContext&, MyContext::match_range r) {
     return IntNode{*r.begin() - '0'};
 });
 
 std::string input = "42";
 MyContext context(input);
-digit(context);
-digit(context);
+g.parse("digit", context);
+g.parse("digit", context);
 // context.node_count() == 2
 // context.peek_node().value == 2 (last pushed)
 ```
 
 ### Named rules with `PEG_RULE` macro
 
+**Removed in Phase 2.** Use the Grammar API instead — rules are auto-named
+from the map key:
+
 ```cpp
-PEG_RULE(MyContext, numeral, '0'-'9' >> +('0'-'9'));
-// equivalent to:
-//   MyContext::Rule numeral = ('0'-'9' >> +('0'-'9'));
-//   numeral.set_name("numeral");
+Grammar<> g;
+g["numeral"] = terminal('0', '9') >> +terminal('0', '9');
 // "numeral" appears in error messages when the rule fails.
 ```
 
 ### Recursive rules
 
-Self-referential or mutually-recursive rules cannot use copy-initialization
-(`Rule<> r = r >> ...`) because the expression is evaluated before `r` is
-constructed. Use default-construct + assign instead:
+With the Grammar API, recursive and mutually-recursive rules work naturally
+— `g["expr"]` lazily creates the rule on first access, so forward references
+are automatic. No forward declarations or macros needed:
 
 ```cpp
-// Function scope — direct assignment works:
-Rule<> expr;
-expr = expr >> '+' >> expr | number;
-
-// Namespace scope — wrap assignments in a static initializer lambda:
-Rule<> expr;
-Rule<> number = +terminal('0', '9');   // non-recursive: copy-init is fine
-
-const bool init = [] {
-    expr = expr >> '+' >> expr | number;  // modifies the existing NonTerminal
-    return true;
-}();
+Grammar<> g;
+g["number"] = +terminal('0', '9');
+g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
+g.set_start("expr");
+g.parse_string("1+2+3");  // convenience: creates a Context internally
 ```
-
-For convenience, `PEG_RULE_DEF` combines forward-declare + assign + name:
-
-```cpp
-PEG_RULE_DEF(MyContext, expr, expr >> '+' >> expr | number);
-```
-
-Why not `Rule<> r = r >> ...`? C++ evaluates the initializer expression before
-constructing `r`. With shared ownership, copying an uninitialized `shared_ptr`
-causes a crash. This is a fundamental C++ language constraint — see
-[Spirit X3's `BOOST_SPIRIT_DEFINE](https://www.boost.org/doc/libs/release/libs/spirit/doc/x3/html/spirit_x3/tutorials/semantic_actions.html)
-for the same pattern in another C++ parser library.
 
 ## Requirements
 
@@ -191,7 +173,8 @@ include/peglib/      header-only library
   ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
   Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
   Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr
-  NonTerminal.h      NonTerminal (internal node), Rule (shared_ptr handle)
+  NonTerminal.h      NonTerminal (internal node), Rule (shared_ptr handle), RuleProxy
+  Grammar.h          Grammar (rule container), the primary user-facing API
   Parser.h           umbrella for the 4 parser headers above
   Rule.h             operator DSL (>>, |, *, +, !, &, ...) + factories
   FileSource.h       streaming file-backed input with double buffering

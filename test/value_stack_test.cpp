@@ -79,7 +79,6 @@ TEST_CASE("value-stack-clear")
 TEST_CASE("value-stack-action-result-pushed")
 {
     using MyContext = Context<std::span<const char>, IntNode>;
-    using MyRule = MyContext::Rule;
 
     std::string input = "42";
     MyContext context(input);
@@ -88,16 +87,17 @@ TEST_CASE("value-stack-action-result-pushed")
     // Construct a TerminalExpr that matches any digit using std::set<char>.
     std::set<char> digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
     using DigitTerminal = TerminalExpr<MyContext, std::set<char>>;
-    MyRule num = DigitTerminal(digits);
-    num.setAction([](MyContext& ctx, MyContext::match_range range) {
+    Grammar<MyContext> g;
+    g["num"] = DigitTerminal(digits);
+    g["num"].set_action([](MyContext& ctx, MyContext::match_range range) {
         char c = *range.begin();
         return IntNode{c - '0'};
     });
 
     // Parse two digits
     CHECK(context.node_count() == 0);
-    CHECK(num(context));
-    CHECK(num(context));
+    CHECK(g.parse("num", context));
+    CHECK(g.parse("num", context));
     CHECK(context.node_count() == 2);
 
     // Last pushed should be the second digit (2)
@@ -117,11 +117,12 @@ TEST_CASE("value-stack-monostate-action-returns-default")
     std::string input = "a";
     DefaultCtxt context(input);
 
-    auto rule = DefaultCtxt::Rule{terminal('a')};
-    rule.setAction(
+    Grammar<DefaultCtxt> g;
+    g["rule"] = terminal('a');
+    g["rule"].set_action(
         [](DefaultCtxt& ctx, DefaultCtxt::match_range range) { return std::monostate{}; });
 
-    CHECK(rule(context));
+    CHECK(g.parse("rule", context));
     CHECK(context.node_count() == 1);
     // peek_node returns a const ref to std::monostate — no value to check,
     // but the stack must have one entry.

@@ -137,7 +137,7 @@ struct Context
 
     const InputSource& get_input() const { return m_input; }
 
-    std::tuple<bool, RuleState> ruleState(const NonTerminalType* rule, iterator pos)
+    std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, iterator pos)
     {
         auto [iter_records, ins] = m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
         auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
@@ -145,7 +145,7 @@ struct Context
     }
 
     bool
-    updateRuleState(const NonTerminalType* rule, iterator start_pos, iterator return_pos, bool return_value)
+    update_rule_state(const NonTerminalType* rule, iterator start_pos, iterator return_pos, bool return_value)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -160,7 +160,7 @@ struct Context
         return true;
     }
 
-    bool updateRuleState(const NonTerminalType* rule, iterator start_pos, const RuleState& ruleState)
+    bool update_rule_state(const NonTerminalType* rule, iterator start_pos, const RuleState& rule_state)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -170,8 +170,8 @@ struct Context
         if (memo == memos->second.end()) {
             return false;
         }
-        memo->second.m_last_pos = ruleState.m_last_pos;
-        memo->second.m_last_return = ruleState.m_last_return;
+        memo->second.m_last_pos = rule_state.m_last_pos;
+        memo->second.m_last_return = rule_state.m_last_return;
         return true;
     }
 

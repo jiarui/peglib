@@ -1,6 +1,7 @@
 #pragma once
 
 #include "peglib/Concepts.h"
+#include "peglib/Grammar.h"
 #include "peglib/Macros.h"
 #include "peglib/ParseError.h"
 #include "peglib/Parser.h"

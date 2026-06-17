@@ -85,6 +85,12 @@ auto cut()
 // is shallow and preserves identity, so no special wrapping (self()/NonTerminalRef)
 // is needed — all operands are handled uniformly via static_cast to the CRTP
 // derived type.
+//
+// Phase 2 (Grammar API): RuleProxy (returned by Grammar::operator[]) also
+// inherits from ParsingExpr, so it participates in operators naturally.
+// Expression trees store RuleProxy copies, which carry the name overhead
+// (~40 bytes per node). This is acceptable for typical grammars; a future
+// optimization can strip RuleProxy to Rule in the tree.
 // ---------------------------------------------------------------------------
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>

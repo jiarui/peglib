@@ -50,20 +50,22 @@ public:
     void set_label(std::string label) { m_label = std::move(label); }
     [[nodiscard]] const std::string& label() const noexcept { return m_label; }
 
+    [[nodiscard]] bool is_defined() const noexcept { return m_rule != nullptr; }
+
     bool operator()(Context& context) const { return parse(context); }
 
     bool parse(Context& context) const override
     {
         auto start_pos = context.mark();
-        std::tuple<bool, typename Context::RuleState> rs = context.ruleState(this, start_pos);
-        typename Context::RuleState ruleState = std::get<1>(rs);
+        std::tuple<bool, typename Context::RuleState> rs = context.rule_state(this, start_pos);
+        typename Context::RuleState rule_state = std::get<1>(rs);
         bool result = false;
         if (!std::get<0>(rs)) {
-            context.reset(ruleState.m_last_pos);
-            result = ruleState.m_last_return;
+            context.reset(rule_state.m_last_pos);
+            result = rule_state.m_last_return;
             return result;
         } else {
-            result = parseImpl(context, start_pos, ruleState);
+            result = parseImpl(context, start_pos, rule_state);
             if (result && ParsingExpr<Context, NonTerminal<Context>>::m_action) {
                 auto end_pos = context.mark();
                 auto node = ParsingExpr<Context, NonTerminal<Context>>::m_action(
@@ -86,35 +88,35 @@ public:
 protected:
     bool parseImpl(Context& context,
                    typename Context::iterator start_pos,
-                   typename Context::RuleState& ruleState) const
+                   typename Context::RuleState& rule_state) const
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");
         auto current_pos = context.mark();
-        context.updateRuleState(this, start_pos, ruleState);
+        context.update_rule_state(this, start_pos, rule_state);
         while (true) {
             context.reset(current_pos);
             bool res = m_rule->parse(context);
             auto end_pos = context.mark();
             if (res) {
-                if (end_pos > ruleState.m_last_pos) {
-                    ruleState.m_last_pos = end_pos;
-                    ruleState.m_last_return = res;
-                    bool update_res = context.updateRuleState(this, start_pos, ruleState);
+                if (end_pos > rule_state.m_last_pos) {
+                    rule_state.m_last_pos = end_pos;
+                    rule_state.m_last_return = res;
+                    bool update_res = context.update_rule_state(this, start_pos, rule_state);
                     if (!update_res) {
                         return res;
                     }
                 } else {
-                    ruleState.m_last_return = res;
-                    context.updateRuleState(this, start_pos, ruleState);
+                    rule_state.m_last_return = res;
+                    context.update_rule_state(this, start_pos, rule_state);
                     break;
                 }
             } else {
                 break;
             }
         }
-        bool result = ruleState.m_last_return;
-        context.reset(ruleState.m_last_pos);
-        return ruleState.m_last_return;
+        bool result = rule_state.m_last_return;
+        context.reset(rule_state.m_last_pos);
+        return rule_state.m_last_return;
     }
 
 protected:
@@ -168,7 +170,9 @@ public:
     void set_label(std::string label) { m_impl->set_label(std::move(label)); }
     [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
 
-    void setAction(SemanticAction action) { m_impl->setAction(std::move(action)); }
+    [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
+
+    void set_action(SemanticAction action) { m_impl->set_action(std::move(action)); }
 
     bool operator()(Context& context) const { return parse(context); }
 
@@ -176,6 +180,81 @@ public:
 
 protected:
     std::shared_ptr<Impl> m_impl;
+};
+
+// ---------------------------------------------------------------------------
+// RuleProxy: transient handle returned by Grammar::operator[].
+//
+// Carries the rule name (for auto-naming on assignment). Copy is shallow —
+// the underlying Rule (shared_ptr<NonTerminal>) is shared. Expression trees
+// store RuleProxy copies (~40 bytes per node: Rule + name string). This is
+// acceptable for typical grammars.
+// ---------------------------------------------------------------------------
+template<typename Context>
+struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
+{
+    using Impl = Rule<Context>;
+    using SemanticAction = typename ParsingExpr<Context, RuleProxy<Context>>::SemanticAction;
+
+    RuleProxy(Impl rule, std::string name)
+        : m_rule(std::move(rule)), m_name(std::move(name))
+    {}
+
+    RuleProxy(const RuleProxy&) = default;
+    RuleProxy(RuleProxy&&) = default;
+    // No copy/move assignment operators — all assignment goes through the
+    // operator= overloads below, which forward to the underlying NonTerminal.
+    // A defaulted copy/move assignment would just copy/move members without
+    // updating the NonTerminal, breaking g["y"] = g["z"].
+
+    // Assignment from any ParsingExpr (including RuleProxy from another rule).
+    // This modifies the underlying NonTerminal in-place and auto-names it.
+    // Note: when rhs is a RuleProxy, the defaulted copy assignment would
+    // normally win (better match). We constrain this template to exclude
+    // RuleProxy itself, then provide a separate RuleProxy overload below.
+    template<typename ExprType>
+        requires (!std::same_as<std::remove_cvref_t<ExprType>, RuleProxy<Context>>)
+    RuleProxy& operator=(const ParsingExpr<Context, ExprType>& rhs)
+    {
+        m_rule = rhs;
+        m_rule.set_name(m_name);
+        return *this;
+    }
+
+    // RuleProxy-to-RuleProxy assignment: treat as forwarding to the underlying
+    // NonTerminal. This makes g["y"] = g["z"] define y's NonTerminal to
+    // reference z's expression tree. Handles both lvalue and rvalue RHS.
+    RuleProxy& operator=(RuleProxy rhs)
+    {
+        m_rule = rhs;
+        m_rule.set_name(m_name);
+        return *this;
+    }
+
+    RuleProxy& set_action(SemanticAction action)
+    {
+        m_rule.set_action(std::move(action));
+        return *this;
+    }
+
+    RuleProxy& set_label(std::string label)
+    {
+        m_rule.set_label(std::move(label));
+        return *this;
+    }
+
+    bool operator()(Context& context) const { return parse(context); }
+
+    bool parse(Context& context) const override { return m_rule.parse(context); }
+
+    [[nodiscard]] const std::string& name() const noexcept { return m_name; }
+
+    const Impl& rule() const noexcept { return m_rule; }
+    Impl& rule() noexcept { return m_rule; }
+
+protected:
+    Impl m_rule;
+    std::string m_name;
 };
 
 } // namespace parsers

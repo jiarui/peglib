@@ -9,20 +9,13 @@ using namespace peg;
 auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
 auto linebreak = terminal('\n');
 auto not_linebreak = terminal<char>([](char c) { return c != '\n'; });
-Rule<> names = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; }) >>
-               *terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
 auto digit = terminal('0', '9');
 auto xdigit = terminal<char>([](char c) { return std::isxdigit(c); });
 auto fractional = -(terminal('+') | '-') >>
                   ((*digit >> terminal('.') >> +digit) | (+digit >> terminal('.') >> *digit));
 auto decimal = -(terminal('+') | '-') >> +digit;
-
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >>
                   -(terminal('.') >> +xdigit) >> -((terminal('p') | 'P') >> decimal);
-Rule<> numeral = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
-
-Rule<> comment = terminal('-') >> '-' >> *not_linebreak >> linebreak;
-
 auto escape_single_quote = terminal('\\') >>
                            (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' |
                             ('z' >> WS) | (3 * digit) | (2 * xdigit) |
@@ -31,14 +24,23 @@ auto string_content =
     terminal<char>([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
 auto string_single_quote = terminal('\'') >> *(string_content | escape_single_quote) >>
                            terminal('\'');
-Rule<> string_literal = string_single_quote;
-
-Rule<> ops = terminal('(') | terminal(')');
-
 auto cut_ = cut<Context<std::span<const char>>>();
 
-Rule<> token = (numeral >> cut_) | (names >> cut_) | (string_literal >> cut_) | ops | comment | WS;
-Rule<> lexer = +token;
+Grammar<> g;
+
+[[maybe_unused]] const bool grammar_initialized = [] {
+    g["names"] = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; }) >>
+                 *terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
+    g["numeral"] =
+        hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
+    g["comment"] = terminal('-') >> '-' >> *not_linebreak >> linebreak;
+    g["string_literal"] = string_single_quote;
+    g["ops"] = terminal('(') | terminal(')');
+    g["token"] = (g["numeral"] >> cut_) | (g["names"] >> cut_) | (g["string_literal"] >> cut_) |
+                 g["ops"] | g["comment"] | WS;
+    g["lexer"] = +g["token"];
+    return true;
+}();
 
 enum class TokenID : std::intmax_t
 {
@@ -99,23 +101,24 @@ struct TokenizerTest
     std::vector<Token> m_token_buf;
     void run(const std::string& input)
     {
-        names.setAction([this](Context<std::span<const std::string::value_type>>& context,
-                               Context<std::span<const std::string::value_type>>::match_range match)
-                            -> std::monostate {
-            std::string m = std::string{match.begin(), match.end()};
-            if (m == "if") {
-                m_token_buf.emplace_back(TokenID::TK_IF);
-            } else if (match.size() > 0) {
-                m_token_buf.emplace_back(m);
-            }
-            return {};
-        });
+        g["names"].set_action(
+            [this](Context<std::span<const std::string::value_type>>& context,
+                   Context<std::span<const std::string::value_type>>::match_range match)
+                -> std::monostate {
+                std::string m = std::string{match.begin(), match.end()};
+                if (m == "if") {
+                    m_token_buf.emplace_back(TokenID::TK_IF);
+                } else if (match.size() > 0) {
+                    m_token_buf.emplace_back(m);
+                }
+                return {};
+            });
         Context context(input);
         while (!context.ended()) {
-            token(context);
+            g.parse("token", context);
         }
     }
-    ~TokenizerTest() { names.setAction(nullptr); }
+    ~TokenizerTest() { g["names"].set_action(nullptr); }
 };
 
 TEST_CASE("lua-lex-token")
@@ -142,17 +145,17 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        names.setAction(
-            ([](decltype(context)& c, decltype(context)::match_range range) -> std::monostate {
-                CHECK(std::string(range.begin(), range.end()) == "print");
-                return {};
-            }));
+        g["names"].set_action(([](decltype(context)& c, decltype(context)::match_range range)
+                                   -> std::monostate {
+            CHECK(std::string(range.begin(), range.end()) == "print");
+            return {};
+        }));
 
-        Rule<> ws = WS;
-        bool ok = ws(context);
+        g["ws"] = WS;
+        bool ok = g.parse("ws", context);
         CHECK(ok);
         auto start = context.mark();
-        CHECK(names(context));
+        CHECK(g.parse("names", context));
         CHECK(std::string(start, context.mark()) == "print");
     }
 }
@@ -176,7 +179,7 @@ TEST_CASE("lua-lex-number")
         std::string input = t;
         Context context(input);
         auto start = context.mark();
-        CHECK(numeral(context));
+        CHECK(g.parse("numeral", context));
         CHECK(std::string(start, context.mark()) == input);
     }
 }
@@ -190,7 +193,7 @@ TEST_CASE("lua-lex-comment")
         std::string input = t;
         Context context(input);
         auto start = context.mark();
-        CHECK(comment(context));
+        CHECK(g.parse("comment", context));
         CHECK(std::string(start, context.mark()) == input);
     }
 }
@@ -202,7 +205,7 @@ TEST_CASE("lua-lex-string")
         std::string input = t;
         Context context(input);
         auto start = context.mark();
-        CHECK(string_literal(context));
+        CHECK(g.parse("string_literal", context));
         CHECK(std::string(start, context.mark()) == input);
     }
 }
@@ -211,26 +214,28 @@ TEST_CASE("lua-lex-tokens")
 {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    names.setAction([](decltype(context)& c,
-                       decltype(context)::match_range range) -> std::monostate { return {}; });
+    g["names"].set_action([](decltype(context)& c,
+                             decltype(context)::match_range range) -> std::monostate {
+        return {};
+    });
     {
         auto start = context.mark();
-        CHECK(token(context));
+        CHECK(g.parse("token", context));
         CHECK(std::string(start, context.mark()) == "print");
     }
     {
         auto start = context.mark();
-        CHECK(token(context));
+        CHECK(g.parse("token", context));
         CHECK(std::string(start, context.mark()) == "(");
     }
     {
         auto start = context.mark();
-        CHECK(token(context));
+        CHECK(g.parse("token", context));
         CHECK(std::string(start, context.mark()) == "'hello world'");
     }
     {
         auto start = context.mark();
-        CHECK(token(context));
+        CHECK(g.parse("token", context));
         CHECK(std::string(start, context.mark()) == ")");
     }
 }
@@ -241,7 +246,6 @@ auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
 auto not_linebreak = terminal<char>([](char c) { return c != '\n'; });
 auto name_start = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; });
 auto name_cont = terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
-Rule<> name = name_start >> *name_cont;
 auto linebreak = terminalSeq<char>("\r\n") | terminal('\n');
 auto digit = terminal('0', '9');
 auto xdigit = terminal<char>([](char c) { return std::isxdigit(c); });
@@ -251,20 +255,27 @@ auto decimal = -pos_or_neg >> +digit;
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >> -('.' >> +xdigit) >>
                   -((terminal('p') | 'P') >> +decimal);
 auto expotent = -pos_or_neg >> +digit;
-Rule<> numeral = hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
-
 auto common_escape_code = terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' |
                           (terminal('\\') >> '\\' >> 'n') | ('z' >> WS) | (3 * digit) |
                           (2 * xdigit) | (terminal('u') >> '{' >> *xdigit >> '}');
-Rule<> single_escape_code = terminal('\\') >> (common_escape_code | '\'');
-Rule<> double_escape_code = terminal('\\') >> (common_escape_code | '\'');
 auto single_no_escape_code = terminal<char>([](char c) { return c != '\''; });
 auto double_no_escape_code = terminal<char>([](char c) { return c != '"'; });
-auto string_single_quote = '\'' >> *(single_escape_code | single_no_escape_code) >> '\'';
-auto string_double_quote = '"' >> *(double_escape_code | double_no_escape_code) >> '"';
-Rule<> long_bracket_start = '[' >> *terminal('=') >> '[';
-Rule<> string_literal = string_single_quote | string_double_quote | long_bracket_start;
 
-Rule<> comment = terminal('-') >> '-' >> (long_bracket_start | (*not_linebreak >> linebreak));
-Rule<> token = numeral | name | string_literal | comment | WS;
-}; // namespace lexconv
+Grammar<> g;
+
+[[maybe_unused]] const bool grammar_initialized = [] {
+    g["name"] = name_start >> *name_cont;
+    g["numeral"] =
+        hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
+    g["single_escape_code"] = terminal('\\') >> (common_escape_code | '\'');
+    g["double_escape_code"] = terminal('\\') >> (common_escape_code | '\'');
+    auto string_single_quote = '\'' >> *(g["single_escape_code"] | single_no_escape_code) >> '\'';
+    auto string_double_quote = '"' >> *(g["double_escape_code"] | double_no_escape_code) >> '"';
+    g["long_bracket_start"] = '[' >> *terminal('=') >> '[';
+    g["string_literal"] = string_single_quote | string_double_quote | g["long_bracket_start"];
+    g["comment"] =
+        terminal('-') >> '-' >> (g["long_bracket_start"] | (*not_linebreak >> linebreak));
+    g["token"] = g["numeral"] | g["name"] | g["string_literal"] | g["comment"] | WS;
+    return true;
+}();
+} // namespace lexconv

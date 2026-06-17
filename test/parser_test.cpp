@@ -37,22 +37,24 @@ TEST_CASE("terminalseq-rollback-on-partial-match")
 
 TEST_CASE("cut-committed-failure-throws-parse-error")
 {
+    Grammar<> g;
+
     // `('a' >> cut) | 'b'` on input "b":
     // first alt fails to match 'a', so cut is never set; second alt matches.
     std::string input1 = "b";
     Context context1(input1);
-    Rule<> g1 = (terminal('a') >> cut()) | terminal('b');
-    CHECK(g1(context1));
+    g["g1"] = (terminal('a') >> cut()) | terminal('b');
+    CHECK(g.parse("g1", context1));
 
     // `('a' >> cut >> 'x') | 'a'` on input "ab":
     // first alt matches 'a', sets cut, then fails on 'x'; cut-committed
     // failure now throws peg::ParseError instead of returning false.
     std::string input2 = "ab";
     Context context2(input2);
-    Rule<> g2 = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
+    g["g2"] = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
     bool threw = false;
     try {
-        g2(context2);
+        g.parse("g2", context2);
     } catch (const ParseError& e) {
         threw = true;
         // Position should be 1 (where 'x' was expected, after matching 'a')
@@ -66,8 +68,9 @@ TEST_CASE("repetition-stops-on-no-progress")
     // `*(empty)` would loop forever without no-progress detection.
     std::string input = "abc";
     Context context(input);
-    Rule<> g = *empty();
-    CHECK(g(context));
+    Grammar<> g;
+    g["g"] = *empty();
+    CHECK(g.parse("g", context));
     CHECK(*context.mark() == 'a');
 }
 
@@ -85,8 +88,9 @@ TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
     //   - Must return true, NOT throw.
     std::string input = "abc";
     Context context(input);
-    Rule<> g = *((&terminal('a')) >> cut());
-    CHECK(g(context));
+    Grammar<> g;
+    g["g"] = *((&terminal('a')) >> cut());
+    CHECK(g.parse("g", context));
     CHECK(*context.mark() == 'a');
 }
 

@@ -32,7 +32,6 @@ concept PegContext =
         typename C::value_type;
         typename C::node_type;
         typename C::match_range;
-        typename C::Rule;
     } &&
     requires(
         C c, typename C::iterator it, typename C::node_type n, ExpectedItem ei, std::size_t pos) {
