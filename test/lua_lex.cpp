@@ -16,10 +16,10 @@ auto fractional = -(terminal('+') | '-') >>
 auto decimal = -(terminal('+') | '-') >> +digit;
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >>
                   -(terminal('.') >> +xdigit) >> -((terminal('p') | 'P') >> decimal);
-auto escape_single_quote = terminal('\\') >>
-                           (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' |
-                            ('z' >> WS) | (3 * digit) | (2 * xdigit) |
-                            terminal('u') >> '{' >> *xdigit >> '}');
+auto escape_single_quote =
+    terminal('\\') >>
+    (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | ('z' >> WS) | (3 * digit) |
+     (2 * xdigit) | terminal('u') >> '{' >> *xdigit >> '}');
 auto string_content =
     terminal<char>([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
 auto string_single_quote = terminal('\'') >> *(string_content | escape_single_quote) >>
@@ -31,8 +31,7 @@ Grammar<> g;
 [[maybe_unused]] const bool grammar_initialized = [] {
     g["names"] = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; }) >>
                  *terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
-    g["numeral"] =
-        hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
+    g["numeral"] = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
     g["comment"] = terminal('-') >> '-' >> *not_linebreak >> linebreak;
     g["string_literal"] = string_single_quote;
     g["ops"] = terminal('(') | terminal(')');
@@ -147,13 +146,13 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        g["names"].set_action(([](decltype(context)& c, decltype(context)::ParseTreeNodePtr node)
-                                   -> std::monostate {
-            auto& input = c.get_input();
-            CHECK(std::string(input.begin() + node->start_offset,
-                              input.begin() + node->end_offset) == "print");
-            return {};
-        }));
+        g["names"].set_action(
+            ([](decltype(context)& c, decltype(context)::ParseTreeNodePtr node) -> std::monostate {
+                auto& input = c.get_input();
+                CHECK(std::string(input.begin() + node->start_offset,
+                                  input.begin() + node->end_offset) == "print");
+                return {};
+            }));
 
         g["ws"] = WS;
         bool ok = g.parse("ws", context);
@@ -218,10 +217,10 @@ TEST_CASE("lua-lex-tokens")
 {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    g["names"].set_action([](decltype(context)& c,
-                             decltype(context)::ParseTreeNodePtr node) -> std::monostate {
-        return {};
-    });
+    g["names"].set_action(
+        [](decltype(context)& c, decltype(context)::ParseTreeNodePtr node) -> std::monostate {
+            return {};
+        });
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
@@ -269,8 +268,7 @@ Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
     g["name"] = name_start >> *name_cont;
-    g["numeral"] =
-        hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
+    g["numeral"] = hexdecimal | ((fractional | decimal) >> (terminal('e') | 'E') >> -(decimal));
     g["single_escape_code"] = terminal('\\') >> (common_escape_code | '\'');
     g["double_escape_code"] = terminal('\\') >> (common_escape_code | '\'');
     auto string_single_quote = '\'' >> *(g["single_escape_code"] | single_no_escape_code) >> '\'';

@@ -185,8 +185,7 @@ public:
     Rule() : m_impl(std::make_shared<Impl>()) {}
 
     template<typename ExprType>
-    Rule(const ParsingExpr<Context, ExprType>& rhs)
-        : m_impl(std::make_shared<Impl>(rhs))
+    Rule(const ParsingExpr<Context, ExprType>& rhs) : m_impl(std::make_shared<Impl>(rhs))
     {}
 
     Rule(const Rule&) = default;
@@ -229,15 +228,13 @@ struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
     using ParseResult = typename ParsingExpr<Context, RuleProxy<Context>>::ParseResult;
     using SemanticAction = typename ParsingExpr<Context, RuleProxy<Context>>::SemanticAction;
 
-    RuleProxy(Impl rule, std::string name)
-        : m_rule(std::move(rule)), m_name(std::move(name))
-    {}
+    RuleProxy(Impl rule, std::string name) : m_rule(std::move(rule)), m_name(std::move(name)) {}
 
     RuleProxy(const RuleProxy&) = default;
     RuleProxy(RuleProxy&&) = default;
 
     template<typename ExprType>
-        requires (!std::same_as<std::remove_cvref_t<ExprType>, RuleProxy<Context>>)
+        requires(!std::same_as<std::remove_cvref_t<ExprType>, RuleProxy<Context>>)
     RuleProxy& operator=(const ParsingExpr<Context, ExprType>& rhs)
     {
         m_rule = rhs;

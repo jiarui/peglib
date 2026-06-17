@@ -1,12 +1,12 @@
 #pragma once
+#include "peglib/Combinators.h"
+#include "peglib/ParserFwd.h"
+#include "peglib/Terminals.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
-
-#include "peglib/Combinators.h"
-#include "peglib/ParserFwd.h"
-#include "peglib/Terminals.h"
 
 namespace peg
 {
@@ -32,8 +32,8 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
     using InterfacePtr = std::shared_ptr<ParsingExprInterface<Context>>;
     using ParseResult = typename Context::ParseResult;
 
-    explicit DynSequenceExpr(std::vector<InterfacePtr> children)
-        : m_children(std::move(children)) {}
+    explicit DynSequenceExpr(std::vector<InterfacePtr> children) : m_children(std::move(children))
+    {}
 
     ParseResult parse(Context& context) const override
     {
@@ -46,16 +46,14 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
                 context.state(state);
                 return {false, nullptr};
             }
-            if (result.tree) node->children.push_back(result.tree);
+            if (result.tree)
+                node->children.push_back(result.tree);
         }
         node->end_offset = context.offset_of(context.mark());
         return {true, node};
     }
 
-    [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept
-    {
-        return m_children;
-    }
+    [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept { return m_children; }
 
 protected:
     std::vector<InterfacePtr> m_children;
@@ -68,7 +66,8 @@ struct DynAlternationExpr : ParsingExpr<Context, DynAlternationExpr<Context>>
     using ParseResult = typename Context::ParseResult;
 
     explicit DynAlternationExpr(std::vector<InterfacePtr> children)
-        : m_children(std::move(children)) {}
+        : m_children(std::move(children))
+    {}
 
     ParseResult parse(Context& context) const override
     {
@@ -86,10 +85,7 @@ struct DynAlternationExpr : ParsingExpr<Context, DynAlternationExpr<Context>>
         return {false, nullptr};
     }
 
-    [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept
-    {
-        return m_children;
-    }
+    [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept { return m_children; }
 
 protected:
     std::vector<InterfacePtr> m_children;
@@ -102,7 +98,8 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
     using ParseResult = typename Context::ParseResult;
 
     DynRepeatExpr(InterfacePtr child, std::size_t min_r, std::int64_t max_r)
-        : m_child(std::move(child)), min_rep(min_r), max_rep(max_r) {}
+        : m_child(std::move(child)), min_rep(min_r), max_rep(max_r)
+    {}
 
     ParseResult parse(Context& context) const override
     {
@@ -123,7 +120,8 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
             if (result.success) {
                 loop_count++;
                 last_success_state = context.state();
-                if (result.tree) node->children.push_back(result.tree);
+                if (result.tree)
+                    node->children.push_back(result.tree);
             } else {
                 exited_via_failure = true;
                 break;

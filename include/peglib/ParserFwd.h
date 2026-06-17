@@ -61,8 +61,7 @@ struct ParsingExpr : ParsingExprInterface<Context>
     using NodeType = typename Context::node_type;
     using ParseResult = typename Context::ParseResult;
     using ParseTreeNodePtr = typename Context::ParseTreeNodePtr;
-    using SemanticAction =
-        std::function<NodeType(Context&, ParseTreeNodePtr)>;
+    using SemanticAction = std::function<NodeType(Context&, ParseTreeNodePtr)>;
     void set_action(SemanticAction action) { m_action = action; }
     ParsingExpr() = default;
     ParsingExpr(SemanticAction action) : m_action(action) {}

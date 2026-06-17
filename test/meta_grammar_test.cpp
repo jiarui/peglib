@@ -42,17 +42,20 @@ PegAstNodePtr get_def(const PegParseCtx::ParseTreeNodePtr& tree, std::size_t idx
     std::size_t count = 0;
     std::function<PegAstNodePtr(const PegParseCtx::ParseTreeNodePtr&)> extract =
         [&](const PegParseCtx::ParseTreeNodePtr& node) -> PegAstNodePtr {
-            if (!node) return nullptr;
-            if (node->name == "Definition" && node->value) {
-                if (count == idx) return node->value;
-                count++;
-                return nullptr;
-            }
-            for (auto& child : node->children) {
-                if (auto r = extract(child)) return r;
-            }
+        if (!node)
             return nullptr;
-        };
+        if (node->name == "Definition" && node->value) {
+            if (count == idx)
+                return node->value;
+            count++;
+            return nullptr;
+        }
+        for (auto& child : node->children) {
+            if (auto r = extract(child))
+                return r;
+        }
+        return nullptr;
+    };
     return extract(tree);
 }
 

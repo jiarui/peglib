@@ -240,11 +240,9 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<MyContext> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action(
-        [](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     g["b_node"] = ATerm('b');
-    g["b_node"].set_action(
-        [](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{2}; });
+    g["b_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{2}; });
     // Both alternatives produce a node. The point of this test: when the
     // first alternative fails (after partial match), its node is not
     // contributed to the parent tree before the second alternative is tried.
@@ -284,8 +282,7 @@ TEST_CASE("value-stack-rollback-on-not-predicate")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<MyContext> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action(
-        [](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     // !a_node succeeds (because lookahead doesn't match), and must leave
     // zero children — the child's would-be node is discarded by NotExpr.
     g["not_a"] = !g["a_node"];
@@ -303,8 +300,7 @@ TEST_CASE("value-stack-rollback-on-and-predicate")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<MyContext> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action(
-        [](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     // &a_node succeeds (lookahead matches 'a'), and must leave zero children
     // — the child's node is discarded by AndExpr.
     g["and_a"] = &g["a_node"];

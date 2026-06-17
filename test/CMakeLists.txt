@@ -23,13 +23,15 @@ add_executable(peglib_test
     value_stack_test.cpp
     error_test.cpp
     dynexpr_test.cpp
-    meta_grammar_test.cpp)
+    meta_grammar_test.cpp
+    self_parse_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})
 
 target_compile_definitions(peglib_test PRIVATE
-    PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    PEGLIB_PROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 add_test(NAME peglib_test COMMAND peglib_test)
 

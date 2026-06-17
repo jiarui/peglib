@@ -361,8 +361,7 @@ TEST_CASE("terminal-range-expression")
 TEST_CASE("terminal-set-expression")
 {
     Grammar<> g;
-    g["grammar"] =
-        terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
+    g["grammar"] = terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
 
     SUBCASE("matches '0'")
     {
@@ -536,12 +535,10 @@ Grammar<> arithmetic_g;
     auto digit = terminal('0', '9');
     auto integer = +digit;
     arithmetic_g["num"] = integer | '(' >> arithmetic_g["add"] >> ')';
-    arithmetic_g["mul"] = (arithmetic_g["mul"] >> '*' >> arithmetic_g["num"])
-                          | (arithmetic_g["mul"] >> '/' >> arithmetic_g["num"])
-                          | arithmetic_g["num"];
-    arithmetic_g["add"] = (arithmetic_g["add"] >> '+' >> arithmetic_g["mul"])
-                          | (arithmetic_g["add"] >> '-' >> arithmetic_g["mul"])
-                          | arithmetic_g["mul"];
+    arithmetic_g["mul"] = (arithmetic_g["mul"] >> '*' >> arithmetic_g["num"]) |
+                          (arithmetic_g["mul"] >> '/' >> arithmetic_g["num"]) | arithmetic_g["num"];
+    arithmetic_g["add"] = (arithmetic_g["add"] >> '+' >> arithmetic_g["mul"]) |
+                          (arithmetic_g["add"] >> '-' >> arithmetic_g["mul"]) | arithmetic_g["mul"];
     arithmetic_g.set_start("add");
     return true;
 }();

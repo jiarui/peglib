@@ -19,8 +19,10 @@ namespace parsers
 template<typename Context, typename... Children>
 struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
 {
-    using ParseResult = typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseResult;
-    using ParseTreeNodePtr = typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseTreeNodePtr;
+    using ParseResult =
+        typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseResult;
+    using ParseTreeNodePtr =
+        typename ParsingExpr<Context, SequenceExpr<Context, Children...>>::ParseTreeNodePtr;
 
     SequenceExpr(const std::tuple<Children...>& children) : m_children{children} {}
 
@@ -46,7 +48,8 @@ protected:
         if constexpr (Index < sizeof...(Children)) {
             auto result = std::get<Index>(m_children).parse(context);
             if (result.success) {
-                if (result.tree) node->children.push_back(result.tree);
+                if (result.tree)
+                    node->children.push_back(result.tree);
                 return parseSeq<Index + 1>(context, node);
             }
             return false;
@@ -64,7 +67,8 @@ protected:
 template<typename Context, typename... Children>
 struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children...>>
 {
-    using ParseResult = typename ParsingExpr<Context, AlternationExpr<Context, Children...>>::ParseResult;
+    using ParseResult =
+        typename ParsingExpr<Context, AlternationExpr<Context, Children...>>::ParseResult;
 
     AlternationExpr(const std::tuple<Children...>& children) : m_children(children) {}
     const std::tuple<Children...>& children() const { return m_children; }
@@ -137,7 +141,8 @@ struct Repetition
             if (result.success) {
                 loopCount++;
                 lastSuccessState = context.state();
-                if (result.tree) node->children.push_back(result.tree);
+                if (result.tree)
+                    node->children.push_back(result.tree);
             } else {
                 exited_via_failure = true;
                 break;

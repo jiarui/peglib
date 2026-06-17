@@ -106,11 +106,11 @@ struct Context
     // -------------------------------------------------------------------
     struct ParseTreeNode
     {
-        std::string name;                 // rule name (empty for anonymous)
-        std::size_t start_offset = 0;     // byte offset of match start
-        std::size_t end_offset = 0;       // byte offset past match end
+        std::string name;             // rule name (empty for anonymous)
+        std::size_t start_offset = 0; // byte offset of match start
+        std::size_t end_offset = 0;   // byte offset past match end
         std::vector<std::shared_ptr<ParseTreeNode>> children;
-        NodeType value{};                 // filled by semantic action
+        NodeType value{}; // filled by semantic action
     };
     using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
 
@@ -175,13 +175,16 @@ struct Context
 
     std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, iterator pos)
     {
-        auto [iter_records, ins] = m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
+        auto [iter_records, ins] =
+            m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
         auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
         return std::tuple<bool, RuleState>{ok, iter->second};
     }
 
-    bool
-    update_rule_state(const NonTerminalType* rule, iterator start_pos, iterator return_pos, bool return_value)
+    bool update_rule_state(const NonTerminalType* rule,
+                           iterator start_pos,
+                           iterator return_pos,
+                           bool return_value)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -196,7 +199,8 @@ struct Context
         return true;
     }
 
-    bool update_rule_state(const NonTerminalType* rule, iterator start_pos, const RuleState& rule_state)
+    bool
+    update_rule_state(const NonTerminalType* rule, iterator start_pos, const RuleState& rule_state)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {

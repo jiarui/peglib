@@ -87,10 +87,7 @@ public:
     }
 
     // Parse using an explicit rule name. Returns true on success.
-    bool parse(std::string_view rule, Context& ctx) const
-    {
-        return at(rule).parse(ctx).success;
-    }
+    bool parse(std::string_view rule, Context& ctx) const { return at(rule).parse(ctx).success; }
 
     // Parse and return the parse tree (nullptr on failure or if the start
     // rule is transparent). Useful for AST construction.

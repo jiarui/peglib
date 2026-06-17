@@ -30,10 +30,13 @@ inline Grammar<> g;
     g["fieldlist"] = g["field"] >> *(g["fieldsep"] >> g["field"]) >> -g["fieldsep"];
     g["tableconstructor"] = terminal('{') >> -g["fieldlist"] >> terminal('}');
     g["parlist"] = g["namelist"] >> (-(terminal(',') >> terminalSeq("...")) | terminalSeq("..."));
-    g["funcbody"] = terminal('(') >> -(g["parlist"]) >> terminal(')') >> g["block"] >> terminalSeq("end");
+    g["funcbody"] =
+        terminal('(') >> -(g["parlist"]) >> terminal(')') >> g["block"] >> terminalSeq("end");
     g["functiondef"] = terminalSeq("function") >> g["funcbody"];
-    g["args"] = (terminal('(') >> -g["explist"] >> terminal(')')) | g["tableconstructor"] | g["LiteralString"];
-    g["functioncall"] = (g["prefixexp"] >> g["args"]) | (g["prefixexp"] >> terminal(':') >> g["Name"] >> g["args"]);
+    g["args"] = (terminal('(') >> -g["explist"] >> terminal(')')) | g["tableconstructor"] |
+                g["LiteralString"];
+    g["functioncall"] =
+        (g["prefixexp"] >> g["args"]) | (g["prefixexp"] >> terminal(':') >> g["Name"] >> g["args"]);
     g["varlist"] = g["var"] >> *(terminal(',') >> g["var"]);
     g["funcname"] = g["Name"] >> *(terminal('.') >> g["Name"]) >> -(terminal(':') >> g["Name"]);
     g["label"] = terminalSeq("::") >> g["Name"] >> terminalSeq("::");
@@ -43,18 +46,20 @@ inline Grammar<> g;
     // Renamed from `stat` to `stat_rule` because Windows ucrt's <sys/stat.h>
     // declares a `stat` function, causing C2373 redefinition errors on MSVC.
     g["stat_rule"] =
-        terminal(';') | (g["varlist"] >> terminal('=') >> g["explist"]) | g["functioncall"] | g["label"] |
-        terminalSeq("break") | (terminalSeq("goto") >> g["Name"]) |
+        terminal(';') | (g["varlist"] >> terminal('=') >> g["explist"]) | g["functioncall"] |
+        g["label"] | terminalSeq("break") | (terminalSeq("goto") >> g["Name"]) |
         (terminalSeq("do") >> g["block"] >> terminalSeq("end")) |
-        (terminalSeq("while") >> g["expr"] >> terminalSeq("do") >> g["block"] >> terminalSeq("end")) |
+        (terminalSeq("while") >> g["expr"] >> terminalSeq("do") >> g["block"] >>
+         terminalSeq("end")) |
         (terminalSeq("repeat") >> g["block"] >> terminalSeq("until") >> g["expr"]) |
         (terminalSeq("if") >> g["expr"] >> terminalSeq("then") >> g["block"] >>
          *(terminalSeq("elseif") >> g["expr"] >> terminalSeq("then") >> g["block"]) >>
          -(terminalSeq("else") >> g["block"]) >> terminalSeq("end")) |
-        (terminalSeq("for") >> g["Name"] >> terminal('=') >> g["expr"] >> terminal(',') >> g["expr"] >>
-         -(terminal(',') >> g["expr"]) >> terminalSeq("do") >> g["block"] >> terminalSeq("end")) |
-        (terminalSeq("for") >> g["namelist"] >> terminalSeq("in") >> g["explist"] >> terminalSeq("do") >>
-         g["block"] >> terminalSeq("end")) |
+        (terminalSeq("for") >> g["Name"] >> terminal('=') >> g["expr"] >> terminal(',') >>
+         g["expr"] >> -(terminal(',') >> g["expr"]) >> terminalSeq("do") >> g["block"] >>
+         terminalSeq("end")) |
+        (terminalSeq("for") >> g["namelist"] >> terminalSeq("in") >> g["explist"] >>
+         terminalSeq("do") >> g["block"] >> terminalSeq("end")) |
         (terminalSeq("function") >> g["funcname"] >> g["funcbody"]) |
         (terminalSeq("local") >> terminalSeq("function") >> g["Name"] >> g["funcbody"]) |
         (terminalSeq("local") >> g["attnamlist"] >> -(terminal('-') >> g["explist"]));
@@ -65,7 +70,8 @@ inline Grammar<> g;
     // Grammar (lazy creation + in-place assignment).
     g["expr"] = terminalSeq("nil") | terminalSeq("false") | terminalSeq("true") |
                 terminalSeq("...") | g["functiondef"] | g["prefixexp"] | g["tableconstructor"] |
-                (g["expr"] >> g["binop"] >> g["expr"]) | (g["unop"] >> g["expr"]) | g["Numeral"] | g["LiteralString"];
+                (g["expr"] >> g["binop"] >> g["expr"]) | (g["unop"] >> g["expr"]) | g["Numeral"] |
+                g["LiteralString"];
     g["explist"] = g["expr"] >> *(terminal(',') >> g["expr"]);
     g["namelist"] = g["Name"] >> *(terminal(',') >> g["Name"]);
     g["var"] = g["Name"] | (g["prefixexp"] >> terminal('[') >> g["expr"] >> terminal(']')) |

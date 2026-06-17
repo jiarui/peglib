@@ -41,18 +41,16 @@ inline Grammar<> g;
     // Whitespace: space, tab, newline, carriage return. (Phase 3 will
     // introduce Context::set_skipper so users won't need to thread this
     // manually.)
-    g["ws"] = *terminal<char>([](char c) {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-    });
+    g["ws"] =
+        *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 
     // ----- string -----
     auto escape_seq = terminal('\\') >> terminal<char>([](char c) {
-        return c == '"' || c == '\\' || c == '/' || c == 'b' || c == 'f' ||
-               c == 'n' || c == 'r' || c == 't' || c == 'u';
-    });
-    auto string_char = terminal<char>([](char c) {
-        return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20;
-    });
+                          return c == '"' || c == '\\' || c == '/' || c == 'b' || c == 'f' ||
+                                 c == 'n' || c == 'r' || c == 't' || c == 'u';
+                      });
+    auto string_char = terminal<char>(
+        [](char c) { return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20; });
     g["string"] = terminal('"') >> *(escape_seq | string_char) >> terminal('"');
 
     // ----- number -----
@@ -89,8 +87,8 @@ inline Grammar<> g;
     // know it's a number, we don't backtrack into trying it as an object.
     // The cut must live inside this AlternationExpr so the cut stack frame
     // is provided by the alternation, not by the individual rules.
-    g["value"] = (g["keyword"] >> cut_) | (g["number"] >> cut_) |
-                 (g["object"] >> cut_) | (g["array"] >> cut_) | (g["string"] >> cut_);
+    g["value"] = (g["keyword"] >> cut_) | (g["number"] >> cut_) | (g["object"] >> cut_) |
+                 (g["array"] >> cut_) | (g["string"] >> cut_);
 
     // ----- top-level -----
     g["json"] = g["ws"] >> g["value"] >> g["ws"];
@@ -117,8 +115,17 @@ TEST_CASE("[json] keyword-rule")
 TEST_CASE("[json] number-rule")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"0", "1", "42", "-1", "3.14", "-0.5", "1e10",
-                                 "2.5E-3", "123.456e789", "10.0", "0.001",
+    for (const std::string& s : {"0",
+                                 "1",
+                                 "42",
+                                 "-1",
+                                 "3.14",
+                                 "-0.5",
+                                 "1e10",
+                                 "2.5E-3",
+                                 "123.456e789",
+                                 "10.0",
+                                 "0.001",
                                  "-123.456e+789"}) {
         Context ctx(s);
         CAPTURE(s);
@@ -141,8 +148,11 @@ TEST_CASE("[json] number-rule-rejects-invalid")
 TEST_CASE("[json] string-rule")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"\"\"", "\"a\"", "\"hello world\"",
-                                 "\"tab\\there\"", "\"unicode\\u0041\"",
+    for (const std::string& s : {"\"\"",
+                                 "\"a\"",
+                                 "\"hello world\"",
+                                 "\"tab\\there\"",
+                                 "\"unicode\\u0041\"",
                                  "\"slash\\/end\""}) {
         Context ctx(s);
         CAPTURE(s);

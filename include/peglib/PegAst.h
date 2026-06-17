@@ -1,11 +1,11 @@
 #pragma once
+#include "peglib/Context.h"
+
 #include <memory>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "peglib/Context.h"
 
 namespace peg
 {
@@ -27,21 +27,21 @@ namespace peg
 enum class NodeKind
 {
     // Structural
-    Definition,   // name <- expr;    children[0] = body expression
-    Sequence,     // e1 e2 ... en
-    Choice,       // e1 / e2 / ... / en
-    Optional,     // e?
-    Star,         // e*
-    Plus,         // e+
-    AndPred,      // &e
-    NotPred,      // !e
-    Group,        // (e)  — child carried transparently
+    Definition, // name <- expr;    children[0] = body expression
+    Sequence,   // e1 e2 ... en
+    Choice,     // e1 / e2 / ... / en
+    Optional,   // e?
+    Star,       // e*
+    Plus,       // e+
+    AndPred,    // &e
+    NotPred,    // !e
+    Group,      // (e)  — child carried transparently
 
     // Leaves
-    Literal,      // 'abc' / "abc";   text = the decoded content
-    CharClass,    // [a-z^0-9_];      text = the raw inside-bracket source
-    Dot,          // .
-    RuleRef,      // name;            text = referenced rule name
+    Literal,   // 'abc' / "abc";   text = the decoded content
+    CharClass, // [a-z^0-9_];      text = the raw inside-bracket source
+    Dot,       // .
+    RuleRef,   // name;            text = referenced rule name
 
     // Internal sentinel used by the meta-grammar's reduce actions to
     // delimit a variable-length run of values on the value stack. Never
@@ -56,8 +56,7 @@ struct PegAstNode
     std::vector<std::shared_ptr<PegAstNode>> children;
 
     PegAstNode() = default;
-    PegAstNode(NodeKind k, std::string t = {})
-        : kind{k}, text{std::move(t)} {}
+    PegAstNode(NodeKind k, std::string t = {}) : kind{k}, text{std::move(t)} {}
 
     // Convenience factory. Usage:
     //   auto n = PegAstNode::make(NodeKind::Literal, "abc");

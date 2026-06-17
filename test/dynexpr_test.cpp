@@ -161,7 +161,7 @@ TEST_CASE("[dynexpr] repeat-optional")
         std::string input = "aa";
         Ctx ctx(input);
         CHECK(opt.parse(ctx));
-        CHECK_FALSE(ctx.ended());  // second 'a' unconsumed
+        CHECK_FALSE(ctx.ended()); // second 'a' unconsumed
     }
 }
 
@@ -177,7 +177,7 @@ TEST_CASE("[dynexpr] and-predicate-zero-width")
     std::string input = "a";
     Ctx ctx(input);
     CHECK(a.parse(ctx));
-    CHECK_FALSE(ctx.ended());  // position unchanged
+    CHECK_FALSE(ctx.ended()); // position unchanged
 }
 
 TEST_CASE("[dynexpr] not-predicate-zero-width")
