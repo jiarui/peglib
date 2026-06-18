@@ -53,6 +53,14 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
         return {true, node};
     }
 
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        for (const auto& child : m_children) {
+            if (child)
+                child->collect_rule_refs(refs);
+        }
+    }
+
     [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept { return m_children; }
 
 protected:
@@ -83,6 +91,14 @@ struct DynAlternationExpr : ParsingExpr<Context, DynAlternationExpr<Context>>
             }
         }
         return {false, nullptr};
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        for (const auto& child : m_children) {
+            if (child)
+                child->collect_rule_refs(refs);
+        }
     }
 
     [[nodiscard]] const std::vector<InterfacePtr>& children() const noexcept { return m_children; }
@@ -149,6 +165,12 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
         return {true, node};
     }
 
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_child)
+            m_child->collect_rule_refs(refs);
+    }
+
     [[nodiscard]] const InterfacePtr& child() const noexcept { return m_child; }
     [[nodiscard]] std::tuple<std::size_t, std::int64_t> reps() const noexcept
     {
@@ -173,6 +195,11 @@ struct DynAndExpr : ParsingExpr<Context, DynAndExpr<Context>>
         context.state(state);
         return {result.success, nullptr};
     }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_child)
+            m_child->collect_rule_refs(refs);
+    }
     [[nodiscard]] const InterfacePtr& child() const noexcept { return m_child; }
 
 protected:
@@ -190,6 +217,11 @@ struct DynNotExpr : ParsingExpr<Context, DynNotExpr<Context>>
         auto result = m_child->parse(context);
         context.state(state);
         return {!result.success, nullptr};
+    }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_child)
+            m_child->collect_rule_refs(refs);
     }
     [[nodiscard]] const InterfacePtr& child() const noexcept { return m_child; }
 
@@ -211,6 +243,12 @@ struct DynExpr : ParsingExpr<Context, DynExpr<Context>>
     typename Context::ParseResult parse(Context& context) const override
     {
         return m_impl->parse(context);
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_impl)
+            m_impl->collect_rule_refs(refs);
     }
 
     [[nodiscard]] const InterfacePtr& impl() const noexcept { return m_impl; }

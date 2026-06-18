@@ -34,6 +34,11 @@ struct RuleRefWrapper : parsers::ParsingExpr<Context, RuleRefWrapper<Context>>
     explicit RuleRefWrapper(parsers::RuleProxy<Context> p) : proxy(std::move(p)) {}
 
     ParseResult parse(Context& ctx) const override { return proxy.parse(ctx); }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        refs.insert(proxy.name());
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -119,10 +124,9 @@ public:
         auto undefined = out.undefined_rules();
         if (!undefined.empty()) {
             // Report the first undefined rule as a diagnostic.
-            err = Diagnostic{0, {ExpectedItem{
-                .kind = ExpectedKind::RuleName,
-                .text = "undefined rule '" + undefined[0] + "'"
-            }}};
+            err = Diagnostic{0,
+                             {ExpectedItem{.kind = ExpectedKind::RuleName,
+                                           .text = "undefined rule '" + undefined[0] + "'"}}};
             return false;
         }
 

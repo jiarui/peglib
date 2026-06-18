@@ -137,42 +137,49 @@ ASan measurement: 100 recursive grammars (`A <- A 'x' / 'y'`) leak
 - [ ] Add a regression test that compiles + destroys N recursive grammars
       and checks ASan is clean.
 
-## Phase 2 — Grammar API (PARTIAL: Grammar container done, textual format pending)
+## Phase 2 — Grammar API + Textual Grammar Format (DONE)
 
-The `Grammar<>` class is now the primary user-facing API. Rules are defined
+The `Grammar<>` class is the primary user-facing API. Rules are defined
 via `g["name"] = expr`, auto-named, and support recursive/mutually-recursive
 references without forward declarations.
+
+PEG text can be compiled at runtime via `GrammarCompiler::from_string()`.
 
 ### Done (Grammar Container)
 - [x] `Grammar<Ctx>` class with `operator[]`, `set_start`, `parse`, `parse_string`
 - [x] `RuleProxy` for assignment chaining and auto-naming
 - [x] Lazy rule creation (forward references work automatically)
 - [x] `undefined_rules()` validation helper
+- [x] `unreachable_rules()` validation helper (dead-code detection)
 - [x] Introspection: `rule_names()`, `has_rule()`, `at()`
 - [x] All tests migrated to Grammar API
 
-### Pending (Textual Grammar Format)
-
-The biggest gap separating peglib from feature-complete PEG libraries (yhirose
-cpp-peglib, pest, peggy). Once shipped, users can author grammars declaratively
-without writing C++ combinators.
-
-- [ ] **PEG-in-PEG self-hosting grammar**: a `peg::grammar` rule that parses PEG
-      text into `Rule` objects
-- [ ] `Grammar::from_string("Expr <- Term ('+' Term)*")` — compile text into a
-      working `Rule` tree at runtime
-- [ ] Support the canonical PEG syntax:
+### Done (Textual Grammar Format)
+- [x] **PEG-in-PEG self-hosting grammar**: C++ meta-grammar (MetaGrammar.h)
+      parses PEG text into PegAstNode trees
+- [x] `GrammarCompiler::from_string("Expr <- Term ('+' Term)*")` — compiles
+      PEG text into a working `Grammar<>` at runtime
+- [x] Canonical PEG syntax (Ford 2004):
       - `Identifier <- Expression` rule definitions
       - Sequence (juxtaposition), `/` ordered choice
       - `*` `+` `?` repetition, `!` `&` predicates
-      - `.` any-char, `[a-z]` char class, `'lit'` / `"lit"` literals
+      - `.` any-char, `[a-z]` char class (ranges, negation, escapes)
+      - `'lit'` / `"lit"` literals (with escape sequences)
       - `(...)` grouping
       - Comments (`# ...` to end of line)
-- [ ] **Grammar validation**: unreachable rules, left-recursion detection
-      (warning, not error — we support it)
-- [ ] Hooks for semantic actions per named rule (lambdas attached after
-      `from_string`)
-- [ ] Round-trip: `Grammar::to_dot()` for visualization
+- [x] **Grammar validation**: unreachable rules detection, undefined rules
+      detection. Left-recursion detection deferred (we support it natively).
+- [x] Semantic actions via post-binding: `g["name"].set_action(...)` after
+      `from_string`
+- [x] Self-hosting: `from_string` can compile `meta/peg.peg` itself
+
+### Architecture Change (post-parse action model)
+- `parse()` returns `ParseResult {success, tree}` instead of `bool`
+- `ParseTreeNode` carries name, offsets, children, and a NodeType value
+- Actions receive `ParseTreeNodePtr` and read `children[i]->value`
+- Memo caches full `ParseResult` (tree + value) — no action replay conflict
+- Value stack completely removed from Context (6 methods + vector deleted)
+- Combinator value-stack rollback removed (tree flows via return values)
 
 ## Phase 3 — Auto Whitespace & Token Boundaries
 
@@ -255,9 +262,9 @@ Reduce grammar duplication.
 | CI platforms | Linux + Windows only | macOS deferred (cost); platform coverage sufficient |
 | Sanitizers | master-only job | Slow (2-3x); not worth blocking every PR |
 | Parser.h structure | Split into ParserFwd/Terminals/Combinators/NonTerminal | Reduce compile times; umbrella preserved for backward compat |
-| Value stack reduce | Phase 1 only pushes; reduce deferred to consumer code | Reduce semantics are application-specific; library should stay generic |
+| Value stack reduce | Eliminated (post-parse action model) | Actions read from ParseTreeNode::children; value stack removed entirely from Context |
 | `DiagnosticConsumer` | Not yet introduced (YAGNI) | Only one diagnostic kind today; revisit when multiple levels / recovery arrive |
-| Textual grammar format | Canonical PEG syntax (Ford 2004) + yhirose-style extensions | Maximally familiar to existing PEG users; deviations only where they add clear value |
+| Textual grammar format | Canonical PEG syntax (Ford 2004) + `#` comments + `[^...]` negated classes | Maximally familiar to existing PEG users; deviations only where they add clear value |
 | Whitespace model | Opt-in `set_skipper` + `lexeme()` escape hatch | pest/yhirose show that auto-skip is the right default; but library users must be able to disable |
 | Rule ownership | `Rule` as `shared_ptr` handle (Phase 2.0) | NonTerminal identity must be stable for memo/seed-grow; Rule must be copyable for ergonomics. Shared ownership reconciles both. |
 | Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |

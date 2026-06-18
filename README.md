@@ -2,15 +2,16 @@
 
 Header-only Parsing Expression Grammar (PEG) library in C++20, featuring packrat
 memoization, left-recursion support, a cut operator for committed choice,
-structured error reporting, and a pluggable value stack for AST construction.
+structured error reporting, runtime text-grammar compilation, and a post-parse
+tree-based action model for AST construction.
 
 ## Status
 
-Core combinators and infrastructure are stable and tested. Phase 1 (error
-reporting, SourceMap, value stack, concept-constrained Context) is complete.
-The roadmap now focuses on **generic PEG library features**: a textual grammar
-format, automatic whitespace skipping, error recovery, tracing/profiling, and
-parameterized rules — see [TODO.md](TODO.md).
+Core combinators, infrastructure, Grammar API, and textual grammar format are
+complete. Phase 2 delivers `GrammarCompiler::from_string()` — compile PEG text
+at runtime into a working `Grammar<>`. The roadmap now focuses on **generic PEG
+library features**: automatic whitespace skipping, error recovery,
+tracing/profiling, and parameterized rules — see [TODO.md](TODO.md).
 
 Application-specific work built on peglib lives in consumer projects.
 [yueshi](https://github.com/jiarui/yueshi) is a Lua 5.4 frontend (lexer → typed
@@ -20,48 +21,56 @@ real-world case study.
 ## Features
 
 - **Header-only**, C++20, no external runtime dependencies.
-- **Natural DSL** via operator overloading: `>>` (sequence), `|` (choice),
-  `*` / `+` / `-` / `n*` (repetition / optional), `!` / `&` (negation /
-  lookahead), `cut()` (committed choice).
+- **Two ways to define grammars**:
+  - **C++ combinators**: `>>` (sequence), `|` (choice), `*` / `+` / `-` /
+    `n*` (repetition / optional), `!` / `&` (negation / lookahead),
+    `cut()` (committed choice).
+  - **Textual PEG format**: `GrammarCompiler::from_string("Expr <- Term ('+' Term)*")`
+    compiles PEG text at runtime into a `Grammar<>`.
 - **Packrat memoization** for linear-time parsing.
 - **Left-recursion** support via seed-grow.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
   throw `peg::ParseError` (a hard error); regular failures are queryable via
   `Context::take_error()`.
+- **Post-parse action model**: `parse()` returns `ParseResult {success, tree}`.
+  Actions receive a `ParseTreeNodePtr` and read `children[i]->value` to access
+  sub-rule results. No value stack — the tree flows through return values.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
   `file:line:col: error: expected A or B` messages.
 - **`SourceMap`**: byte offset ↔ (line, col) mapping, supports both contiguous
   in-memory sources and streaming `FileSource`.
-- **Value stack**: `Context<InputSource, NodeType>` holds a stack of
-  user-defined AST nodes. Semantic actions push return values; reduction is
-  deferred to a later phase.
+- **Grammar validation**: `undefined_rules()` and `unreachable_rules()` helpers.
 - **Concept-constrained**: `PegContext<C>` concept validates the Context API at
   compile time.
 - **Pluggable input sources**: in-memory (`std::string`, `std::vector`) and
   streaming file I/O (`FileSource` with double buffering + cut-driven eviction).
+- **Self-hosting**: the C++ meta-grammar can parse `meta/peg.peg`, and
+  `GrammarCompiler` can compile it into a working grammar.
 
 ## Quick Start
+
+### Textual grammar (recommended)
 
 ```cpp
 #include "peglib.h"
 #include <iostream>
-#include <string>
 
 using namespace peg;
 
 int main() {
-    // A grammar for comma-separated letters: 'a','b','c'
-    const Rule<> letter = terminal('a') | 'b' | 'c';
-    const Rule<> list   = letter >> *(',' >> letter);
+    auto g = GrammarCompiler::from_string(R"(
+        Expr   <- Term ('+' Term)*
+        Term   <- Factor ('*' Factor)*
+        Factor <- [0-9]+ / '(' Expr ')'
+    )");
 
-    std::string input = "a,b,c";
-    Context context(input);
-    if (list(context) && context.ended()) {
+    std::string input = "1+2*3";
+    Context<> ctx{input};
+    if (g.parse(ctx)) {
         std::cout << "parsed successfully\n";
     } else {
-        // On normal failure: query the diagnostic
-        if (auto err = context.take_error()) {
+        if (auto err = ctx.take_error()) {
             SourceMap map{std::string_view{input}};
             std::cerr << err->format(map, "input") << "\n";
         }
@@ -69,62 +78,7 @@ int main() {
 }
 ```
 
-### Error reporting with cut
-
-```cpp
-// `('a' >> cut >> 'x') | 'a'` on input "ab":
-// first alt matches 'a', sets cut, fails on 'x' — cut-committed
-// failure throws peg::ParseError instead of falling through to alt 2.
-Rule<> g = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
-std::string input = "ab";
-Context context(input);
-
-try {
-    g(context);
-} catch (const ParseError& e) {
-    SourceMap map{std::string_view{input}};
-    std::cerr << e.to_diagnostic().format(map, "file.txt") << "\n";
-    // Prints: file.txt:1:2: error: expected 'x'
-}
-```
-
-### Custom AST node type
-
-```cpp
-struct IntNode { int value; };
-
-using MyContext = Context<std::span<const char>, IntNode>;
-
-Grammar<MyContext> g;
-g["digit"] = ...; // construct a TerminalExpr<MyContext, ...>
-g["digit"].set_action([](MyContext&, MyContext::match_range r) {
-    return IntNode{*r.begin() - '0'};
-});
-
-std::string input = "42";
-MyContext context(input);
-g.parse("digit", context);
-g.parse("digit", context);
-// context.node_count() == 2
-// context.peek_node().value == 2 (last pushed)
-```
-
-### Named rules with `PEG_RULE` macro
-
-**Removed in Phase 2.** Use the Grammar API instead — rules are auto-named
-from the map key:
-
-```cpp
-Grammar<> g;
-g["numeral"] = terminal('0', '9') >> +terminal('0', '9');
-// "numeral" appears in error messages when the rule fails.
-```
-
-### Recursive rules
-
-With the Grammar API, recursive and mutually-recursive rules work naturally
-— `g["expr"]` lazily creates the rule on first access, so forward references
-are automatic. No forward declarations or macros needed:
+### C++ combinator grammar
 
 ```cpp
 Grammar<> g;

@@ -281,6 +281,44 @@ TEST_CASE("[from_string] semantic-action-binding")
 }
 
 // ---------------------------------------------------------------------------
+// unreachable_rules() validation
+// ---------------------------------------------------------------------------
+TEST_CASE("[from_string] unreachable-rules")
+{
+    SUBCASE("all-reachable")
+    {
+        auto g = GrammarCompiler::from_string(R"(
+            A <- B 'x'
+            B <- [a-z]+
+        )");
+        auto unreachable = g.unreachable_rules();
+        CHECK(unreachable.empty());
+    }
+    SUBCASE("one-unreachable")
+    {
+        auto g = GrammarCompiler::from_string(R"(
+            Start <- 'a'
+            Dead  <- 'b'
+        )");
+        auto unreachable = g.unreachable_rules();
+        REQUIRE(unreachable.size() == 1);
+        CHECK(unreachable[0] == "Dead");
+    }
+    SUBCASE("transitive-reachability")
+    {
+        auto g = GrammarCompiler::from_string(R"(
+            A <- B
+            B <- C
+            C <- 'x'
+            D <- 'y'
+        )");
+        auto unreachable = g.unreachable_rules();
+        REQUIRE(unreachable.size() == 1);
+        CHECK(unreachable[0] == "D");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Self-parse: compile peg.peg itself and verify it can parse PEG text
 // ---------------------------------------------------------------------------
 TEST_CASE("[from_string] self-hosting-compile-peg-spec")

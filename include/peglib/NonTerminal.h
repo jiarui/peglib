@@ -118,6 +118,12 @@ public:
         return result;
     }
 
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_rule)
+            m_rule->collect_rule_refs(refs);
+    }
+
 protected:
     ParseResult parseImpl(Context& context,
                           typename Context::iterator start_pos,
@@ -210,6 +216,11 @@ public:
 
     ParseResult parse(Context& context) const override { return m_impl->parse(context); }
 
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        m_impl->collect_rule_refs(refs);
+    }
+
 protected:
     std::shared_ptr<Impl> m_impl;
 };
@@ -262,6 +273,8 @@ struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
     }
 
     ParseResult parse(Context& context) const override { return m_rule.parse(context); }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override { refs.insert(m_name); }
 
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
 

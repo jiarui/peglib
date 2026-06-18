@@ -249,3 +249,19 @@ TEST_CASE("[grammar] reusable-across-parses")
         CHECK(g.parse_string(input));
     }
 }
+
+// ---------------------------------------------------------------------------
+// unreachable_rules(): validation for C++-defined grammars
+// ---------------------------------------------------------------------------
+TEST_CASE("[grammar] unreachable-rules-cpp-grammar")
+{
+    Grammar<> g;
+    g["start"] = g["used"] >> terminal('x');
+    g["used"] = terminal('a');
+    g["dead"] = terminal('b');
+    g.set_start("start");
+
+    auto unreachable = g.unreachable_rules();
+    REQUIRE(unreachable.size() == 1);
+    CHECK(unreachable[0] == "dead");
+}

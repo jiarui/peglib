@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <string>
 
 #include "Context.h"
 
@@ -40,6 +41,12 @@ struct ParsingExprInterface
     using ParseResult = typename Context::ParseResult;
     virtual ~ParsingExprInterface() = default;
     virtual ParseResult parse(Context& context) const = 0;
+
+    // Collect names of rules directly referenced by this expression.
+    // Default is no-op (leaves: terminals, empty, cut). Container types
+    // and rule-reference types override this. The caller (Grammar) handles
+    // transitive closure.
+    virtual void collect_rule_refs(std::set<std::string>&) const {}
 };
 
 // ---------------------------------------------------------------------------

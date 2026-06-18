@@ -122,6 +122,50 @@ public:
         return result;
     }
 
+    // Returns names of rules that are defined but not reachable from the
+    // start rule. These are dead code — they can be removed without
+    // changing the grammar's behaviour.
+    [[nodiscard]] std::vector<std::string> unreachable_rules() const
+    {
+        if (m_start.empty())
+            return {};
+        auto start_it = m_rules.find(m_start);
+        if (start_it == m_rules.end())
+            return {};
+
+        // Collect all rule names transitively referenced from the start
+        // rule's body.
+        std::set<std::string> reachable;
+        reachable.insert(m_start);
+
+        // DFS: for each reachable rule, collect its body's direct references.
+        std::vector<std::string> queue{m_start};
+        while (!queue.empty()) {
+            auto name = queue.back();
+            queue.pop_back();
+            auto it = m_rules.find(name);
+            if (it == m_rules.end())
+                continue;
+
+            std::set<std::string> refs;
+            it->second.collect_rule_refs(refs);
+            for (const auto& ref : refs) {
+                if (reachable.insert(ref).second) {
+                    queue.push_back(ref);
+                }
+            }
+        }
+
+        // Unreachable = all defined rules minus reachable.
+        std::vector<std::string> result;
+        for (const auto& [name, rule] : m_rules) {
+            if (rule.is_defined() && reachable.find(name) == reachable.end()) {
+                result.push_back(name);
+            }
+        }
+        return result;
+    }
+
 protected:
     std::map<std::string, Rule> m_rules;
     std::string m_start;

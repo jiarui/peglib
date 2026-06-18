@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 2 (Textual Grammar Format)
+- **`GrammarCompiler::from_string(text)`** (`include/peglib/GrammarCompiler.h`):
+  compiles PEG text at runtime into a working `Grammar<>`. Supports canonical
+  PEG syntax (Ford 2004): rule definitions (`<-`), sequence, ordered choice
+  (`/`), repetition (`* + ?`), predicates (`! &`), dot (`.`), character
+  classes (`[a-z]`, `[^0-9]`), literals (`'...'`, `"..."` with escapes),
+  grouping (`(...)`), and comments (`# ...`).
+- **`try_from_string(text, out, err)`**: non-throwing version. Reports
+  undefined rule references via `Diagnostic`.
+- **`meta_grammar()`** (`include/peglib/MetaGrammar.h`): C++ reference
+  PEG-in-PEG parser. Produces `PegAstNode` trees via tree-based actions.
+- **`meta/peg.peg`**: authoritative textual PEG spec (20 rules). Used as a
+  self-parse regression test.
+- **`unreachable_rules()`**: grammar validation helper listing defined rules
+  not reachable from the start rule (dead-code detection). Works for both
+  C++ and text grammars via `collect_rule_refs()` virtual visitor.
+- **`ParseTreeNode`**: immutable record of a match (name, start/end offset,
+  children, NodeType value). Returned in `ParseResult`.
+- New test files: `from_string_test.cpp` (19 cases), `meta_grammar_test.cpp`
+  (20 cases), `self_parse_test.cpp` (3 cases), `dynexpr_test.cpp` (9 cases).
+
+### Changed — Phase 2 (Post-Parse Action Model)
+- **Breaking**: `parse()` returns `ParseResult {success, tree}` instead of
+  `bool`. `ParseResult` has `explicit operator bool()`.
+- **Breaking**: Semantic action signature changed from
+  `(Context&, Context::match_range)` to `(Context&, ParseTreeNodePtr)`.
+  Actions read `node->children[i]->value` for sub-rule results, and access
+  matched text via `ctx.get_input()` + `node->start_offset`/`end_offset`.
+- **Breaking**: Value stack removed from `Context`. Deleted: `push_node`,
+  `pop_node`, `peek_node`, `node_count`, `truncate_node_stack`, `clear_stack`,
+  `m_value_stack`.
+- **Memoization**: `RuleState` caches full `ParseResult` (including tree +
+  action value). Memo hits return cached result directly — eliminates the
+  packrat-vs-action conflict.
+- **Seed-grow**: fixed zero-width match (now records result before breaking),
+  and updates intermediate `cached_result` for recursive memo hits.
+
 ### Added — Phase 2 (Grammar API)
 - **`Grammar<Ctx>`** class (`include/peglib/Grammar.h`): the primary user-facing
   API. Container of named rules with lazy creation, auto-naming, and parse

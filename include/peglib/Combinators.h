@@ -41,6 +41,11 @@ struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
         return {false, nullptr};
     }
 
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        std::apply([&refs](const auto&... c) { (c.collect_rule_refs(refs), ...); }, m_children);
+    }
+
 protected:
     template<size_t Index>
     bool parseSeq(Context& context, ParseTreeNodePtr& node) const
@@ -78,6 +83,11 @@ struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children.
         context.init_cut();
         ScopeGuard s{[&context]() { context.remove_cut(); }};
         return parseAlt<0>(context);
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        std::apply([&refs](const auto&... c) { (c.collect_rule_refs(refs), ...); }, m_children);
     }
 
 protected:
@@ -190,6 +200,10 @@ struct ZeroOrMoreExpr : ParsingExpr<Context, ZeroOrMoreExpr<Context, Child>>,
     {
         return Repetition<Context, Child>::parse(context);
     }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        this->m_child.collect_rule_refs(refs);
+    }
 };
 
 template<typename Context, typename Child>
@@ -201,6 +215,10 @@ struct OneOrMoreExpr : ParsingExpr<Context, OneOrMoreExpr<Context, Child>>,
     typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
+    }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        this->m_child.collect_rule_refs(refs);
     }
 };
 
@@ -215,6 +233,10 @@ struct NTimesExpr : ParsingExpr<Context, NTimesExpr<Context, Child>>, Repetition
     {
         return Repetition<Context, Child>::parse(context);
     }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        this->m_child.collect_rule_refs(refs);
+    }
 };
 
 template<typename Context, typename Child>
@@ -225,6 +247,10 @@ struct OptionalExpr : ParsingExpr<Context, OptionalExpr<Context, Child>>, Repeti
     typename Context::ParseResult parse(Context& context) const override
     {
         return Repetition<Context, Child>::parse(context);
+    }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        this->m_child.collect_rule_refs(refs);
     }
 };
 
@@ -243,6 +269,11 @@ struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>
         context.state(initState);
         // Predicate: no tree, no consumed input.
         return {!result.success, nullptr};
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        m_child.collect_rule_refs(refs);
     }
 
 protected:
@@ -264,6 +295,11 @@ struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>
         context.state(initState);
         // Predicate: no tree, no consumed input.
         return {result.success, nullptr};
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        m_child.collect_rule_refs(refs);
     }
 
 protected:
