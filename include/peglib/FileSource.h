@@ -17,6 +17,17 @@ namespace peg
 // Iterator validity:
 //   - Comparing iterators from different FileSource instances is undefined.
 //   - Dereferencing the end iterator (or any iterator >= end()) is undefined.
+//
+// Thread safety: NOT thread-safe. The buffer cache is mutable and mutated
+// by const-looking accessors (begin/end/get re-fill buffers on cache miss),
+// so concurrent reads — even through a const FileSource — race on the cache.
+// PEG parsing is inherently sequential; share one FileSource across parse
+// steps in the same thread only.
+//
+// Large files: buffer positioning uses fseek with a `long` offset, which on
+// platforms where `long` is 32-bit (e.g. 32-bit Linux) cannot address files
+// larger than ~2 GiB. On LP64 platforms (64-bit Linux/macOS) `long` is
+// 64-bit and this is not a concern.
 template<typename value_type_>
 struct FileSource
 {

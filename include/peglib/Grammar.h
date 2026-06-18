@@ -168,6 +168,12 @@ public:
     }
 
     // Convenience: parse a string input using the start rule.
+    //
+    // Partial-match semantics: returns true if the start rule matches at the
+    // beginning of `input`, EVEN IF input remains unconsumed. To require the
+    // whole input be consumed, append a end-of-input anchor (!. / EndOfFile)
+    // to the start rule in the grammar. (parse_string makes its own copy of
+    // the input, so temporaries are safe to pass.)
     bool parse_string(std::string_view input) const
     {
         std::string s{input};

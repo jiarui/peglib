@@ -84,10 +84,25 @@ struct Context
 {
     using node_type = NodeType;
 
+    // Construct from a contiguous range (std::string, std::vector, ...).
+    // The Context stores a std::span into `t` — it does NOT copy. The caller
+    // must keep the input alive for the Context's lifetime. For a self-
+    // contained copy, use Grammar::parse_string (which makes its own string).
+    // Passing a temporary here dangles silently.
     template<typename InputType>
     Context(const InputType& t)
         : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position}
     {}
+
+    // A Context owns a memo table, cut stack, and (for FileSource) paged
+    // buffers — all expensive or unsafe to duplicate. It is meant for a
+    // single parse; copying one mid-parse would duplicate memo entries
+    // keyed by raw NonTerminal* and silently corrupt furthest-error state.
+    // Move is allowed (e.g. from from_file); copy is not.
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+    Context(Context&&) noexcept = default;
+    Context& operator=(Context&&) noexcept = default;
 
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;

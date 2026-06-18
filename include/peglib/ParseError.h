@@ -150,13 +150,15 @@ public:
             oss << "unexpected input";
         } else {
             oss << "expected ";
-            bool first = true;
+            // English-list join: "a", "a or b", "a, b or c", ...
+            const std::size_t n = m_expected.size();
+            std::size_t i = 0;
             for (const auto& item : m_expected) {
-                if (!first) {
-                    oss << " or ";
+                if (i > 0) {
+                    oss << (i + 1 == n ? " or " : ", ");
                 }
-                first = false;
                 oss << item.text;
+                ++i;
             }
         }
         return oss.str();

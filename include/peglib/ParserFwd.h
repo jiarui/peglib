@@ -16,19 +16,27 @@ namespace parsers
 
 // ---------------------------------------------------------------------------
 // ScopeGuard: RAII cleanup for parser internals (cut stack management, etc.)
+//
+// Templated on the cleanup callable so small captures (e.g. [&context]) are
+// stored inline with no std::function heap allocation. CTAD deduces F from
+// the constructor argument, so call sites read identically to before:
+//   ScopeGuard _{[&context]() { context.remove_cut(); }};
 // ---------------------------------------------------------------------------
+template<typename FuncType>
 struct ScopeGuard
 {
-    template<typename FuncType>
-    ScopeGuard(FuncType f) : m_cleanup{f}
-    {}
+    ScopeGuard(FuncType f) : m_cleanup{std::move(f)} {}
     ~ScopeGuard() { m_cleanup(); }
 
-protected:
     ScopeGuard(const ScopeGuard&) = delete;
     ScopeGuard& operator=(const ScopeGuard&) = delete;
-    std::function<void()> m_cleanup;
+
+protected:
+    FuncType m_cleanup;
 };
+// Deduction guide so ScopeGuard{lambda} deduces ScopeGuard<decltype(lambda)>.
+template<typename FuncType>
+ScopeGuard(FuncType) -> ScopeGuard<FuncType>;
 
 // ---------------------------------------------------------------------------
 // ParsingExprInterface: abstract base for all parsing expressions.
