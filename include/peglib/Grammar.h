@@ -3,6 +3,7 @@
 #include "peglib/Terminals.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -13,7 +14,8 @@ namespace peg
 {
 
 // ---------------------------------------------------------------------------
-// Grammar: user-facing container of named rules.
+// Grammar: user-facing container of named rules. Sole owner of all
+// NonTerminals (held via shared_ptr).
 //
 //   Grammar<> g;
 //   g["number"] = +terminal('0', '9');
@@ -23,8 +25,12 @@ namespace peg
 //
 // Rules are lazily created on first access via operator[]. Assignment
 // auto-names the rule from the map key. The same Grammar can parse many
-// inputs — each parse gets a fresh Context (fresh memo cache, position,
-// value stack).
+// inputs — each parse gets a fresh Context (fresh memo cache, position).
+//
+// **Design**: Rule (the handle returned by operator[]) stores a bare
+// NonTerminal*, not a shared_ptr. This eliminates shared_ptr cycles in
+// recursive grammars at the source — ~Grammar() needs no special handling.
+// The constraint is that Rule cannot outlive its Grammar (intentional).
 // ---------------------------------------------------------------------------
 template<typename Ctx = Context<std::span<const char>>>
 class Grammar
@@ -32,7 +38,7 @@ class Grammar
 public:
     using Context = Ctx;
     using Rule = parsers::Rule<Context>;
-    using RuleProxy = parsers::RuleProxy<Context>;
+    using NonTerminalType = parsers::NonTerminal<Context>;
 
     Grammar() = default;
     Grammar(const Grammar&) = delete;
@@ -41,21 +47,15 @@ public:
     Grammar& operator=(Grammar&&) = default;
 
     // Access a rule by name. Lazily creates the rule if it doesn't exist
-    // (forward declaration). Returns a RuleProxy for assignment/chaining.
-    RuleProxy operator[](std::string name)
+    // (forward declaration). Returns a non-owning Rule handle for
+    // assignment / chaining / introspection.
+    Rule operator[](std::string name)
     {
         auto [it, inserted] = m_rules.try_emplace(name);
-        return RuleProxy{it->second, std::move(name)};
-    }
-
-    // Const access — throws if the rule doesn't exist.
-    const Rule& at(std::string_view name) const
-    {
-        auto it = m_rules.find(std::string{name});
-        if (it == m_rules.end()) {
-            throw std::out_of_range{"Grammar::at: rule '" + std::string{name} + "' not found"};
+        if (inserted) {
+            it->second = std::make_shared<NonTerminalType>();
         }
-        return it->second;
+        return Rule{it->second.get(), it->first};
     }
 
     [[nodiscard]] bool has_rule(std::string_view name) const
@@ -87,13 +87,25 @@ public:
     }
 
     // Parse using an explicit rule name. Returns true on success.
-    bool parse(std::string_view rule, Context& ctx) const { return at(rule).parse(ctx).success; }
+    bool parse(std::string_view rule, Context& ctx) const
+    {
+        auto it = m_rules.find(std::string{rule});
+        if (it == m_rules.end()) {
+            throw std::out_of_range{"Grammar::parse: rule '" + std::string{rule} + "' not found"};
+        }
+        return it->second->parse(ctx).success;
+    }
 
     // Parse and return the parse tree (nullptr on failure or if the start
     // rule is transparent). Useful for AST construction.
     typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
     {
-        return at(rule).parse(ctx).tree;
+        auto it = m_rules.find(std::string{rule});
+        if (it == m_rules.end()) {
+            throw std::out_of_range{"Grammar::parse_tree: rule '" + std::string{rule} +
+                                    "' not found"};
+        }
+        return it->second->parse(ctx).tree;
     }
 
     // Convenience: parse a string input using the start rule.
@@ -114,8 +126,8 @@ public:
     [[nodiscard]] std::vector<std::string> undefined_rules() const
     {
         std::vector<std::string> result;
-        for (const auto& [name, rule] : m_rules) {
-            if (!rule.is_defined()) {
+        for (const auto& [name, nt] : m_rules) {
+            if (!nt->is_defined()) {
                 result.push_back(name);
             }
         }
@@ -148,7 +160,7 @@ public:
                 continue;
 
             std::set<std::string> refs;
-            it->second.collect_rule_refs(refs);
+            it->second->collect_rule_refs(refs);
             for (const auto& ref : refs) {
                 if (reachable.insert(ref).second) {
                     queue.push_back(ref);
@@ -158,8 +170,8 @@ public:
 
         // Unreachable = all defined rules minus reachable.
         std::vector<std::string> result;
-        for (const auto& [name, rule] : m_rules) {
-            if (rule.is_defined() && reachable.find(name) == reachable.end()) {
+        for (const auto& [name, nt] : m_rules) {
+            if (nt->is_defined() && reachable.find(name) == reachable.end()) {
                 result.push_back(name);
             }
         }
@@ -167,7 +179,9 @@ public:
     }
 
 protected:
-    std::map<std::string, Rule> m_rules;
+    // Grammar is the sole owner of all NonTerminals. Rule handles (returned
+    // by operator[]) hold bare NonTerminal* — no shared_ptr cycle possible.
+    std::map<std::string, std::shared_ptr<NonTerminalType>> m_rules;
     std::string m_start;
 };
 

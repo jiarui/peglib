@@ -172,117 +172,102 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
-// Rule: user-facing handle wrapping shared_ptr<NonTerminal>.
+// Rule: non-owning handle to a NonTerminal, returned by Grammar::operator[].
 //
-// Copy is shallow (shared ownership) — multiple Rule objects can point to
-// the same NonTerminal identity. This is essential for:
-//   - Memo key stability (m_mem[pos][const NonTerminal*])
-//   - Left-recursion seed identity (seed-grow writes to a specific NonTerminal)
-//   - Semantic action sharing (m_action lives on the NonTerminal entity)
+// Stores a bare NonTerminal* (Grammar is the sole owner via shared_ptr) plus
+// a copied rule name (std::string). Copy is shallow — multiple Rule copies
+// can point to the same NonTerminal. Expression trees (SequenceExpr,
+// DynSequenceExpr, etc.) store Rule copies by value (~40 bytes on libstdc++:
+// 8-byte pointer + SSO string).
+//
+// **Design constraint**: a Rule cannot outlive its Grammar. This is
+// intentional — it eliminates shared_ptr cycles at the source (recursive
+// grammars no longer form reference cycles, so ~Grammar needs no special
+// handling).
+//
+// Two assignment semantics:
+//   - operator=(ParsingExpr<...>) : assign a body to the underlying
+//     NonTerminal (auto-names from m_name).
+//   - operator=(Rule rhs)         : alias — make this rule's body delegate to
+//     rhs's NonTerminal (g["A"] = g["B"] makes A an alias for B).
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct Rule : ParsingExpr<Context, Rule<Context>>
 {
-public:
     using Impl = NonTerminal<Context>;
     using ParseResult = typename ParsingExpr<Context, Rule<Context>>::ParseResult;
     using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
 
-    Rule() : m_impl(std::make_shared<Impl>()) {}
-
-    template<typename ExprType>
-    Rule(const ParsingExpr<Context, ExprType>& rhs) : m_impl(std::make_shared<Impl>(rhs))
-    {}
+    Rule(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
 
     Rule(const Rule&) = default;
-    Rule& operator=(const Rule&) = default;
+    Rule(Rule&&) = default;
+    // NOTE: copy/move *assignment* have alias semantics (see below), not
+    // the usual shallow rebind. This is because Rule handles are views
+    // returned by Grammar::operator[]; assigning one view to another
+    // mutates the underlying NonTerminal, not the view itself. Expression
+    // trees only copy-construct Rule (via std::make_tuple), never
+    // copy-assign, so this is safe.
 
+    // Assign a body expression to the underlying NonTerminal. Auto-names
+    // the rule from m_name.
     template<typename ExprType>
+        requires(!std::same_as<std::remove_cvref_t<ExprType>, Rule<Context>>)
     Rule& operator=(const ParsingExpr<Context, ExprType>& rhs)
     {
         *m_impl = rhs;
+        m_impl->set_name(m_name);
         return *this;
     }
 
-    void set_name(std::string name) { m_impl->set_name(std::move(name)); }
-    [[nodiscard]] const std::string& name() const noexcept { return m_impl->name(); }
+    // Alias assignment: make this rule's body delegate to rhs's NonTerminal.
+    // The body becomes a Rule copy pointing at rhs's NonTerminal. This is
+    // **lazy**: if rhs's body is later reassigned, parsing this rule sees
+    // the update (because parsing delegates to rhs's NonTerminal, not a
+    // snapshot of its body).
+    // Example: g["A"] = g["B"];  // A delegates to B
+    Rule& operator=(const Rule& rhs)
+    {
+        *m_impl = rhs; // NonTerminal template operator= stores a Rule body
+        m_impl->set_name(m_name);
+        return *this;
+    }
+    // Not noexcept: NonTerminal::template operator= does make_shared (can
+    // throw bad_alloc), and set_name does a std::string assign.
+    Rule& operator=(Rule&& rhs)
+    {
+        *m_impl = rhs;
+        m_impl->set_name(m_name);
+        return *this;
+    }
 
-    void set_label(std::string label) { m_impl->set_label(std::move(label)); }
-    [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
+    Rule& set_action(SemanticAction action)
+    {
+        m_impl->set_action(std::move(action));
+        return *this;
+    }
 
-    [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
-
-    void set_action(SemanticAction action) { m_impl->set_action(std::move(action)); }
+    Rule& set_label(std::string label)
+    {
+        m_impl->set_label(std::move(label));
+        return *this;
+    }
 
     ParseResult parse(Context& context) const override { return m_impl->parse(context); }
-
-    void collect_rule_refs(std::set<std::string>& refs) const override
-    {
-        m_impl->collect_rule_refs(refs);
-    }
-
-protected:
-    std::shared_ptr<Impl> m_impl;
-};
-
-// ---------------------------------------------------------------------------
-// RuleProxy: transient handle returned by Grammar::operator[].
-//
-// Carries the rule name (for auto-naming on assignment). Copy is shallow —
-// the underlying Rule (shared_ptr<NonTerminal>) is shared. Expression trees
-// store RuleProxy copies (~40 bytes per node: Rule + name string).
-// ---------------------------------------------------------------------------
-template<typename Context>
-struct RuleProxy : ParsingExpr<Context, RuleProxy<Context>>
-{
-    using Impl = Rule<Context>;
-    using ParseResult = typename ParsingExpr<Context, RuleProxy<Context>>::ParseResult;
-    using SemanticAction = typename ParsingExpr<Context, RuleProxy<Context>>::SemanticAction;
-
-    RuleProxy(Impl rule, std::string name) : m_rule(std::move(rule)), m_name(std::move(name)) {}
-
-    RuleProxy(const RuleProxy&) = default;
-    RuleProxy(RuleProxy&&) = default;
-
-    template<typename ExprType>
-        requires(!std::same_as<std::remove_cvref_t<ExprType>, RuleProxy<Context>>)
-    RuleProxy& operator=(const ParsingExpr<Context, ExprType>& rhs)
-    {
-        m_rule = rhs;
-        m_rule.set_name(m_name);
-        return *this;
-    }
-
-    RuleProxy& operator=(RuleProxy rhs)
-    {
-        m_rule = rhs;
-        m_rule.set_name(m_name);
-        return *this;
-    }
-
-    RuleProxy& set_action(SemanticAction action)
-    {
-        m_rule.set_action(std::move(action));
-        return *this;
-    }
-
-    RuleProxy& set_label(std::string label)
-    {
-        m_rule.set_label(std::move(label));
-        return *this;
-    }
-
-    ParseResult parse(Context& context) const override { return m_rule.parse(context); }
 
     void collect_rule_refs(std::set<std::string>& refs) const override { refs.insert(m_name); }
 
     [[nodiscard]] const std::string& name() const noexcept { return m_name; }
+    [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
+    [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
 
-    const Impl& rule() const noexcept { return m_rule; }
-    Impl& rule() noexcept { return m_rule; }
+    // Direct access to the underlying NonTerminal (for Grammar internals and
+    // GrammarCompiler). Non-owning.
+    [[nodiscard]] const Impl* impl() const noexcept { return m_impl; }
+    [[nodiscard]] Impl* impl() noexcept { return m_impl; }
 
 protected:
-    Impl m_rule;
+    Impl* m_impl;
     std::string m_name;
 };
 

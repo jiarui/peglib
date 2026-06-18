@@ -8,7 +8,7 @@
 //   - Validation (undefined rules)
 //   - parse_string convenience
 //   - Semantic actions
-//   - RuleProxy chaining (set_action, set_label)
+//   - Rule handle chaining (set_action, set_label)
 // ---------------------------------------------------------------------------
 
 #include "peglib.h"
@@ -197,9 +197,9 @@ TEST_CASE("[grammar] semantic-action")
 }
 
 // ---------------------------------------------------------------------------
-// RuleProxy chaining: set_action, set_label
+// Rule handle chaining: set_action, set_label
 // ---------------------------------------------------------------------------
-TEST_CASE("[grammar] proxy-chaining")
+TEST_CASE("[grammar] rule-chaining")
 {
     using Ctx = Context<std::span<const char>>;
     Grammar<> g;

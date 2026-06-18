@@ -88,6 +88,29 @@ g.set_start("expr");
 g.parse_string("1+2+3");  // convenience: creates a Context internally
 ```
 
+## Lifetime & Recursive Rules
+
+peglib's `Grammar<>` is the **sole owner** of all rule entities (`NonTerminal`).
+The handle returned by `g["name"]` is a non-owning `Rule` — it stores a bare
+pointer to the underlying `NonTerminal` plus the rule's name.
+
+- **Recursive rules work out of the box.** Self-recursion
+  (`g["expr"] = g["expr"] >> '+' >> g["number"]`) and mutual recursion
+  (`g["A"] = g["B"] | ...; g["B"] = g["A"] | ...`) work without forward
+  declarations or macro gymnastics.
+- **No shared_ptr cycles.** Because `Rule` is non-owning, recursive grammar
+  trees never form reference cycles. `~Grammar()` destroys everything in one
+  pass — no runtime cycle-breaking patches, no `weak_ptr`, no manual cleanup.
+- **Design constraint: a `Rule` cannot outlive its `Grammar`.** This is
+  intentional — it prevents dangling references in recursive grammars and is
+  the reason cycles can be eliminated at the source. Don't store a `Rule`
+  extracted from one `Grammar` beyond the `Grammar`'s lifetime; build a new
+  `Grammar` instead.
+
+If you only need to parse input, `Grammar::parse_string(input)` and
+`Grammar::parse(ctx)` are all you need — you never have to name the `Rule`
+type yourself.
+
 ## Requirements
 
 | Toolchain          | Minimum version |
@@ -123,11 +146,11 @@ ctest --test-dir build --output-on-failure
 ```
 include/peglib/      header-only library
   peglib.h           umbrella (includes everything)
-  Context.h          parsing context (state, memo, cut, error tracking, value stack)
+  Context.h          parsing context (state, memo, cut, error tracking)
   ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
   Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
   Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr
-  NonTerminal.h      NonTerminal (internal node), Rule (shared_ptr handle), RuleProxy
+  NonTerminal.h      NonTerminal (internal entity), Rule (non-owning handle)
   Grammar.h          Grammar (rule container), the primary user-facing API
   Parser.h           umbrella for the 4 parser headers above
   Rule.h             operator DSL (>>, |, *, +, !, &, ...) + factories
@@ -135,7 +158,10 @@ include/peglib/      header-only library
   SourceMap.h        byte offset <-> (line, col) mapping
   ParseError.h       Diagnostic, ParseError, ExpectedItem, escape helpers
   Concepts.h         PegContext concept
-  Macros.h           PEG_RULE, PEG_RULE_LABELED
+  DynExpr.h          type-erased expressions for runtime grammar compilation
+  PegAst.h           AST node types for the PEG meta-grammar
+  MetaGrammar.h      C++ reference PEG-in-PEG parser (drives GrammarCompiler)
+  GrammarCompiler.h  from_string / try_from_string — compile PEG text
 test/                unit tests (doctest)
   *_test.cpp         per-header test cases
   json_test.cpp      JSON grammar example (real-world PEG use case)

@@ -108,11 +108,14 @@ lambda. Non-recursive rules continue to work with copy-init as before.
 - `Context` ownership of input data (separate issue, deferred)
 - Textual grammar format (Phase 2, after this is stable)
 
-## High Priority — shared_ptr cycle leak in recursive grammars
+## Done — shared_ptr cycle leak in recursive grammars (X4 redesign)
 
 **Discovered**: Phase 2 W3 (GrammarCompiler). ASan confirmed.
+**Fixed**: Phase 2 W7 via the X4 redesign (non-owning `Rule` handle).
 
-Recursive grammars create `shared_ptr` cycles that prevent destruction:
+### Problem
+
+Recursive grammars created `shared_ptr` cycles that prevented destruction:
 
 ```
 NonTerminal → body (shared_ptr<DynExpr>)
@@ -121,21 +124,49 @@ NonTerminal → body (shared_ptr<DynExpr>)
             → rule (shared_ptr<NonTerminal>)   ← cycle back to start
 ```
 
-Every `RuleRef` in the AST embeds a `RuleProxy` copy (containing
+Every `RuleRef` in the AST embedded a `RuleProxy` copy (containing
 `shared_ptr<NonTerminal>`) inside the expression tree. For self-referential
-or mutually-recursive rules, this forms a cycle. The "leak" is bounded by
-grammar size, so long-lived grammars are unaffected. But programs that
-compile grammars dynamically (e.g. per-request) will accumulate memory.
+or mutually-recursive rules, this formed a cycle. ASan measurement:
+100 recursive grammars (`A <- A 'x' / 'y'`) + a static JSON grammar
+leaked ~7720 bytes in 20 allocations at process exit.
 
-ASan measurement: 100 recursive grammars (`A <- A 'x' / 'y'`) leak
-~79 KB in 900 allocations. Non-recursive grammars leak nothing.
+### Root Cause
 
-- [ ] **Fix**: break the cycle. Candidate approaches:
-  - `weak_ptr` for rule back-references in `RuleRefWrapper`
-  - Store `NonTerminal*` (non-owning) in `RuleRefWrapper`; Grammar owns all rules
-  - `Grammar` destructor resets rule bodies before releasing rule handles
-- [ ] Add a regression test that compiles + destroys N recursive grammars
-      and checks ASan is clean.
+The original `Rule` class (Phase 2.0) was a shared_ptr owner wrapper around
+`NonTerminal`. Every rule reference inside an expression tree carried an
+owning `shared_ptr<NonTerminal>`, so any recursive edge completed a cycle.
+
+### Fix — X4 Redesign (eliminate the cycle at the source)
+
+Replaced three overlapping types (`Rule` as owning handle, `RuleProxy` as
+transient handle, `RuleRefWrapper` as DynExpr adapter) with a single
+non-owning `Rule` handle:
+
+- `Grammar` is the sole owner of all `NonTerminal`s, held directly as
+  `std::map<string, std::shared_ptr<NonTerminal>>`.
+- `Rule` (formerly `RuleProxy`) stores a **bare `NonTerminal*`** plus the
+  rule name. It is returned by `Grammar::operator[]` and embedded by value
+  in expression trees (static `SequenceExpr`/`AlternationExpr` tuples and
+  dynamic `DynSequenceExpr`/`DynAlternationExpr` vectors alike).
+- `Rule` is itself a `ParsingExpr`, so `GrammarCompiler` can type-erase it
+  directly via `make_shared<Rule>(...)` — no `RuleRefWrapper` adapter.
+- The design constraint is that **a `Rule` cannot outlive its `Grammar`**.
+  This is intentional — it is exactly what eliminates the cycle.
+
+### Verification
+
+- `~Grammar()` is `= default` — no runtime cycle-breaking patches, no
+  `weak_ptr`, no manual `clear_body()`.
+- `recursive_leak_test.cpp` compiles + destroys 100 recursive grammars
+  per subcase (textual-grammar path, static-API path, mutual recursion).
+  Under ASan: **0 leaks** (down from ~7720 bytes in the baseline).
+
+- [x] Break the cycle by making `Rule` non-owning (bare `NonTerminal*`).
+- [x] Consolidate `Rule` + `RuleProxy` + `RuleRefWrapper` into a single
+      `Rule` type.
+- [x] Remove standalone `Rule<>` from the public API (Grammar is the sole
+      owner; `Rule` handles are non-owning views).
+- [x] Regression test under ASan (recursive_leak_test.cpp).
 
 ## Phase 2 — Grammar API + Textual Grammar Format (DONE)
 
@@ -266,6 +297,6 @@ Reduce grammar duplication.
 | `DiagnosticConsumer` | Not yet introduced (YAGNI) | Only one diagnostic kind today; revisit when multiple levels / recovery arrive |
 | Textual grammar format | Canonical PEG syntax (Ford 2004) + `#` comments + `[^...]` negated classes | Maximally familiar to existing PEG users; deviations only where they add clear value |
 | Whitespace model | Opt-in `set_skipper` + `lexeme()` escape hatch | pest/yhirose show that auto-skip is the right default; but library users must be able to disable |
-| Rule ownership | `Rule` as `shared_ptr` handle (Phase 2.0) | NonTerminal identity must be stable for memo/seed-grow; Rule must be copyable for ergonomics. Shared ownership reconciles both. |
+| Rule ownership | Grammar sole owner via shared_ptr; Rule is non-owning handle (raw pointer) | X4 design: eliminates shared_ptr cycles at the source. Rule cannot outlive Grammar by design. Consolidates Rule + RuleProxy + RuleRefWrapper into one type. |
 | Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |
 | Grammar-Context relationship | Grammar typed to Context, no Context owned (Level 1) | Same Grammar reusable across many parses; fresh Context per parse (fresh memo, position, value stack). |

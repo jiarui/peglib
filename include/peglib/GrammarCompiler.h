@@ -2,6 +2,7 @@
 #include "peglib/DynExpr.h"
 #include "peglib/Grammar.h"
 #include "peglib/MetaGrammar.h"
+#include "peglib/NonTerminal.h"
 #include "peglib/ParseError.h"
 #include "peglib/PegAst.h"
 #include "peglib/Rule.h"
@@ -20,28 +21,6 @@ namespace peg
 {
 
 // ---------------------------------------------------------------------------
-// RuleRefWrapper: wraps a RuleProxy so it can be stored as a
-// shared_ptr<ParsingExprInterface> in Dyn* expression trees.
-// This is needed because RuleProxy is a ParsingExpr (CRTP) but not
-// polymorphically compatible with ParsingExprInterface without wrapping.
-// ---------------------------------------------------------------------------
-template<typename Context>
-struct RuleRefWrapper : parsers::ParsingExpr<Context, RuleRefWrapper<Context>>
-{
-    using ParseResult = typename Context::ParseResult;
-    parsers::RuleProxy<Context> proxy;
-
-    explicit RuleRefWrapper(parsers::RuleProxy<Context> p) : proxy(std::move(p)) {}
-
-    ParseResult parse(Context& ctx) const override { return proxy.parse(ctx); }
-
-    void collect_rule_refs(std::set<std::string>& refs) const override
-    {
-        refs.insert(proxy.name());
-    }
-};
-
-// ---------------------------------------------------------------------------
 // GrammarCompiler: compiles a PEG AST (produced by meta_grammar) into a
 // runtime Grammar<> that can parse input text.
 //
@@ -50,8 +29,10 @@ struct RuleRefWrapper : parsers::ParsingExpr<Context, RuleRefWrapper<Context>>
 //   try_from_string(text, out)  — returns false, fills Diagnostic on error
 //
 // The compiler walks each Definition's body AST recursively, building
-// DynExpr nodes (type-erased parsing expressions) that reference rules
-// via Grammar::operator[]. The first definition becomes the start rule.
+// DynExpr nodes (type-erased parsing expressions). Rule references are
+// compiled into Rule handles (non-owning pointers to the Grammar's
+// NonTerminals); Rule is itself a ParsingExpr, so no wrapper is needed.
+// The first definition becomes the start rule.
 // ---------------------------------------------------------------------------
 
 class GrammarCompiler
@@ -192,17 +173,14 @@ private:
         }
     }
 
-    // RuleRef: wrap the Grammar's RuleProxy as a DynExpr.
+    // RuleRef: wrap the Grammar's Rule handle as a DynExpr. Rule is itself a
+    // ParsingExpr, so we type-erase it directly by storing it inside a
+    // shared_ptr<ParsingExprInterface>. Non-owning — Grammar owns the
+    // NonTerminal.
     static parsers::DynExpr<DefaultCtx> compile_ruleref(const NodePtr& node, DefaultGrammar& g)
     {
-        // operator[] returns a RuleProxy which is itself a ParsingExpr.
-        // We type-erase it by wrapping in DynExpr.
-        auto proxy = g[node->text];
-        // RuleProxy inherits ParsingExpr, but DynExpr needs a
-        // shared_ptr<ParsingExprInterface>. We create a DynExpr that
-        // captures the RuleProxy by value (it's cheap — shared_ptr + name).
-        return parsers::DynExpr<DefaultCtx>{
-            std::make_shared<RuleRefWrapper<DefaultCtx>>(std::move(proxy))};
+        auto handle = g[node->text];
+        return parsers::DynExpr<DefaultCtx>{std::make_shared<parsers::Rule<DefaultCtx>>(handle)};
     }
 
     // Literal: TerminalSeqExpr matching the decoded string.

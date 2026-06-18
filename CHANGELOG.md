@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — Phase 2 (X4 Rule redesign)
+- **shared_ptr cycle leak in recursive grammars**: eliminated at the source
+  by making `Rule` a non-owning handle. Previously, recursive grammars
+  (both textual via `GrammarCompiler` and the primary C++ DSL) formed
+  reference cycles through `shared_ptr<NonTerminal>` edges embedded in
+  expression trees; ASan reported ~7720 bytes leaked in 20 allocations
+  from 100 recursive grammars + a static JSON grammar. With the X4
+  redesign, `~Grammar()` is `= default` — no runtime cycle-breaking
+  patches, no `weak_ptr`, no manual `clear_body()`. ASan now reports
+  zero leaks.
+
+### Changed — Phase 2 (X4 Rule redesign)
+- **`Grammar` now stores `std::shared_ptr<NonTerminal>` directly** in its
+  rule map (was via the `Rule` wrapper class). Grammar is the sole owner
+  of all rule entities.
+- **`Rule` (formerly `RuleProxy`) is now a non-owning handle**: it stores
+  a bare `NonTerminal*` plus the rule name, and lives in
+  `peg::parsers::`. Returned by `Grammar::operator[]`. Expression trees
+  embed `Rule` copies by value (~16 bytes: pointer + string reference).
+- **Design constraint**: a `Rule` cannot outlive its `Grammar`. This is
+  intentional — it is what eliminates the shared_ptr cycle. Documented
+  in README's "Lifetime & Recursive Rules" section.
+- **`Rule::operator=(const Rule&)` is now alias assignment** with lazy
+  semantics: `g["A"] = g["B"]` makes A's body delegate to B's NonTerminal.
+  If B is later reassigned, parsing A sees the update. **Behavior change**:
+  the previous `RuleProxy::operator=(RuleProxy)` did a shared_ptr copy
+  that made A and B share the same NonTerminal entity (and `set_name`
+  then renamed that shared entity to A — effectively mutating B). The
+  new semantics keep A and B distinct: only A's body delegates to B.
+
+### Removed — Phase 2 (X4 Rule redesign)
+- **Old `Rule` class** (shared_ptr owner wrapper from Phase 2.0) — replaced
+  by the non-owning `Rule` (formerly `RuleProxy`).
+- **`RuleProxy`** name — class renamed to `Rule`.
+- **`RuleRefWrapper`** — `Rule` is itself a `ParsingExpr`, no wrapper needed.
+  `GrammarCompiler::compile_ruleref` now uses `make_shared<Rule>(...)`
+  directly.
+- **`Grammar::at(name)`** — use `has_rule()` + `operator[]` for introspection.
+- **`Context::Rule`** typedef — no longer needed.
+- **`peg::Rule<>`** namespace alias — removed.
+- **`include/peglib/Macros.h`** — empty stub since Phase 2 (PEG_RULE macros
+  were removed); now physically deleted.
+
+### Migrated — Phase 2 (X4 Rule redesign)
+- `error_test.cpp` 4 cases rewritten from `Ctxt::Rule{peg::terminal('x')}`
+  to `Grammar<>` API. Updated `error-terminal-records-expected-on-failure`
+  assertion (named rule now contributes both Literal and RuleName to the
+  expected set, so size is 2 not 1).
+- `recursive_leak_test.cpp` cleaned up: commented-out standalone `Rule<>`
+  subcase removed (no longer applicable — standalone Rule is gone).
+
 ### Added — Phase 2 (Textual Grammar Format)
 - **`GrammarCompiler::from_string(text)`** (`include/peglib/GrammarCompiler.h`):
   compiles PEG text at runtime into a working `Grammar<>`. Supports canonical

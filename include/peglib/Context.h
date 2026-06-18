@@ -91,7 +91,6 @@ struct Context
 
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;
-    using Rule = peg::parsers::Rule<Context<InputSource, NodeType>>;
     using NonTerminalType = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
     using match_range = typename ContextMatchRange<InputSource>::type;
 

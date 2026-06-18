@@ -130,13 +130,26 @@ TEST_CASE("error-terminal-records-expected-on-failure")
     std::string input = "abc";
     Context context(input);
 
-    auto rule = Ctxt::Rule{peg::terminal('x')};
-    CHECK_FALSE(rule.parse(context));
+    Grammar<> g;
+    g["anon"] = peg::terminal('x');
+    CHECK_FALSE(g.parse("anon", context));
     CHECK(context.has_error());
     CHECK(context.furthest_failure_pos() == 0);
-    CHECK(context.expected().size() == 1);
-    CHECK(context.expected().begin()->kind == ExpectedKind::Literal);
-    CHECK(context.expected().begin()->text == "'x'");
+    // Named rule: both the literal 'x' (from the terminal) and the rule
+    // name "anon" (from the NonTerminal) appear in the expected set.
+    CHECK(context.expected().size() == 2);
+    bool found_literal = false;
+    bool found_rule = false;
+    for (const auto& item : context.expected()) {
+        if (item.kind == ExpectedKind::Literal && item.text == "'x'") {
+            found_literal = true;
+        }
+        if (item.kind == ExpectedKind::RuleName && item.text == "anon") {
+            found_rule = true;
+        }
+    }
+    CHECK(found_literal);
+    CHECK(found_rule);
 }
 
 TEST_CASE("error-named-rule-records-rulename-on-failure")
@@ -144,9 +157,9 @@ TEST_CASE("error-named-rule-records-rulename-on-failure")
     std::string input = "abc";
     Context context(input);
 
-    auto rule = Ctxt::Rule{peg::terminal('x')};
-    rule.set_name("MyRule");
-    CHECK_FALSE(rule.parse(context));
+    Grammar<> g;
+    g["MyRule"] = peg::terminal('x');
+    CHECK_FALSE(g.parse("MyRule", context));
     CHECK(context.has_error());
     // The NonTerminal adds RuleName (label takes priority, but we only set name)
     bool found_rule_name = false;
@@ -163,10 +176,10 @@ TEST_CASE("error-labeled-rule-records-rulelabel-on-failure")
     std::string input = "abc";
     Context context(input);
 
-    auto rule = Ctxt::Rule{peg::terminal('x')};
-    rule.set_name("MyRule");
-    rule.set_label("a specific thing");
-    CHECK_FALSE(rule.parse(context));
+    Grammar<> g;
+    g["MyRule"] = peg::terminal('x');
+    g["MyRule"].set_label("a specific thing");
+    CHECK_FALSE(g.parse("MyRule", context));
     CHECK(context.has_error());
     bool found_label = false;
     for (const auto& item : context.expected()) {
@@ -184,8 +197,9 @@ TEST_CASE("error-alternatives-accumulate-expected")
     std::string input = "x";
     Context context(input);
 
-    auto rule = Ctxt::Rule{peg::terminal('a') | peg::terminal('b')};
-    CHECK_FALSE(rule.parse(context));
+    Grammar<> g;
+    g["alt"] = peg::terminal('a') | peg::terminal('b');
+    CHECK_FALSE(g.parse("alt", context));
     CHECK(context.has_error());
     // Both 'a' and 'b' should be in the expected set at position 0
     CHECK(context.expected().size() >= 1);
@@ -288,7 +302,7 @@ TEST_CASE("grammar-auto-names-rules")
     (void)context;
 
     CHECK(g["my_digit"].name() == "my_digit");
-    CHECK(g["my_digit"].rule().label().empty());
+    CHECK(g["my_digit"].label().empty());
 }
 
 TEST_CASE("grammar-set-label-works")
@@ -302,5 +316,5 @@ TEST_CASE("grammar-set-label-works")
     (void)context;
 
     CHECK(g["my_thing"].name() == "my_thing");
-    CHECK(g["my_thing"].rule().label() == "a specific thing");
+    CHECK(g["my_thing"].label() == "a specific thing");
 }

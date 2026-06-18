@@ -18,9 +18,6 @@ using parsers::TerminalExpr;
 using parsers::TerminalSeqExpr;
 using parsers::ZeroOrMoreExpr;
 
-template<typename C = Context<std::span<const std::string::value_type>>>
-using Rule = typename C::Rule;
-
 template<typename elem>
 auto terminal(const std::predicate<elem> auto& f)
 {
@@ -81,16 +78,15 @@ auto cut()
 // ---------------------------------------------------------------------------
 // Operator overloads for building expression trees.
 //
-// With Phase 2.0, Rule is a shared_ptr<NonTerminal> handle. Copying a Rule
-// is shallow and preserves identity, so no special wrapping (self()/NonTerminalRef)
-// is needed — all operands are handled uniformly via static_cast to the CRTP
-// derived type.
+// All parsing expression types (Terminals, Combinators, and Rule) derive
+// from ParsingExpr<Context, Derived>, so the operators below handle every
+// operand uniformly via static_cast to the CRTP derived type.
 //
-// Phase 2 (Grammar API): RuleProxy (returned by Grammar::operator[]) also
-// inherits from ParsingExpr, so it participates in operators naturally.
-// Expression trees store RuleProxy copies, which carry the name overhead
-// (~40 bytes per node). This is acceptable for typical grammars; a future
-// optimization can strip RuleProxy to Rule in the tree.
+// Rule (returned by Grammar::operator[]) is a non-owning handle and is
+// itself a ParsingExpr, so it participates in operators naturally.
+// Expression trees store Rule copies by value (~40 bytes each: a bare
+// NonTerminal* + a copied std::string name). Since Rule is non-owning,
+// recursive grammars never form shared_ptr cycles.
 // ---------------------------------------------------------------------------
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>
