@@ -1,4 +1,5 @@
 #pragma once
+#include "peglib/Concepts.h"
 #include "peglib/NonTerminal.h"
 #include "peglib/Terminals.h"
 
@@ -32,7 +33,7 @@ namespace peg
 // recursive grammars at the source — ~Grammar() needs no special handling.
 // The constraint is that Rule cannot outlive its Grammar (intentional).
 // ---------------------------------------------------------------------------
-template<typename Ctx = Context<std::span<const char>>>
+template<PegContext Ctx = Context<std::span<const char>>>
 class Grammar
 {
 public:
@@ -45,6 +46,20 @@ public:
     Grammar& operator=(const Grammar&) = delete;
     Grammar(Grammar&&) = default;
     Grammar& operator=(Grammar&&) = default;
+    ~Grammar()
+    {
+#ifndef NDEBUG
+        // Debug lifetime aid: poison every NonTerminal's body before the
+        // shared_ptr map releases them. If a Rule handle escapes its
+        // Grammar's lifetime, its next parse() trips the
+        // `assert(m_rule && ...)` in NonTerminal::parseImpl instead of
+        // silently using freed memory. (Under ASan, the same misuse is
+        // additionally caught as a use-after-free.) No-op in release builds.
+        for (auto& [_, nt] : m_rules) {
+            nt->clear_body_for_debug();
+        }
+#endif
+    }
 
     // Access a rule by name. Lazily creates the rule if it doesn't exist
     // (forward declaration). Returns a non-owning Rule handle for
@@ -77,7 +92,11 @@ public:
     void set_start(std::string name) { m_start = std::move(name); }
     [[nodiscard]] const std::string& start_rule() const noexcept { return m_start; }
 
-    // Parse using the start rule. Returns true on success.
+    // Parse using the start rule. Returns true on success, false on any
+    // failure (including cut-committed failures). On failure, the Context
+    // holds the diagnostic — retrieve it with `ctx.take_error()`. This method
+    // does not throw for parse failures; it only throws `std::logic_error` if
+    // no start rule is set.
     bool parse(Context& ctx) const
     {
         if (m_start.empty()) {
@@ -86,18 +105,35 @@ public:
         return parse(m_start, ctx);
     }
 
-    // Parse using an explicit rule name. Returns true on success.
+    // Parse using an explicit rule name. Returns true on success, false on
+    // any failure (regular or cut-committed). Cut-committed failures (which
+    // manifest internally as a thrown peg::ParseError from the
+    // Alternation/Repetition that owned the cut scope) are caught here and
+    // surfaced as a normal failure: the Context's furthest-failure state —
+    // already populated by record_failure() calls made before the throw — is
+    // queryable via ctx.take_error(). Throws std::out_of_range if `rule`
+    // is not defined.
     bool parse(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
         if (it == m_rules.end()) {
             throw std::out_of_range{"Grammar::parse: rule '" + std::string{rule} + "' not found"};
         }
-        return it->second->parse(ctx).success;
+        try {
+            return it->second->parse(ctx).success;
+        } catch (const ParseError&) {
+            // The Context's error state was already updated by record_failure
+            // calls along the failing path before the cut committed. Nothing
+            // to do here but report failure.
+            return false;
+        }
     }
 
     // Parse and return the parse tree (nullptr on failure or if the start
-    // rule is transparent). Useful for AST construction.
+    // rule is transparent). Useful for AST construction. Like parse(), this
+    // catches cut-committed failures and returns nullptr; retrieve the
+    // diagnostic via ctx.take_error(). Throws std::out_of_range if `rule`
+    // is not defined.
     typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -105,7 +141,11 @@ public:
             throw std::out_of_range{"Grammar::parse_tree: rule '" + std::string{rule} +
                                     "' not found"};
         }
-        return it->second->parse(ctx).tree;
+        try {
+            return it->second->parse(ctx).tree;
+        } catch (const ParseError&) {
+            return nullptr;
+        }
     }
 
     // Convenience: parse a string input using the start rule.

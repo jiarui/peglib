@@ -62,6 +62,13 @@ public:
 
     [[nodiscard]] bool is_defined() const noexcept { return m_rule != nullptr; }
 
+    // Debug-only lifetime aid: ~Grammar() calls this on every NonTerminal
+    // before releasing its owning shared_ptr. Clearing the body makes any
+    // dangling Rule handle (one that outlived its Grammar) trip the
+    // `assert(m_rule && ...)` in parseImpl instead of silently calling into
+    // freed memory. No-op in release builds (NDEBUG defined).
+    void clear_body_for_debug() noexcept { m_rule.reset(); }
+
     ParseResult parse(Context& context) const override
     {
         auto start_pos = context.mark();
@@ -85,7 +92,6 @@ public:
                     start_pos, ExpectedItem{.kind = ExpectedKind::RuleName, .text = m_name});
             }
             ParseResult fail{false, nullptr};
-            rule_state.m_last_return = false;
             rule_state.m_cached_result = fail;
             context.update_rule_state(this, start_pos, rule_state);
             return fail;
@@ -142,7 +148,6 @@ protected:
             if (result.success) {
                 if (end_pos > rule_state.m_last_pos) {
                     rule_state.m_last_pos = end_pos;
-                    rule_state.m_last_return = true;
                     best = result;
                     // Cache intermediate result so recursive memo hits
                     // during seed-grow see the latest successful match.
@@ -151,7 +156,6 @@ protected:
                         break;
                     }
                 } else {
-                    rule_state.m_last_return = true;
                     best = std::move(result);
                     rule_state.m_cached_result = best;
                     context.update_rule_state(this, start_pos, rule_state);
@@ -184,6 +188,17 @@ protected:
 // intentional — it eliminates shared_ptr cycles at the source (recursive
 // grammars no longer form reference cycles, so ~Grammar needs no special
 // handling).
+//
+// **Lifetime of handles**:
+//   - After `~Grammar()`, any outstanding Rule handle dangles. In debug
+//     builds `~Grammar()` poisons each NonTerminal's body, so a dangling
+//     Rule's next parse() hits `assert(m_rule && ...)` in parseImpl; under
+//     ASan the same misuse is caught as a use-after-free.
+//   - After `Grammar` move (`Grammar g2 = std::move(g1)`), Rule handles
+//     obtained from `g1` *remain valid*: `shared_ptr` move leaves the source
+//     map empty but the owned NonTerminal objects stay alive (re-homed in
+//     `g2`) at the same addresses, so the bare pointers in existing Rule
+//     handles still resolve correctly.
 //
 // Two assignment semantics:
 //   - operator=(ParsingExpr<...>) : assign a body to the underlying

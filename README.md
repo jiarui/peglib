@@ -41,8 +41,10 @@ real-world case study.
 - **`SourceMap`**: byte offset ↔ (line, col) mapping, supports both contiguous
   in-memory sources and streaming `FileSource`.
 - **Grammar validation**: `undefined_rules()` and `unreachable_rules()` helpers.
-- **Concept-constrained**: `PegContext<C>` concept validates the Context API at
-  compile time.
+- **Concept-constrained**: the `PegContext<C>` concept mirrors the full Context
+  API that combinators depend on, and is applied as a constraint on `Grammar`'s
+  template parameter — a custom Context type that's missing a method fails
+  fast with a single concept diagnostic instead of a deep template error.
 - **Pluggable input sources**: in-memory (`std::string`, `std::vector`) and
   streaming file I/O (`FileSource` with double buffering + cut-driven eviction).
 - **Self-hosting**: the C++ meta-grammar can parse `meta/peg.peg`, and

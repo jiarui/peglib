@@ -161,7 +161,7 @@ struct Repetition
                 break;
             }
             // Not advancing, stop
-            if (context.state().m_pos == startState.m_pos) {
+            if (context.state() == startState) {
                 break;
             }
         }

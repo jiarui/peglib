@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — parse API error contract
+- **`Grammar::parse` / `parse_tree` / `parse_string` no longer throw
+  `peg::ParseError` for cut-committed failures.** Previously, a cut operator
+  inside an alternative or unbounded repetition caused a `peg::ParseError` to
+  propagate out of the parse call (despite the `bool` return type suggesting
+  all failures were reported via the return value). These exceptions are now
+  caught at the `Grammar` boundary and reported as normal failures: callers
+  see `false` from `parse` (or `nullptr` from `parse_tree`) and retrieve the
+  diagnostic via `ctx.take_error()`, exactly as for a regular parse failure.
+  This makes the `bool` return contract self-consistent and unifies error
+  handling. **Migration**: any caller code of the form
+  `try { g.parse(ctx); } catch (const peg::ParseError&) { ... }` should be
+  rewritten as `if (!g.parse(ctx)) { auto err = ctx.take_error(); ... }`.
+  `ParseError` is still thrown internally and remains constructible by users
+  for ad-hoc diagnostics; only the `Grammar::parse*` call boundary changes.
+
+### Added — PegContext concept enforcement
+- **`PegContext<C>` is now applied as a constraint on `Grammar`'s template
+  parameter.** The concept was previously defined but unused; it now mirrors
+  the full Context API that combinators depend on (position/state, memo, cut,
+  error tracking, and all nested types). A custom Context type that's missing
+  a required method fails fast at `Grammar` instantiation with a single
+  concept diagnostic instead of a deep template error inside a combinator.
+- Self-check `static_assert`s verify the three shipped Context specializations
+  (`span<const char>`, `span<const char>, PegAstNodePtr`, `FileSource<char>`)
+  all satisfy the concept.
+
+### Changed — dead-code cleanup (preparing for concept enforcement)
+- **Removed `RuleState::m_last_return`** and the four-argument
+  `Context::update_rule_state` overload. Both were write-only leftovers from
+  the pre-Phase-2 boolean-returning `parse` model; every memo-hit path now
+  uses `RuleState::m_cached_result.success` instead.
+- **`Context::State` now exposes `operator==`**, and the combinators
+  (`Repetition`, `DynRepeatExpr`) compare `State` values directly instead of
+  reaching into `State::m_pos`. This keeps `m_pos` an internal detail so the
+  public Context contract (now expressed by `PegContext`) stays clean.
+
 ### Fixed — Phase 2 (X4 Rule redesign)
 - **shared_ptr cycle leak in recursive grammars**: eliminated at the source
   by making `Rule` a non-owning handle. Previously, recursive grammars

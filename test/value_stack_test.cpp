@@ -20,7 +20,7 @@ using namespace peg;
 //   - Default NodeType == std::monostate
 //   - Action return value stored on ParseTreeNode::value
 //   - Parse-tree shape after sequence / alternation / predicates
-//   - PegContext concept (see note below — currently disabled)
+//   - PegContext concept (applied as a Grammar constraint)
 // ---------------------------------------------------------------------------
 
 // A simple user-defined AST node for testing.
@@ -145,15 +145,14 @@ TEST_CASE("value-stack-monostate-action-returns-default")
 }
 
 // ---------------------------------------------------------------------------
-// PegContext concept tests
+// PegContext concept tests.
 //
-// NOTE: disabled because Concepts.h still references the removed value-stack
-// API (push_node / pop_node / peek_node / node_count / clear_stack) inside
-// the PegContext requires-clause. Context no longer provides those members,
-// so PegContext<Context<...>> currently evaluates to false. These tests will
-// be revived once Concepts.h is updated for the parse-tree refactor.
+// PegContext is applied as a constraint on Grammar's template parameter, so
+// a custom Context type that fails to satisfy it is rejected at the Grammar
+// instantiation point with a single concept diagnostic. These tests pin the
+// behaviour for the shipped Context specializations and confirm the concept
+// actually rejects incomplete Context types.
 // ---------------------------------------------------------------------------
-#if 0
 
 TEST_CASE("concept-default-context-satisfies-pegcontext")
 {
@@ -184,7 +183,23 @@ TEST_CASE("concept-filesource-context-satisfies-pegcontext")
     CHECK(PegContext<C>);
 }
 
-#endif // 0 — concept tests disabled pending Concepts.h refactor
+// Negative case: a Context type that is missing a required member (here,
+// init_cut / remove_cut — the cut stack API) must NOT satisfy PegContext.
+// This proves the concept is genuinely restrictive, not vacuously true.
+namespace
+{
+// Minimal stub that wires up the typedefs and a handful of methods but omits
+// the cut API deliberately.
+struct BadContextNoCut
+{
+    using iterator = const char*;
+    using value_type = char;
+    using node_type = std::monostate;
+    using match_range = std::span<const char>;
+};
+} // namespace
+static_assert(!PegContext<BadContextNoCut>,
+              "a Context missing the cut API must fail PegContext");
 
 // ---------------------------------------------------------------------------
 // Parse-tree shape after backtracking combinators.

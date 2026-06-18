@@ -126,11 +126,10 @@ struct Context
 
     struct RuleState
     {
-        RuleState(iterator pos, bool lr = false) : m_last_pos{pos}, m_last_return{lr} {}
+        explicit RuleState(iterator pos) : m_last_pos{pos} {}
         RuleState(const RuleState&) = default;
         RuleState& operator=(const RuleState&) = default;
         iterator m_last_pos;
-        bool m_last_return;
         // Cached ParseResult from the first successful parse at this
         // (position, rule) pair. On a memo hit, the caller receives this
         // cached result — including the tree and action value — without
@@ -143,6 +142,10 @@ struct Context
     {
         explicit State(iterator pos) : m_pos(pos) {}
         iterator m_pos;
+        // Comparable so combinators can detect zero-width progress
+        // (e.g. a repetition body that matched without advancing) without
+        // reaching into m_pos directly.
+        friend bool operator==(const State& lhs, const State& rhs) { return lhs.m_pos == rhs.m_pos; }
     };
 
     State state() { return State{m_position}; }
@@ -178,24 +181,6 @@ struct Context
             m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
         auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
         return std::tuple<bool, RuleState>{ok, iter->second};
-    }
-
-    bool update_rule_state(const NonTerminalType* rule,
-                           iterator start_pos,
-                           iterator return_pos,
-                           bool return_value)
-    {
-        auto memos = m_mem.find(start_pos);
-        if (memos == m_mem.end()) {
-            return false;
-        }
-        auto memo = memos->second.find(rule);
-        if (memo == memos->second.end()) {
-            return false;
-        }
-        memo->second.m_last_pos = return_pos;
-        memo->second.m_last_return = return_value;
-        return true;
     }
 
     bool

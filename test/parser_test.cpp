@@ -35,7 +35,7 @@ TEST_CASE("terminalseq-rollback-on-partial-match")
     CHECK(context2.mark() == context2.get_input().begin());
 }
 
-TEST_CASE("cut-committed-failure-throws-parse-error")
+TEST_CASE("cut-committed-failure-surfaces-via-take-error")
 {
     Grammar<> g;
 
@@ -47,20 +47,20 @@ TEST_CASE("cut-committed-failure-throws-parse-error")
     CHECK(g.parse("g1", context1));
 
     // `('a' >> cut >> 'x') | 'a'` on input "ab":
-    // first alt matches 'a', sets cut, then fails on 'x'; cut-committed
-    // failure now throws peg::ParseError instead of returning false.
+    // first alt matches 'a', sets cut, then fails on 'x'. With the
+    // D1 contract change, Grammar::parse catches the internally-thrown
+    // peg::ParseError and reports failure normally — it does NOT throw to
+    // the caller. The diagnostic is queryable via ctx.take_error().
     std::string input2 = "ab";
     Context context2(input2);
     g["g2"] = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
-    bool threw = false;
-    try {
-        g.parse("g2", context2);
-    } catch (const ParseError& e) {
-        threw = true;
-        // Position should be 1 (where 'x' was expected, after matching 'a')
-        CHECK(e.position() == 1);
-    }
-    CHECK(threw);
+    CHECK_FALSE(g.parse("g2", context2));
+    auto err = context2.take_error();
+    REQUIRE(err);
+    // Position should be 1 (where 'x' was expected, after matching 'a').
+    CHECK(err->position() == 1);
+    // The expected set reflects what the cut-committed branch wanted ('x').
+    CHECK_FALSE(err->expected().empty());
 }
 
 TEST_CASE("repetition-stops-on-no-progress")

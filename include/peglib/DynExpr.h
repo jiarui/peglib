@@ -145,7 +145,7 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
             if (max_rep > 0 && loop_count >= static_cast<std::size_t>(max_rep)) {
                 break;
             }
-            if (context.state().m_pos == start_state.m_pos) {
+            if (context.state() == start_state) {
                 break;
             }
         }

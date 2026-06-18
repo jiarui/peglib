@@ -83,3 +83,26 @@ TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Debug lifetime aid: ~Grammar() poisons each NonTerminal's body before
+// release so a dangling Rule handle fails fast (assert in debug, use-after-
+// free under ASan) rather than silently calling into freed memory.
+//
+// We can't directly assert on the assert/abort (process-level), so this test
+// verifies the observable mechanism: clear_body_for_debug() makes
+// is_defined() flip to false, which is what drives the assert in parseImpl.
+// Runs in all build types; the actual poisoning in ~Grammar is debug-only.
+// ---------------------------------------------------------------------------
+TEST_CASE("[lifecycle] clear-body-for-debug-makes-rule-undefined")
+{
+    Grammar<> g;
+    auto handle = g["rule"];
+    handle = +terminal('a');
+    CHECK(handle.is_defined());
+
+    // Poison the body as ~Grammar would in a debug build.
+    handle.impl()->clear_body_for_debug();
+    CHECK_FALSE(handle.is_defined());
+}
+
