@@ -19,8 +19,8 @@ struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueTy
     using SemanticAction =
         typename ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>::SemanticAction;
     TerminalExpr(const TerminalValueType& value, SemanticAction action = nullptr)
-        : m_terminalValue{value},
-          ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(action)
+        : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(action),
+          m_terminalValue{value}
     {}
     typename Context::ParseResult parse(Context& context) const override
     {
@@ -132,7 +132,7 @@ template<typename Context>
 struct EmptyExpr : ParsingExpr<Context, EmptyExpr<Context>>
 {
     EmptyExpr() {}
-    typename Context::ParseResult parse(Context& context) const override { return {true, nullptr}; }
+    typename Context::ParseResult parse(Context& /*context*/) const override { return {true, nullptr}; }
 };
 
 } // namespace parsers

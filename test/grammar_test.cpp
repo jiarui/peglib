@@ -244,7 +244,7 @@ TEST_CASE("[grammar] reusable-across-parses")
     g["num"] = +terminal('0', '9');
     g.set_start("num");
 
-    for (const std::string& input : {"1", "12", "123", "99999"}) {
+    for (const std::string input : {"1", "12", "123", "99999"}) {
         CAPTURE(input);
         CHECK(g.parse_string(input));
     }

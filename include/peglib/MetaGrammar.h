@@ -96,7 +96,6 @@ inline const Grammar<PegParseCtx>& meta_grammar()
     using CTerm = TerminalExpr<Ctx, char>;
     using CTermRange = TerminalExpr<Ctx, std::array<char, 2>>;
     using CTermPred = TerminalExpr<Ctx, bool (*)(char)>;
-    using CEmpty = EmptyExpr<Ctx>;
 
     static Grammar<PegParseCtx> g = []() {
         Grammar<PegParseCtx> g;
@@ -428,7 +427,7 @@ inline const Grammar<PegParseCtx>& meta_grammar()
         // ==================================================================
         g["Grammar"] = g["Spacing"] >> +g["Definition"] >> g["EndOfFile"];
         // Grammar: pass through all Definition children's values.
-        g["Grammar"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Grammar"].set_action([](Ctx&, TreePtr /*node*/) -> NodePtr {
             // Return the first definition; caller can inspect the full tree
             // for multiple definitions. This is a convention: the tree's
             // children carry all Definition nodes.

@@ -34,7 +34,7 @@ Checks: >
   +readability-uniqueptr-delete-release,
   +readability-else-after-return
 
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 
 HeaderFilterRegex: 'include/.*'
 

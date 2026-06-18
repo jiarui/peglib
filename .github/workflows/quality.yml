@@ -84,11 +84,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-      - name: Generate coverage report + enforce threshold (>= 70% lines)
+      - name: Generate coverage report + enforce threshold (>= 80% lines)
         run: |
-          # --fail-under-line exits non-zero if line coverage is below 70%.
+          # --fail-under-line exits non-zero if line coverage is below 80%.
           gcovr --root . --filter 'include/' \
-                --fail-under-line 70 \
+                --fail-under-line 80 \
                 --print-summary \
                 --html-details build/coverage.html \
                 --txt

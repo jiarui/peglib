@@ -167,7 +167,7 @@ struct FileSource
         friend FileSource;
 
     protected:
-        iterator(const FileSource* f, size_t pos) : m_freader{f}, m_pos{pos} {}
+        iterator(const FileSource* f, size_t pos) : m_pos{pos}, m_freader{f} {}
         size_t m_pos; // in item index
         const FileSource* m_freader;
     };

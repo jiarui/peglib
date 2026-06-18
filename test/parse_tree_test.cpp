@@ -137,7 +137,7 @@ TEST_CASE("value-stack-monostate-action-returns-default")
     Grammar<DefaultCtxt> g;
     g["rule"] = terminal('a');
     g["rule"].set_action(
-        [](DefaultCtxt& ctx, DefaultCtxt::ParseTreeNodePtr node) { return std::monostate{}; });
+        [](DefaultCtxt& /*ctx*/, DefaultCtxt::ParseTreeNodePtr /*node*/) { return std::monostate{}; });
 
     auto tree = g.parse_tree("rule", context);
     REQUIRE(tree);

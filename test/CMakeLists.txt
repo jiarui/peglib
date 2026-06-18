@@ -10,6 +10,18 @@ add_library(peglib_test_main OBJECT doctest_main.cpp)
 target_include_directories(peglib_test_main PRIVATE ${doctest_include_dir})
 
 # ---------------------------------------------------------------------------
+# Warning flags for the TEST targets only (not the INTERFACE peglib library,
+# so consumers of peglib are not forced into -Werror). GCC/Clang get the full
+# -Wall -Wextra -Wpedantic -Werror treatment; MSVC uses /W4 /WX. This catches
+# issues in both the tests and the header-only library as compiled here.
+# ---------------------------------------------------------------------------
+add_library(peglib_test_warnings INTERFACE)
+target_compile_options(peglib_test_warnings INTERFACE
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
+        -Wall -Wextra -Wpedantic -Werror>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>)
+
+# ---------------------------------------------------------------------------
 # Core library tests
 # ---------------------------------------------------------------------------
 add_executable(peglib_test
@@ -29,7 +41,7 @@ add_executable(peglib_test
     recursive_leak_test.cpp
     negative_path_test.cpp)
 
-target_link_libraries(peglib_test PRIVATE peglib peglib_test_main)
+target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})
 
 target_compile_definitions(peglib_test PRIVATE
@@ -39,18 +51,22 @@ target_compile_definitions(peglib_test PRIVATE
 add_test(NAME peglib_test COMMAND peglib_test)
 
 # ---------------------------------------------------------------------------
-# Lua lexer/parser smoke tests (no external deps beyond doctest)
+# Lua lexer/parser smoke tests (no external deps beyond doctest).
+# Gated on PEGLIB_BUILD_LUA_EXAMPLES so they can be disabled independently
+# of the core test suite (they're real-world examples, not library regressions).
 # ---------------------------------------------------------------------------
+if(PEGLIB_BUILD_LUA_EXAMPLES)
 add_executable(peglib_lua_test
     lua_lex.cpp
     lua.cpp)
 
-target_link_libraries(peglib_lua_test PRIVATE peglib peglib_test_main)
+target_link_libraries(peglib_lua_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_lua_test PRIVATE ${doctest_include_dir})
 target_compile_definitions(peglib_lua_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_test(NAME peglib_lua_test COMMAND peglib_lua_test)
+endif()
 
 # ---------------------------------------------------------------------------
 # JSON grammar example tests
@@ -58,7 +74,7 @@ add_test(NAME peglib_lua_test COMMAND peglib_lua_test)
 add_executable(peglib_json_test
     json_test.cpp)
 
-target_link_libraries(peglib_json_test PRIVATE peglib peglib_test_main)
+target_link_libraries(peglib_json_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_json_test PRIVATE ${doctest_include_dir})
 target_compile_definitions(peglib_json_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

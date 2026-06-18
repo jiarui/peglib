@@ -105,7 +105,7 @@ inline Grammar<> g;
 TEST_CASE("[json] keyword-rule")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"true", "false", "null"}) {
+    for (const std::string s : {"true", "false", "null"}) {
         Context ctx(s);
         CHECK(g.parse("keyword", ctx));
         CHECK(ctx.ended());
@@ -115,7 +115,7 @@ TEST_CASE("[json] keyword-rule")
 TEST_CASE("[json] number-rule")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"0",
+    for (const std::string s : {"0",
                                  "1",
                                  "42",
                                  "-1",
@@ -137,7 +137,7 @@ TEST_CASE("[json] number-rule")
 TEST_CASE("[json] number-rule-rejects-invalid")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"01", "1.", "+5", ".5", "--1"}) {
+    for (const std::string s : {"01", "1.", "+5", ".5", "--1"}) {
         Context ctx(s);
         CAPTURE(s);
         bool matched = g.parse("number", ctx);
@@ -148,7 +148,7 @@ TEST_CASE("[json] number-rule-rejects-invalid")
 TEST_CASE("[json] string-rule")
 {
     using namespace json_grammar;
-    for (const std::string& s : {"\"\"",
+    for (const std::string s : {"\"\"",
                                  "\"a\"",
                                  "\"hello world\"",
                                  "\"tab\\there\"",
@@ -172,7 +172,7 @@ TEST_CASE("[json] string-rule-rejects-unterminated")
 TEST_CASE("[json] whitespace-tolerance")
 {
     using namespace json_grammar;
-    for (const std::string& input : {
+    for (const std::string input : {
              "  null  ",
              "\n\ttrue\r\n",
              "   42   ",

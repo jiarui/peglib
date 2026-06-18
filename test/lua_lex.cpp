@@ -218,7 +218,7 @@ TEST_CASE("lua-lex-tokens")
     std::string input = R"(print('hello world'))";
     Context context(input);
     g["names"].set_action(
-        [](decltype(context)& c, decltype(context)::ParseTreeNodePtr node) -> std::monostate {
+        [](decltype(context)& /*c*/, decltype(context)::ParseTreeNodePtr /*node*/) -> std::monostate {
             return {};
         });
     {
