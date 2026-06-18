@@ -196,7 +196,6 @@ struct BadContextNoCut
     using iterator = const char*;
     using value_type = char;
     using node_type = std::monostate;
-    using match_range = std::span<const char>;
 };
 } // namespace
 static_assert(!PegContext<BadContextNoCut>, "a Context missing the cut API must fail PegContext");

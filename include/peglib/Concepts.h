@@ -36,7 +36,6 @@ concept PegContext =
         typename C::iterator;
         typename C::value_type;
         typename C::node_type;
-        typename C::match_range;
         typename C::NonTerminalType;
         typename C::RuleState;
         typename C::State;
