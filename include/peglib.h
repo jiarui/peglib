@@ -3,6 +3,7 @@
 #include "peglib/Concepts.h"
 #include "peglib/DynExpr.h"
 #include "peglib/Grammar.h"
+#include "peglib/GrammarCompiler.h"
 #include "peglib/Macros.h"
 #include "peglib/MetaGrammar.h"
 #include "peglib/ParseError.h"

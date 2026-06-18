@@ -24,7 +24,8 @@ add_executable(peglib_test
     error_test.cpp
     dynexpr_test.cpp
     meta_grammar_test.cpp
-    self_parse_test.cpp)
+    self_parse_test.cpp
+    from_string_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})
