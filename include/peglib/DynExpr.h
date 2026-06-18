@@ -80,7 +80,9 @@ struct DynAlternationExpr : ParsingExpr<Context, DynAlternationExpr<Context>>
     ParseResult parse(Context& context) const override
     {
         context.init_cut();
-        ScopeGuard guard{[&context]() { context.remove_cut(); }};
+        ScopeGuard guard{[&context]() {
+            context.remove_cut();
+        }};
         for (const auto& child : m_children) {
             auto result = child->parse(context);
             if (result.success) {

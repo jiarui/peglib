@@ -62,7 +62,7 @@ TEST_CASE("context-reset-allows-rewind-past-last-cut")
     context.next();
     CHECK(*context.mark() == 'd');
     context.init_cut();
-    context.cut(true);       // commits; m_last_cut advances on remove_cut
+    context.cut(true); // commits; m_last_cut advances on remove_cut
     context.remove_cut();
 
     // Rewind to the beginning — strictly before m_last_cut. Legal per contract.

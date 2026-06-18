@@ -74,7 +74,8 @@ public:
         // Phase 2: collect all Definition AST nodes.
         auto defs = collect_definitions(tree);
         if (defs.empty()) {
-            err = Diagnostic{0, {ExpectedItem{ExpectedKind::RuleName, "no rule definitions found"}}};
+            err =
+                Diagnostic{0, {ExpectedItem{ExpectedKind::RuleName, "no rule definitions found"}}};
             return false;
         }
 

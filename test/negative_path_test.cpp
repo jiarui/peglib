@@ -119,7 +119,9 @@ TEST_CASE("[negative] sourcemap-locate-past-eof")
 TEST_CASE("[negative] sourcemap-from-empty-file")
 {
     const std::string path = std::string(PEGLIB_TEST_DATA_DIR) + "/empty.tmp";
-    { std::ofstream out(path, std::ios::binary | std::ios::trunc); } // create 0-byte file
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    } // create 0-byte file
 
     FileSource<char> fs{64, path};
     SourceMap map{fs};

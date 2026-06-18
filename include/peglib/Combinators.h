@@ -85,7 +85,9 @@ struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children.
     ParseResult parse(Context& context) const override
     {
         context.init_cut();
-        ScopeGuard s{[&context]() { context.remove_cut(); }};
+        ScopeGuard s{[&context]() {
+            context.remove_cut();
+        }};
         return parseAlt<0>(context);
     }
 
@@ -137,11 +139,12 @@ protected:
 template<typename Context, typename ChildOp>
     requires std::invocable<ChildOp&, Context&>
 typename Context::ParseResult
-repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep,
-                  std::int64_t max_rep)
+repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, std::int64_t max_rep)
 {
     context.init_cut();
-    ScopeGuard _{[&context]() { context.remove_cut(); }};
+    ScopeGuard _{[&context]() {
+        context.remove_cut();
+    }};
     auto initState = context.state();
     auto node = std::make_shared<typename Context::ParseTreeNode>();
     node->start_offset = context.offset_of(context.mark());
@@ -210,7 +213,7 @@ struct Repetition : ParsingExpr<Context, Repetition<Context, Child>>
         : m_child(child), min_rep(min_r), max_rep(max_r)
     {
         if (!((max_rep < 0) ||
-               ((max_rep >= 0) && (min_rep <= static_cast<std::size_t>(max_rep))))) {
+              ((max_rep >= 0) && (min_rep <= static_cast<std::size_t>(max_rep))))) {
             throw std::invalid_argument("rep not correct");
         }
     }
@@ -223,8 +226,8 @@ struct Repetition : ParsingExpr<Context, Repetition<Context, Child>>
 
     ParseResult parse(Context& context) const override
     {
-        return repeat_parse_impl(context, [this](Context& c) { return m_child.parse(c); },
-                                 min_rep, max_rep);
+        return repeat_parse_impl(
+            context, [this](Context& c) { return m_child.parse(c); }, min_rep, max_rep);
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override

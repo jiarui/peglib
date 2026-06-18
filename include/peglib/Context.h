@@ -160,7 +160,10 @@ struct Context
         // Comparable so combinators can detect zero-width progress
         // (e.g. a repetition body that matched without advancing) without
         // reaching into m_pos directly.
-        friend bool operator==(const State& lhs, const State& rhs) { return lhs.m_pos == rhs.m_pos; }
+        friend bool operator==(const State& lhs, const State& rhs)
+        {
+            return lhs.m_pos == rhs.m_pos;
+        }
     };
 
     State state() { return State{m_position}; }

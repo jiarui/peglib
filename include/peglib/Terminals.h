@@ -132,7 +132,10 @@ template<typename Context>
 struct EmptyExpr : ParsingExpr<Context, EmptyExpr<Context>>
 {
     EmptyExpr() {}
-    typename Context::ParseResult parse(Context& /*context*/) const override { return {true, nullptr}; }
+    typename Context::ParseResult parse(Context& /*context*/) const override
+    {
+        return {true, nullptr};
+    }
 };
 
 } // namespace parsers

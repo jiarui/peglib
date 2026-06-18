@@ -159,8 +159,8 @@ inline const Grammar<PegParseCtx>& meta_grammar()
         g["IdentifierRaw"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
             auto& input = ctx.get_input();
             std::string name(input.begin() + node->start_offset, input.begin() + node->end_offset);
-            return PegAstNode::make(NodeKind::RuleRef, std::move(name),
-                                    node->start_offset, node->end_offset);
+            return PegAstNode::make(
+                NodeKind::RuleRef, std::move(name), node->start_offset, node->end_offset);
         });
 
         // Identifier: pass through IdentifierRaw's value. The body is
@@ -206,8 +206,8 @@ inline const Grammar<PegParseCtx>& meta_grammar()
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string_view body(input.data() + s, e - s);
-            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body),
-                                    node->start_offset, node->end_offset);
+            return PegAstNode::make(
+                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
         });
 
         g["DoubleQuotedCore"] = CTerm('"') >> *(!CTerm('"') >> g["Char"]) >> CTerm('"');
@@ -216,8 +216,8 @@ inline const Grammar<PegParseCtx>& meta_grammar()
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string_view body(input.data() + s, e - s);
-            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body),
-                                    node->start_offset, node->end_offset);
+            return PegAstNode::make(
+                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
         });
 
         // LiteralCore: pass through SingleQuotedCore / DoubleQuotedCore value.
@@ -242,8 +242,8 @@ inline const Grammar<PegParseCtx>& meta_grammar()
         g["ClassCore"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
             auto& input = ctx.get_input();
             std::string raw(input.begin() + node->start_offset, input.begin() + node->end_offset);
-            return PegAstNode::make(NodeKind::CharClass, std::move(raw),
-                                    node->start_offset, node->end_offset);
+            return PegAstNode::make(
+                NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
         });
 
         // Class: pass through ClassCore's value.
@@ -269,10 +269,9 @@ inline const Grammar<PegParseCtx>& meta_grammar()
         make_punct("CLOSE", CTerm(')') >> g["Spacing"]);
 
         g["DOT"] = CTerm('.') >> g["Spacing"];
-        g["DOT"].set_action(
-            [](Ctx&, TreePtr node) -> NodePtr {
-                return PegAstNode::make(NodeKind::Dot, {}, node->start_offset, node->end_offset);
-            });
+        g["DOT"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+            return PegAstNode::make(NodeKind::Dot, {}, node->start_offset, node->end_offset);
+        });
 
         // ==================================================================
         // Primary
@@ -415,8 +414,8 @@ inline const Grammar<PegParseCtx>& meta_grammar()
                 return nullptr;
             // Span the whole Definition (name <- body); position diagnostics
             // (e.g. undefined-rule references inside the body) at the def.
-            auto def = PegAstNode::make(NodeKind::Definition, id->value->text,
-                                        node->start_offset, node->end_offset);
+            auto def = PegAstNode::make(
+                NodeKind::Definition, id->value->text, node->start_offset, node->end_offset);
             if (expr && expr->value)
                 def->children.push_back(expr->value);
             return def;

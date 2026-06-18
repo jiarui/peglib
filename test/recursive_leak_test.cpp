@@ -105,4 +105,3 @@ TEST_CASE("[lifecycle] clear-body-for-debug-makes-rule-undefined")
     handle.impl()->clear_body_for_debug();
     CHECK_FALSE(handle.is_defined());
 }
-

@@ -116,17 +116,17 @@ TEST_CASE("[json] number-rule")
 {
     using namespace json_grammar;
     for (const std::string s : {"0",
-                                 "1",
-                                 "42",
-                                 "-1",
-                                 "3.14",
-                                 "-0.5",
-                                 "1e10",
-                                 "2.5E-3",
-                                 "123.456e789",
-                                 "10.0",
-                                 "0.001",
-                                 "-123.456e+789"}) {
+                                "1",
+                                "42",
+                                "-1",
+                                "3.14",
+                                "-0.5",
+                                "1e10",
+                                "2.5E-3",
+                                "123.456e789",
+                                "10.0",
+                                "0.001",
+                                "-123.456e+789"}) {
         Context ctx(s);
         CAPTURE(s);
         CHECK(g.parse("number", ctx));
@@ -149,11 +149,11 @@ TEST_CASE("[json] string-rule")
 {
     using namespace json_grammar;
     for (const std::string s : {"\"\"",
-                                 "\"a\"",
-                                 "\"hello world\"",
-                                 "\"tab\\there\"",
-                                 "\"unicode\\u0041\"",
-                                 "\"slash\\/end\""}) {
+                                "\"a\"",
+                                "\"hello world\"",
+                                "\"tab\\there\"",
+                                "\"unicode\\u0041\"",
+                                "\"slash\\/end\""}) {
         Context ctx(s);
         CAPTURE(s);
         CHECK(g.parse("string", ctx));

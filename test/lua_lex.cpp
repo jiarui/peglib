@@ -16,10 +16,10 @@ auto fractional = -(terminal('+') | '-') >>
 auto decimal = -(terminal('+') | '-') >> +digit;
 auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >>
                   -(terminal('.') >> +xdigit) >> -((terminal('p') | 'P') >> decimal);
-auto escape_single_quote =
-    terminal('\\') >>
-    (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | ('z' >> WS) | (3 * digit) |
-     (2 * xdigit) | terminal('u') >> '{' >> *xdigit >> '}');
+auto escape_single_quote = terminal('\\') >>
+                           (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' |
+                            ('z' >> WS) | (3 * digit) | (2 * xdigit) |
+                            terminal('u') >> '{' >> *xdigit >> '}');
 auto string_content =
     terminal<char>([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
 auto string_single_quote = terminal('\'') >> *(string_content | escape_single_quote) >>
@@ -29,8 +29,12 @@ auto cut_ = cut<Context<std::span<const char>>>();
 Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
-    g["names"] = terminal<char>([](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }) >>
-                 *terminal<char>([](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
+    g["names"] = terminal<char>([](char c) {
+                     return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+                 }) >>
+                 *terminal<char>([](char c) {
+                     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+                 });
     g["numeral"] = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
     g["comment"] = terminal('-') >> '-' >> *not_linebreak >> linebreak;
     g["string_literal"] = string_single_quote;
@@ -218,9 +222,8 @@ TEST_CASE("lua-lex-tokens")
     std::string input = R"(print('hello world'))";
     Context context(input);
     g["names"].set_action(
-        [](decltype(context)& /*c*/, decltype(context)::ParseTreeNodePtr /*node*/) -> std::monostate {
-            return {};
-        });
+        [](decltype(context)& /*c*/,
+           decltype(context)::ParseTreeNodePtr /*node*/) -> std::monostate { return {}; });
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
