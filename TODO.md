@@ -108,6 +108,35 @@ lambda. Non-recursive rules continue to work with copy-init as before.
 - `Context` ownership of input data (separate issue, deferred)
 - Textual grammar format (Phase 2, after this is stable)
 
+## High Priority — shared_ptr cycle leak in recursive grammars
+
+**Discovered**: Phase 2 W3 (GrammarCompiler). ASan confirmed.
+
+Recursive grammars create `shared_ptr` cycles that prevent destruction:
+
+```
+NonTerminal → body (shared_ptr<DynExpr>)
+            → impl (shared_ptr<RuleRefWrapper>)
+            → proxy (RuleProxy)
+            → rule (shared_ptr<NonTerminal>)   ← cycle back to start
+```
+
+Every `RuleRef` in the AST embeds a `RuleProxy` copy (containing
+`shared_ptr<NonTerminal>`) inside the expression tree. For self-referential
+or mutually-recursive rules, this forms a cycle. The "leak" is bounded by
+grammar size, so long-lived grammars are unaffected. But programs that
+compile grammars dynamically (e.g. per-request) will accumulate memory.
+
+ASan measurement: 100 recursive grammars (`A <- A 'x' / 'y'`) leak
+~79 KB in 900 allocations. Non-recursive grammars leak nothing.
+
+- [ ] **Fix**: break the cycle. Candidate approaches:
+  - `weak_ptr` for rule back-references in `RuleRefWrapper`
+  - Store `NonTerminal*` (non-owning) in `RuleRefWrapper`; Grammar owns all rules
+  - `Grammar` destructor resets rule bodies before releasing rule handles
+- [ ] Add a regression test that compiles + destroys N recursive grammars
+      and checks ASan is clean.
+
 ## Phase 2 — Grammar API (PARTIAL: Grammar container done, textual format pending)
 
 The `Grammar<>` class is now the primary user-facing API. Rules are defined
