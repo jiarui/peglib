@@ -55,6 +55,15 @@ struct PegAstNode
     std::string text;
     std::vector<std::shared_ptr<PegAstNode>> children;
 
+    // Source span (byte offsets into the original PEG text). Filled by the
+    // meta-grammar's actions from the matching ParseTreeNode's offsets, so
+    // that GrammarCompiler diagnostics can point at where an AST node
+    // originated — e.g. "undefined rule 'foo'" can name the offset of the
+    // offending identifier rather than a hardcoded 0. Defaults to 0 for
+    // nodes built without offset context.
+    std::size_t start_offset = 0;
+    std::size_t end_offset = 0;
+
     PegAstNode() = default;
     PegAstNode(NodeKind k, std::string t = {}) : kind{k}, text{std::move(t)} {}
 
@@ -63,6 +72,16 @@ struct PegAstNode
     static std::shared_ptr<PegAstNode> make(NodeKind k, std::string t = {})
     {
         return std::make_shared<PegAstNode>(k, std::move(t));
+    }
+
+    // Factory that also records the source span.
+    static std::shared_ptr<PegAstNode>
+    make(NodeKind k, std::string t, std::size_t start, std::size_t end)
+    {
+        auto n = std::make_shared<PegAstNode>(k, std::move(t));
+        n->start_offset = start;
+        n->end_offset = end;
+        return n;
     }
 };
 

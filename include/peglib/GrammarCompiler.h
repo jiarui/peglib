@@ -66,7 +66,7 @@ public:
             if (auto d = ctx.take_error()) {
                 err = std::move(*d);
             } else {
-                err = Diagnostic{0, {}};
+                err = Diagnostic{0, {ExpectedItem{ExpectedKind::RuleName, "empty grammar input"}}};
             }
             return false;
         }
@@ -74,7 +74,7 @@ public:
         // Phase 2: collect all Definition AST nodes.
         auto defs = collect_definitions(tree);
         if (defs.empty()) {
-            err = Diagnostic{0, {}};
+            err = Diagnostic{0, {ExpectedItem{ExpectedKind::RuleName, "no rule definitions found"}}};
             return false;
         }
 
@@ -97,17 +97,29 @@ public:
                 }
             }
         } catch (const std::exception& e) {
-            err = Diagnostic{0, {}};
+            // Preserve the internal error message instead of swallowing it.
+            // Without this, a meta-grammar bug (e.g. unhandled NodeKind)
+            // manifests as a useless Diagnostic{0, {}} to the caller.
+            err = Diagnostic{
+                0,
+                {ExpectedItem{ExpectedKind::RuleName, std::string{"internal error: "} + e.what()}}};
             return false;
         }
 
-        // Phase 4: validate — report undefined rule references.
+        // Phase 4: validate — report undefined rule references. Report ALL
+        // undefined names (not just the first) so the user can fix every typo
+        // in one pass. Position at the first definition's offset (best
+        // available source location) rather than a hardcoded 0.
         auto undefined = out.undefined_rules();
         if (!undefined.empty()) {
-            // Report the first undefined rule as a diagnostic.
-            err = Diagnostic{0,
-                             {ExpectedItem{.kind = ExpectedKind::RuleName,
-                                           .text = "undefined rule '" + undefined[0] + "'"}}};
+            std::size_t pos = defs.empty() ? 0 : defs[0]->start_offset;
+            std::string msg = "undefined rule(s): ";
+            for (std::size_t i = 0; i < undefined.size(); ++i) {
+                if (i)
+                    msg += ", ";
+                msg += "'" + undefined[i] + "'";
+            }
+            err = Diagnostic{pos, {ExpectedItem{ExpectedKind::RuleName, std::move(msg)}}};
             return false;
         }
 

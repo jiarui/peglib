@@ -10,7 +10,7 @@ auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
 auto linebreak = terminal('\n');
 auto not_linebreak = terminal<char>([](char c) { return c != '\n'; });
 auto digit = terminal('0', '9');
-auto xdigit = terminal<char>([](char c) { return std::isxdigit(c); });
+auto xdigit = terminal<char>([](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
 auto fractional = -(terminal('+') | '-') >>
                   ((*digit >> terminal('.') >> +digit) | (+digit >> terminal('.') >> *digit));
 auto decimal = -(terminal('+') | '-') >> +digit;
@@ -29,8 +29,8 @@ auto cut_ = cut<Context<std::span<const char>>>();
 Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
-    g["names"] = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; }) >>
-                 *terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
+    g["names"] = terminal<char>([](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }) >>
+                 *terminal<char>([](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
     g["numeral"] = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
     g["comment"] = terminal('-') >> '-' >> *not_linebreak >> linebreak;
     g["string_literal"] = string_single_quote;
@@ -247,11 +247,11 @@ namespace lexconv
 {
 auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
 auto not_linebreak = terminal<char>([](char c) { return c != '\n'; });
-auto name_start = terminal<char>([](char c) { return std::isalpha(c) || c == '_'; });
-auto name_cont = terminal<char>([](char c) { return std::isalnum(c) || c == '_'; });
+auto name_start = terminal<char>([](char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; });
+auto name_cont = terminal<char>([](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
 auto linebreak = terminalSeq<char>("\r\n") | terminal('\n');
 auto digit = terminal('0', '9');
-auto xdigit = terminal<char>([](char c) { return std::isxdigit(c); });
+auto xdigit = terminal<char>([](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
 auto pos_or_neg = (terminal('+') | '-');
 auto fractional = -pos_or_neg >> ((*digit >> '.' >> +digit) | (+digit >> '.' >> *digit));
 auto decimal = -pos_or_neg >> +digit;

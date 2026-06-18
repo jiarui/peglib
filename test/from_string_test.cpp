@@ -246,16 +246,36 @@ TEST_CASE("[from_string] try_from_string")
     SUBCASE("invalid-grammar")
     {
         CHECK_FALSE(GrammarCompiler::try_from_string("bad syntax !!!", g, err));
+        // A syntactic failure should carry a real diagnostic, not an empty one.
+        CHECK_FALSE(err.expected().empty());
     }
     SUBCASE("undefined-rule")
     {
         // A references B which is never defined.
         CHECK_FALSE(GrammarCompiler::try_from_string("A <- B", g, err));
+        // B2: the undefined-rule diagnostic must name B (and the message is
+        // non-empty so callers can show something useful).
+        REQUIRE_FALSE(err.expected().empty());
+        CHECK(err.expected().begin()->text.find("B") != std::string::npos);
+    }
+    SUBCASE("undefined-rule-reports-all")
+    {
+        // Multiple undefined references — B2 reports every name, not just
+        // the first, so the user fixes all typos in one pass.
+        CHECK_FALSE(GrammarCompiler::try_from_string("A <- B / C / D", g, err));
+        REQUIRE_FALSE(err.expected().empty());
+        const auto& msg = err.expected().begin()->text;
+        CHECK(msg.find("B") != std::string::npos);
+        CHECK(msg.find("C") != std::string::npos);
+        CHECK(msg.find("D") != std::string::npos);
     }
     SUBCASE("non-throwing-on-internal-error")
     {
         // try_from_string must not throw even on edge cases.
         CHECK_FALSE(GrammarCompiler::try_from_string("", g, err));
+        // B2: empty input gets a descriptive message, not an empty expected set.
+        REQUIRE_FALSE(err.expected().empty());
+        CHECK_FALSE(err.expected().begin()->text.empty());
     }
 }
 
