@@ -26,7 +26,8 @@ add_executable(peglib_test
     meta_grammar_test.cpp
     self_parse_test.cpp
     from_string_test.cpp
-    recursive_leak_test.cpp)
+    recursive_leak_test.cpp
+    negative_path_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})

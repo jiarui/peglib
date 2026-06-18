@@ -2,9 +2,10 @@
 // Self-parse test — W2.5 of Phase 2 textual grammar format.
 //
 // Verifies that the C++ reference meta-grammar can parse the canonical
-// textual PEG spec (meta/peg.peg). This is the foundation for the
-// bootstrap: once GrammarCompiler (W3) can turn the AST into a working
-// Grammar, we'll verify the bootstrapped grammar produces the same AST.
+// textual PEG spec (meta/peg.peg), and that GrammarCompiler can compile
+// that spec into a working grammar. A full bootstrap-equivalence check
+// (the compiled grammar producing the same AST as the C++ meta-grammar)
+// is a planned follow-up; these tests validate each path independently.
 // ---------------------------------------------------------------------------
 
 #include "peglib.h"

@@ -47,8 +47,11 @@ real-world case study.
   fast with a single concept diagnostic instead of a deep template error.
 - **Pluggable input sources**: in-memory (`std::string`, `std::vector`) and
   streaming file I/O (`FileSource` with double buffering + cut-driven eviction).
-- **Self-hosting**: the C++ meta-grammar can parse `meta/peg.peg`, and
-  `GrammarCompiler` can compile it into a working grammar.
+- **Parses its own grammar spec**: the C++ meta-grammar can parse `meta/peg.peg`,
+  and `GrammarCompiler` can compile that spec into a working grammar. (A full
+  bootstrap-equivalence test — compiled grammar produces the same AST as the
+  C++ meta-grammar — is a planned follow-up; today both paths are validated
+  independently.)
 
 ## Quick Start
 
