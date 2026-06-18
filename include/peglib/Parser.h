@@ -6,7 +6,7 @@
 //   Terminals.h    — TerminalExpr, TerminalSeqExpr, EmptyExpr
 //   Combinators.h  — SequenceExpr, AlternationExpr, Repetition (+ variants),
 //                    NotExpr, AndExpr, CutExpr
-//   NonTerminal.h  — NonTerminal (internal node), Rule (shared_ptr handle)
+//   NonTerminal.h  — NonTerminal (internal node), Rule (bare-pointer handle)
 
 #include "peglib/Combinators.h"
 #include "peglib/NonTerminal.h"

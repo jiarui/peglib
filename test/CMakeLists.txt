@@ -20,7 +20,7 @@ add_executable(peglib_test
     context_test.cpp
     file_source_test.cpp
     sourcemap_test.cpp
-    value_stack_test.cpp
+    parse_tree_test.cpp
     error_test.cpp
     dynexpr_test.cpp
     meta_grammar_test.cpp

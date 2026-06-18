@@ -14,14 +14,17 @@ namespace peg
 // PegAst: AST produced by the meta-grammar when parsing PEG text.
 //
 // This is an intermediate representation between textual PEG input and the
-// runtime Rule tree. The meta-grammar's semantic actions build these nodes
-// and push them onto the Context value stack; the GrammarCompiler then
-// walks the tree to construct Grammar<> rules.
+// runtime Rule tree. Under the post-parse-tree action model, each
+// meta-grammar action receives a ParseTreeNodePtr and returns a PegAstNode
+// (stored on the node's `value`); GrammarCompiler then walks the resulting
+// PegAst tree to construct Grammar<> rules.
 //
 // Shape: a simple discriminated tree. Every node has a kind, an optional
-// text payload (literal value / char-class source / identifier name), and
-// a list of children. We deliberately avoid std::variant here so that the
-// meta-grammar's reduce actions stay uniform regardless of kind.
+// text payload (literal value / char-class source / identifier name), a
+// list of children, and a source span (start/end byte offsets into the
+// original PEG text) for diagnostics. We deliberately avoid std::variant
+// here so that the meta-grammar's reduce actions stay uniform regardless
+// of kind.
 // ---------------------------------------------------------------------------
 
 enum class NodeKind
@@ -35,18 +38,12 @@ enum class NodeKind
     Plus,       // e+
     AndPred,    // &e
     NotPred,    // !e
-    Group,      // (e)  — child carried transparently
 
     // Leaves
     Literal,   // 'abc' / "abc";   text = the decoded content
     CharClass, // [a-z^0-9_];      text = the raw inside-bracket source
     Dot,       // .
     RuleRef,   // name;            text = referenced rule name
-
-    // Internal sentinel used by the meta-grammar's reduce actions to
-    // delimit a variable-length run of values on the value stack. Never
-    // appears in a finished AST tree returned to user code.
-    Marker,
 };
 
 struct PegAstNode
@@ -87,8 +84,9 @@ struct PegAstNode
 
 using PegAstNodePtr = std::shared_ptr<PegAstNode>;
 
-// Context type used by the meta-grammar. The value stack carries
-// PegAstNodePtr values; std::monostate users are unaffected.
+// Context type used by the meta-grammar. NodeType is PegAstNodePtr so the
+// meta-grammar's actions can return PegAstNode values via the parse tree;
+// the default std::monostate users are unaffected.
 using PegParseCtx = Context<std::span<const char>, PegAstNodePtr>;
 
 } // namespace peg

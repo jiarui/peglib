@@ -45,15 +45,32 @@ TEST_CASE("context-state-save-restore")
     CHECK(*context.mark() == 'c');
 }
 
-TEST_CASE("context-reset-clamped-by-last-cut")
+TEST_CASE("context-reset-allows-rewind-past-last-cut")
 {
+    // reset()'s lower bound is intentionally NOT enforced: after a cut,
+    // memo/buffer data for earlier positions has been released, but it is
+    // still valid to rewind there and re-parse from scratch. This test
+    // pins that contract — a future change that clamps reset() to
+    // m_last_cut would break legitimate backtracking-after-cut grammars.
     std::string input = "abcdef";
     Context context(input);
 
-    // Initially last_cut == begin, so reset anywhere in [begin, end] is OK.
+    // Walk to 'd' (offset 3), commit a cut there (advances m_last_cut to 3),
+    // then rewind to the start — must succeed even though it's before the cut.
     context.next();
-    auto p = context.mark();
-    context.reset(p);
+    context.next();
+    context.next();
+    CHECK(*context.mark() == 'd');
+    context.init_cut();
+    context.cut(true);       // commits; m_last_cut advances on remove_cut
+    context.remove_cut();
+
+    // Rewind to the beginning — strictly before m_last_cut. Legal per contract.
+    auto begin = context.get_input().begin();
+    context.reset(begin);
+    CHECK(*context.mark() == 'a');
+    // And we can walk forward again from scratch (memo was erased, re-parse OK).
+    context.next();
     CHECK(*context.mark() == 'b');
 }
 

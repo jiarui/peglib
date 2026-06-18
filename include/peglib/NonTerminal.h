@@ -15,8 +15,8 @@ namespace parsers
 //
 // Supports packrat memoization and left-recursion (seed-grow algorithm).
 // NonTerminal is non-copyable — identity (the `this` pointer) is the memo
-// key and seed-grow anchor. Users interact via Rule (a shared_ptr handle),
-// never directly with NonTerminal.
+// key and seed-grow anchor. Users interact via Rule (a bare-pointer,
+// non-owning handle), never directly with NonTerminal.
 //
 // Post-parse action model (Phase 2 refactor):
 //   parse() returns ParseResult { success, tree }. On the first successful
