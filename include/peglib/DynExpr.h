@@ -158,6 +158,9 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
             context.state(last_success_state);
             node->children.resize(loop_count);
         }
+        // Unbounded repetition: cut-committed child failure escalates to
+        // ParseError. Bounded repetitions (max_rep >= 0) do NOT escalate —
+        // see Repetition's class-level cut-semantics note in Combinators.h.
         if (max_rep < 0 && exited_via_failure && context.cut()) {
             throw ParseError{context.furthest_failure_pos(), context.expected()};
         }

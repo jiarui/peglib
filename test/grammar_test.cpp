@@ -265,3 +265,31 @@ TEST_CASE("[grammar] unreachable-rules-cpp-grammar")
     REQUIRE(unreachable.size() == 1);
     CHECK(unreachable[0] == "dead");
 }
+
+// ---------------------------------------------------------------------------
+// find(): read-only rule lookup that does NOT insert (unlike operator[]).
+// ---------------------------------------------------------------------------
+TEST_CASE("[grammar] find-does-not-create-rule")
+{
+    Grammar<> g;
+    g["real"] = terminal('a');
+    g.set_start("real");
+
+    // find() on a missing rule returns nullopt...
+    CHECK_FALSE(g.find("typo").has_value());
+    // ...and crucially does NOT create it: undefined_rules() stays clean.
+    CHECK(g.undefined_rules().empty());
+
+    // Contrast: operator[] would have inserted "typo" as undefined.
+    // (Demonstrated here only to pin the documented caveat.)
+    (void)g["another_typo"];
+    auto undef = g.undefined_rules();
+    REQUIRE(undef.size() == 1);
+    CHECK(undef[0] == "another_typo");
+
+    // find() on an existing rule returns the handle, with the right name.
+    auto h = g.find("real");
+    REQUIRE(h.has_value());
+    CHECK(h->name() == "real");
+    CHECK(h->is_defined());
+}

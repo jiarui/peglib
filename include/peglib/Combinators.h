@@ -113,7 +113,17 @@ protected:
 // Repetition: matches a child expression between min_rep and max_rep times.
 // On success, returns an anonymous grouping node whose children are the
 // non-null trees from each successful iteration.
-// Cut-committed failure in unbounded repetition throws peg::ParseError.
+//
+// Cut semantics (intentional asymmetry between bounded and unbounded):
+//   - Unbounded (max_rep < 0, i.e. `*` / `+`): a cut-committed failure of
+//     the child escalates to peg::ParseError — the loop is "infinite" and a
+//     committed failure cannot be recovered by trying fewer iterations.
+//   - Bounded (max_rep >= 0, i.e. `?` / `n*e`): a cut inside the child
+//     commits only to THIS repetition's scope. On failure the loop simply
+//     stops (returning the iterations matched so far); it does NOT throw,
+//     because a bounded repetition legitimately admits "fewer matches".
+//     So `2 * ('a' >> cut() >> 'b')` on "ax" stops after iteration 1 and
+//     returns success, not a ParseError.
 // ---------------------------------------------------------------------------
 template<typename Context, typename Child>
 struct Repetition
@@ -176,6 +186,9 @@ struct Repetition
             node->children.resize(loopCount);
         }
         if (max_rep < 0) {
+            // Unbounded repetition: a cut-committed child failure escalates
+            // to ParseError. Bounded repetitions (max_rep >= 0) deliberately
+            // do NOT escalate — see the class-level cut-semantics note.
             if (exited_via_failure && context.cut()) {
                 throw ParseError{context.furthest_failure_pos(), context.expected()};
             }

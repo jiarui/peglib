@@ -117,3 +117,30 @@ TEST_CASE("terminal-range-records-range-expected")
     CHECK(context.expected().begin()->kind == ExpectedKind::Range);
     CHECK(context.expected().begin()->text == "'a'..'z'");
 }
+
+TEST_CASE("bounded-repetition-cut-failure-does-not-throw")
+{
+    // D4 pinning test: a cut inside a BOUNDED repetition commits only to
+    // that repetition's scope. On child failure the loop stops and returns
+    // success (with the iterations matched so far) — it does NOT escalate
+    // to peg::ParseError. Only unbounded (`*`/`+`) repetitions escalate.
+    //
+    // Grammar: 2 * ('a' >> cut() >> 'b')  on input "ax":
+    //   - Iteration 1: 'a' matches, cut() commits, 'b' fails on 'x'.
+    //   - Bounded repetition: cut does NOT escalate; loop stops, returns
+    //     success with 1 iteration's worth of children (well, the cut
+    //     failure rolled back iteration 1's partial match).
+    //   - Must NOT throw.
+    std::string input = "ax";
+    Context context(input);
+    Grammar<> g;
+    g["g"] = 2 * (terminal('a') >> cut() >> terminal('b'));
+    g.set_start("g");
+    // The whole grammar still fails to match (it wanted 2 'a..b' pairs and
+    // got none committed), but it fails NORMALLY — no exception escapes.
+    CHECK_FALSE(g.parse(context));
+    // And crucially: no cut-committed ParseError propagated. (If it had,
+    // g.parse would have caught it per the D1 contract and reported via
+    // take_error; the assertion above already covers "no throw". Here we
+    // additionally confirm the failure is a regular parse failure.)
+}

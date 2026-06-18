@@ -5,6 +5,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -61,15 +62,33 @@ public:
 #endif
     }
 
-    // Access a rule by name. Lazily creates the rule if it doesn't exist
-    // (forward declaration). Returns a non-owning Rule handle for
+    // Access a rule by name. This is **get-or-create**: if the rule does
+    // not yet exist it is lazily inserted as a forward declaration (an
+    // undefined NonTerminal). Returns a non-owning Rule handle for
     // assignment / chaining / introspection.
+    //
+    // Caveat: because operator[] inserts on miss, using it for an existence
+    // check pollutes undefined_rules() — `if (g["typo"].is_defined())` creates
+    // the rule "typo". For read-only existence queries that must NOT insert,
+    // use find() or has_rule() instead.
     Rule operator[](std::string name)
     {
         auto [it, inserted] = m_rules.try_emplace(name);
         if (inserted) {
             it->second = std::make_shared<NonTerminalType>();
         }
+        return Rule{it->second.get(), it->first};
+    }
+
+    // Read-only rule lookup. Returns std::nullopt if the rule does not
+    // exist — and, unlike operator[], does NOT insert it. Use this (or
+    // has_rule) when you need to inspect a rule's existence/body without
+    // side-effecting the grammar.
+    [[nodiscard]] std::optional<Rule> find(std::string_view name) const
+    {
+        auto it = m_rules.find(std::string{name});
+        if (it == m_rules.end())
+            return std::nullopt;
         return Rule{it->second.get(), it->first};
     }
 
