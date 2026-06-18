@@ -119,53 +119,10 @@ struct DynRepeatExpr : ParsingExpr<Context, DynRepeatExpr<Context>>
 
     ParseResult parse(Context& context) const override
     {
-        context.init_cut();
-        ScopeGuard guard{[&context]() { context.remove_cut(); }};
-        auto init_state = context.state();
-        auto node = std::make_shared<typename Context::ParseTreeNode>();
-        node->start_offset = context.offset_of(context.mark());
-
-        std::size_t loop_count = 0;
-        bool exited_via_failure = false;
-        typename Context::State last_success_state = init_state;
-
-        while (true) {
-            auto start_state = context.state();
-            context.cut(false);
-            auto result = m_child->parse(context);
-            if (result.success) {
-                loop_count++;
-                last_success_state = context.state();
-                if (result.tree)
-                    node->children.push_back(result.tree);
-            } else {
-                exited_via_failure = true;
-                break;
-            }
-            if (max_rep > 0 && loop_count >= static_cast<std::size_t>(max_rep)) {
-                break;
-            }
-            if (context.state() == start_state) {
-                break;
-            }
-        }
-
-        if (loop_count < min_rep) {
-            context.state(init_state);
-            return {false, nullptr};
-        }
-        if (exited_via_failure) {
-            context.state(last_success_state);
-            node->children.resize(loop_count);
-        }
-        // Unbounded repetition: cut-committed child failure escalates to
-        // ParseError. Bounded repetitions (max_rep >= 0) do NOT escalate —
-        // see Repetition's class-level cut-semantics note in Combinators.h.
-        if (max_rep < 0 && exited_via_failure && context.cut()) {
-            throw ParseError{context.furthest_failure_pos(), context.expected()};
-        }
-        node->end_offset = context.offset_of(context.mark());
-        return {true, node};
+        // Delegate to the single shared implementation so the static
+        // Repetition<C,Child> and this type-erased variant stay in lockstep.
+        return repeat_parse_impl(
+            context, [this](Context& c) { return m_child->parse(c); }, min_rep, max_rep);
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override
