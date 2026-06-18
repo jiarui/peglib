@@ -7,7 +7,7 @@
 #include "peglib/Rule.h"
 #include "peglib/Terminals.h"
 
-#include <cctype>
+#include <functional>
 #include <memory>
 #include <set>
 #include <span>
@@ -93,20 +93,39 @@ public:
         }
 
         // Phase 3: compile each definition into the output Grammar.
-        // First pass: create all rule names (forward declarations).
-        for (const auto& def : defs) {
-            out[def->text]; // lazily creates the rule
-        }
-        // Second pass: assign compiled bodies.
-        bool first = true;
-        for (const auto& def : defs) {
-            auto body = compile(def->children[0], out);
-            out[def->text] = body;
-            if (first) {
-                out.set_start(def->text);
-                first = false;
+        // Wrap in try/catch so try_from_string honours its non-throwing
+        // contract even if compile() hits an unexpected internal error.
+        try {
+            // First pass: create all rule names (forward declarations).
+            for (const auto& def : defs) {
+                out[def->text]; // lazily creates the rule
             }
+            // Second pass: assign compiled bodies.
+            bool first = true;
+            for (const auto& def : defs) {
+                auto body = compile(def->children[0], out);
+                out[def->text] = body;
+                if (first) {
+                    out.set_start(def->text);
+                    first = false;
+                }
+            }
+        } catch (const std::exception& e) {
+            err = Diagnostic{0, {}};
+            return false;
         }
+
+        // Phase 4: validate — report undefined rule references.
+        auto undefined = out.undefined_rules();
+        if (!undefined.empty()) {
+            // Report the first undefined rule as a diagnostic.
+            err = Diagnostic{0, {ExpectedItem{
+                .kind = ExpectedKind::RuleName,
+                .text = "undefined rule '" + undefined[0] + "'"
+            }}};
+            return false;
+        }
+
         return true;
     }
 

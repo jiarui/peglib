@@ -247,6 +247,16 @@ TEST_CASE("[from_string] try_from_string")
     {
         CHECK_FALSE(GrammarCompiler::try_from_string("bad syntax !!!", g, err));
     }
+    SUBCASE("undefined-rule")
+    {
+        // A references B which is never defined.
+        CHECK_FALSE(GrammarCompiler::try_from_string("A <- B", g, err));
+    }
+    SUBCASE("non-throwing-on-internal-error")
+    {
+        // try_from_string must not throw even on edge cases.
+        CHECK_FALSE(GrammarCompiler::try_from_string("", g, err));
+    }
 }
 
 // ---------------------------------------------------------------------------
