@@ -83,3 +83,18 @@ target_compile_definitions(peglib_json_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_test(NAME peglib_json_test COMMAND peglib_json_test)
+
+# ---------------------------------------------------------------------------
+# JSON-with-auto-skip comparison test (Phase 3 demonstration). A separate
+# target so the two JSON grammars (manual ws threading vs set_skipper)
+# live in independent TUs and can be compared directly.
+# ---------------------------------------------------------------------------
+add_executable(peglib_json_skipper_test
+    json_skipper_test.cpp)
+
+target_link_libraries(peglib_json_skipper_test PRIVATE peglib peglib_test_main peglib_test_warnings)
+target_include_directories(peglib_json_skipper_test PRIVATE ${doctest_include_dir})
+target_compile_definitions(peglib_json_skipper_test PRIVATE
+    PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+add_test(NAME peglib_json_skipper_test COMMAND peglib_json_skipper_test)
