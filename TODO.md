@@ -17,6 +17,12 @@ top of peglib.
 - CMake build (C++20, INTERFACE target, compile_commands.json)
 - clang-format + clang-tidy configs
 - CI: GitHub Actions (Linux + Windows, GCC/Clang/MSVC matrix)
+- **Auto whitespace** (Phase 3): `Grammar::set_skipper` + `lexeme()` —
+  transparent rule fires between adjacent sequence children and between
+  repetition iterations; pest-style leading whitespace at the grammar
+  boundary. `lexeme()` locally disables skip for token bodies.
+- **Grammar visualization** (Phase 5 slice): `Grammar::to_dot()` Graphviz
+  DOT export of rule dependencies.
 
 ## Phase 1 — Core Infrastructure (DONE)
 
@@ -212,18 +218,48 @@ PEG text can be compiled at runtime via `GrammarCompiler::from_string()`.
 - Value stack completely removed from Context (6 methods + vector deleted)
 - Combinator value-stack rollback removed (tree flows via return values)
 
-## Phase 3 — Auto Whitespace & Token Boundaries
+## Phase 3 — Auto Whitespace & Token Boundaries (DONE)
 
 Eliminate the boilerplate of manually threading `WS` rules through every
 production — a feature every comparable PEG library offers.
 
-- [ ] `Context::set_skipper(rule)` — auto-skip whitespace (or any skip rule)
-      between adjacent terminals in the grammar
-- [ ] `lexeme(rule)` combinator — disable auto-skip within a sub-expression
-      (useful for tokens, strings, numbers)
-- [ ] **Atomic rules** — opt-in "no skip + no inner backtracking" mode for
-      lexical rules (matches pest's `@{}` and yhirose's `< ... >`)
-- [ ] Per-context opt-out: `Context::set_skipper(empty)` to disable globally
+### Done
+- [x] **`Grammar::set_skipper(rule)`** — register a transparent rule that
+      fires automatically between adjacent sequence children and between
+      repetition iterations. Storage is on Grammar (one non-owning
+      `NonTerminal*`); stamped onto Context at `Grammar::parse` entry so
+      expressions see it without per-parse setup.
+- [x] **`lexeme(rule)` combinator** — disable auto-skip within a
+      sub-expression (for tokens, strings, numbers whose characters must
+      stay contiguous). Implemented as `LexemeExpr` with exception-safe
+      save/restore of `Context::skip_enabled` via `ScopeGuard`.
+- [x] **`clear_skipper()` / `has_skipper()`** — disable globally or query
+      configuration.
+- [x] **Pest-style leading whitespace** consumed at the Grammar::parse
+      boundary (so users don't need `ws >>` prefix on their start rule).
+      Trailing whitespace is the user's choice via an explicit `EndOfFile`
+      (`!.`) anchor.
+
+### Design contract
+- **Skip sites**: `SequenceExpr::parseSeq` (Index > 0),
+  `DynSequenceExpr::parse` (bool first flag), `repeat_parse_impl`
+  (loopCount > 0).
+- **Excluded by design**: Alternation (no adjacency), predicates (would
+  corrupt zero-width assertions), NonTerminal seed-grow (would break
+  left-recursion), TerminalSeqExpr char loop (literals must be contiguous).
+- **Reentrancy guard**: while the skipper runs, `skip_enabled` is cleared so
+  the skipper's own internals don't recurse into `run_skipper()`. A skipper
+  is therefore a single self-contained rule (typically `*e`).
+- **CharT generality**: works for any `CharT` (`char`, `char32_t`, …).
+- **`GrammarCompiler::from_string`** does NOT auto-inject a skipper rule —
+  users call `set_skipper` after compilation.
+
+### Deferred (Phase 3 sub-item)
+- [ ] **Atomic rules** — "no-skip + no inner backtracking" mode for lexical
+      rules (pest's `@{}` / yhirose's `< ... >`). The "no-skip" half is
+      already covered by `lexeme`; the "no inner backtracking" half is a
+      separate semantic worth its own design pass (interacts with cut and
+      memoization). Punt until a real consumer needs it.
 
 ## Phase 4 — Error Recovery
 
@@ -249,8 +285,12 @@ Grammar bugs are subtle; a tracer is essential during development.
 - [ ] **Hit counter**: per-rule invocation count + cache-hit ratio
 - [ ] **Time-per-rule profiling**: cumulative wall time per rule, sorted
       descending (helps identify grammar hotspots)
-- [ ] **Grammar visualization**: `Grammar::to_dot()` exports a Graphviz DOT
-      digraph of rule dependencies (already sketched in Phase 2, finalized here)
+- [x] **Grammar visualization**: `Grammar::to_dot()` exports a Graphviz DOT
+      digraph of rule dependencies (DONE — shipped as a Phase 3 companion
+      since `collect_rule_refs` was already in place; ~30 lines reusing the
+      existing DFS). Every defined rule is a node (start rule gets
+      `peripheries=2`), every rule-reference is an edge, undefined references
+      appear as dangling edge targets for typo detection.
 - [ ] Optional `PEGLIB_TRACE` macro for verbose stdout logging when building
       test grammars
 
@@ -299,4 +339,5 @@ Reduce grammar duplication.
 | Whitespace model | Opt-in `set_skipper` + `lexeme()` escape hatch | pest/yhirose show that auto-skip is the right default; but library users must be able to disable |
 | Rule ownership | Grammar sole owner via shared_ptr; Rule is non-owning handle (raw pointer) | X4 design: eliminates shared_ptr cycles at the source. Rule cannot outlive Grammar by design. Consolidates Rule + RuleProxy + RuleRefWrapper into one type. |
 | Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |
+| Skipper storage | Grammar-owned, stamped to Context at parse entry | Avoids polluting Context construction; zero overhead when unset (Context's `m_skipper` defaults to nullptr, so `run_skipper()` early-returns before any virtual dispatch). `lexeme()` toggles a separate `skip_enabled` flag with save/restore. |
 | Grammar-Context relationship | Grammar typed to Context, no Context owned (Level 1) | Same Grammar reusable across many parses; fresh Context per parse (fresh memo, position, value stack). |

@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Phase 3 (Auto Whitespace) + Phase 5 to_dot() slice
+
+#### Auto whitespace (`set_skipper` + `lexeme`)
+- **`Grammar::set_skipper(rule)`**: register a transparent rule that fires
+  automatically between adjacent sequence children and between repetition
+  iterations — eliminates the manual `>> ws >>` threading that every
+  whitespace-tolerant grammar previously needed. Storage is on the Grammar
+  (one non-owning `NonTerminal*`); `Grammar::parse` stamps it onto the
+  Context at entry so expressions see it without any per-parse setup.
+- **`Grammar::clear_skipper()` / `has_skipper()`**: disable auto-skip
+  globally or query whether a skipper is configured.
+- **`lexeme(expr)` combinator** (`include/peglib/Combinators.h`,
+  `LexemeExpr`): locally disable auto-skip for a sub-expression's subtree.
+  Token bodies (numbers, identifiers, string literals) whose characters must
+  stay contiguous are wrapped in `lexeme(...)`. Implemented as an
+  exception-safe save/restore of `Context::skip_enabled` via `ScopeGuard`,
+  so nested `lexeme(lexeme(...))` is a no-op-on-the-flag.
+- **`ParsingExpr::context_type` trait**: enables `peg::lexeme(expr)` to
+  deduce the Context type from any expression object, so users write
+  `lexeme(+terminal(...))` with no explicit template arguments.
+- **`Context::run_skipper()` / `internal_set_skipper()` / `skip_enabled()` /
+  `has_skipper()`**: internal hooks (public only because the expression types
+  live in `peg::parsers`). End users drive skip via `Grammar::set_skipper` /
+  `lexeme`.
+- **Reentrancy guard**: while the skipper itself runs, `skip_enabled` is
+  temporarily cleared so the skipper's own internal Repetition/Sequence
+  children do not recursively invoke `run_skipper()` (which would
+  double-consume input). A skipper is therefore a single self-contained rule
+  (typically `*e`) and cannot rely on auto-skip itself.
+- **Pest-style leading whitespace**: `Grammar::parse` and `parse_tree`
+  invoke `ctx.run_skipper()` once before the start rule, so leading
+  whitespace is consumed at the grammar boundary without an explicit `ws >>`
+  prefix in the start rule. Trailing whitespace is intentionally NOT consumed
+  (parse_string is partial-match; users wanting full consumption append
+  `EndOfFile` (`!.`) to the start rule).
+- New test files: `skipper_test.cpp` (14 cases), `json_skipper_test.cpp`
+  (6 cases, a real-world JSON grammar built with `set_skipper` vs the
+  manual threading of `json_test.cpp`).
+
+#### Grammar visualization (Phase 5 to_dot() slice)
+- **`Grammar::to_dot()`**: emit a Graphviz DOT digraph of rule dependencies.
+  Every defined rule is a node (start rule gets `peripheries=2`); every
+  rule reference (via `collect_rule_refs`) is a directed edge; undefined
+  references appear as dangling edge targets for spotting typos.
+  Implementation reuses the existing DFS / `collect_rule_refs` visitor, so
+  no new virtual is introduced. Suitable for piping through `dot -Tsvg`.
+- New test file: `to_dot_test.cpp` (11 cases — digraph structure, start-rule
+  marking, recursive self-loops, typo detection, DOT-special character
+  escaping, empty/unset-start robustness).
+
+#### Skip sites wired (design contract)
+- **`SequenceExpr::parseSeq<Index>`**: skip when `Index > 0` (between
+  adjacent tuple children; never before the first).
+- **`DynSequenceExpr::parse`**: skip between adjacent vector children via a
+  `bool first` flag (mirrors the static path).
+- **`repeat_parse_impl`**: skip when `loopCount > 0` (between iterations;
+  never before the first). The zero-width termination guard is preserved.
+- **Excluded by design** (no adjacency): `AlternationExpr`,
+  `DynAlternationExpr`, predicates (`NotExpr`/`AndExpr`), NonTerminal
+  seed-grow, and `TerminalSeqExpr`'s internal char loop.
+
 ### Changed — source erasure + FixSizeBuffer + Tier 1 char (6-phase refactor)
 
 A structural refactor that decouples the storage strategy from the Context

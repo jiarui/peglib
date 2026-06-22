@@ -27,17 +27,16 @@ Grammar<char> make_json_skipper_grammar()
 {
     Grammar<char> g;
 
-    g["ws"] = *terminal<char>([](char c) {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-    });
+    g["ws"] =
+        *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 
     // No `>> g["ws"] >>` anywhere — the skipper handles it.
     g["number"] = lexeme(+terminal('0', '9'));
-    g["string"] = lexeme(terminal('"') >> *(terminal<char>([](char c) {
-                         return c != '"' && c != '\\';
-                     })) >> terminal('"'));
-    g["value"] = g["number"] | g["string"] | g["object"] | g["array"]
-                 | terminalSeq("true") | terminalSeq("false") | terminalSeq("null");
+    g["string"] =
+        lexeme(terminal('"') >> *(terminal<char>([](char c) { return c != '"' && c != '\\'; })) >>
+               terminal('"'));
+    g["value"] = g["number"] | g["string"] | g["object"] | g["array"] | terminalSeq("true") |
+                 terminalSeq("false") | terminalSeq("null");
     g["member"] = g["string"] >> terminal(':') >> g["value"];
     g["members"] = g["member"] >> *(terminal(',') >> g["member"]);
     g["object"] = terminal('{') >> -g["members"] >> terminal('}');
@@ -94,8 +93,8 @@ TEST_CASE("json_skipper: lexeme keeps number digits contiguous")
     // remains. So "12 34" parses as one number "12" + unconsumed " 34".
     // The skipper-relevant property: lexeme stops the number at the
     // space, so "12 34" does NOT become one number "1234".
-    CHECK(g.parse_string("12"));         // one number, full match
-    CHECK(g.parse_string("12 34"));      // partial match — value="12"
+    CHECK(g.parse_string("12"));    // one number, full match
+    CHECK(g.parse_string("12 34")); // partial match — value="12"
 
     // Inside an array, elements are comma-separated. The skipper lets
     // whitespace flex around the comma, but does NOT substitute for it.
@@ -123,9 +122,16 @@ TEST_CASE("json_skipper: grammar visualises cleanly via to_dot")
     // graph (the skipper is referenced by no other rule's body).
     auto g = make_json_skipper_grammar();
     const auto dot = g.to_dot();
-    for (const char* name :
-         {"ws", "number", "string", "value", "member", "members", "object",
-          "elements", "array", "json"}) {
+    for (const char* name : {"ws",
+                             "number",
+                             "string",
+                             "value",
+                             "member",
+                             "members",
+                             "object",
+                             "elements",
+                             "array",
+                             "json"}) {
         CHECK(dot.find(std::string{"\""} + name + "\"") != std::string::npos);
     }
     // The skipper rule (ws) is never *referenced* by any rule body — it

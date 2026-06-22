@@ -7,11 +7,13 @@ tree-based action model for AST construction.
 
 ## Status
 
-Core combinators, infrastructure, Grammar API, and textual grammar format are
-complete. Phase 2 delivers `GrammarCompiler::from_string()` — compile PEG text
-at runtime into a working `Grammar<>`. The roadmap now focuses on **generic PEG
-library features**: automatic whitespace skipping, error recovery,
-tracing/profiling, and parameterized rules — see [TODO.md](TODO.md).
+Core combinators, infrastructure, Grammar API, textual grammar format, and
+automatic whitespace handling are complete. Phase 2 delivers
+`GrammarCompiler::from_string()` — compile PEG text at runtime into a working
+`Grammar<>`. Phase 3 delivers `set_skipper` + `lexeme` (eliminates manual
+whitespace threading) plus `Grammar::to_dot()` for Graphviz visualization.
+The roadmap now focuses on **error recovery, full tracing/profiling, and
+parameterized rules** — see [TODO.md](TODO.md).
 
 Application-specific work built on peglib lives in consumer projects.
 [yueshi](https://github.com/jiarui/yueshi) is a Lua 5.4 frontend (lexer → typed
@@ -41,6 +43,20 @@ real-world case study.
 - **`SourceMap`**: byte offset ↔ (line, col) mapping, supports both contiguous
   in-memory sources and streaming `FileSource`.
 - **Grammar validation**: `undefined_rules()` and `unreachable_rules()` helpers.
+- **Automatic whitespace skipping**: `Grammar::set_skipper(rule)` makes a
+  transparent rule fire automatically between adjacent sequence children
+  and between repetition iterations — no more manual `>> ws >>` threading
+  between every pair of terminals. `lexeme(expr)` locally disables
+  auto-skip for token bodies (numbers, identifiers, string literals) whose
+  characters must stay contiguous. Leading whitespace is consumed at the
+  grammar boundary (pest-style); trailing whitespace is the user's choice
+  via an explicit `EndOfFile` (`!.`) anchor. Works for any `CharT`
+  (`char`, `char32_t`, …).
+- **Grammar visualization**: `Grammar::to_dot()` emits a Graphviz DOT
+  digraph of rule dependencies (every defined rule is a node, every rule
+  reference is an edge, the start rule gets a double border, undefined
+  references appear as dangling edge targets for spotting typos). Pipe
+  the output through `dot -Tsvg` to render.
 - **Concept-constrained**: the `PegContext<C>` concept mirrors the full Context
   API that combinators depend on, and is applied as a constraint on `Grammar`'s
   template parameter — a malformed Context fails fast with a single concept
@@ -105,6 +121,45 @@ g["number"] = +terminal('0', '9');
 g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
 g.set_start("expr");
 g.parse_string("1+2+3");  // convenience: creates a Context internally
+```
+
+### Automatic whitespace skipping
+
+For any grammar where tokens may be separated by spaces, tabs, newlines, or
+comments, declare one skipper rule and call `set_skipper` — you no longer
+need to thread `>> ws >>` between every pair of terminals:
+
+```cpp
+Grammar<> g;
+
+// Whitespace + line comments, both transparent.
+g["ws"] = *terminal<char>([](char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+});
+g["number"] = lexeme(+terminal('0', '9'));   // contiguous digits, no inner ws
+g["ident"]  = lexeme(terminal('a','z') >> *terminal('a','z'));
+g["expr"]   = g["term"] >> *(terminal('+') >> g["term"]);
+g["term"]   = g["factor"] >> *(terminal('*') >> g["factor"]);
+g["factor"] = g["number"] | g["ident"]
+            | terminal('(') >> g["expr"] >> terminal(')');
+
+g.set_start("expr");
+g.set_skipper(g["ws"]);                       // one line replaces all the threading
+
+g.parse_string("1 + 2 * ( 3 + 4 )");          // true
+g.parse_string("  1+2*3  ");                  // true (pest-style leading ws)
+```
+
+`lexeme(...)` is the escape hatch: inside it, auto-skip is disabled so a
+token's characters stay contiguous (`"12 34"` is two numbers, not `"1234"`).
+To disable auto-skip globally, call `clear_skipper()` (or never call
+`set_skipper` — that is the default).
+
+### Grammar visualization
+
+```cpp
+std::cout << g.to_dot();
+// then render with:  ./my_parser | dot -Tsvg > grammar.svg
 ```
 
 ## Lifetime & Recursive Rules
@@ -227,8 +282,12 @@ per-header:
 - `sourcemap_test.cpp` — byte offset ↔ (line, col) mapping
 - `value_stack_test.cpp` — value stack, PegContext concept
 - `error_test.cpp` — error reporting, expected set, Diagnostic format, ParseError
+- `skipper_test.cpp` — auto-skip (`set_skipper` + `lexeme`), all CharT
+- `to_dot_test.cpp` — Graphviz DOT output, edge cases, escaping
 - `json_test.cpp` — JSON grammar (real-world example of building a complete
   language grammar with the operator DSL)
+- `json_skipper_test.cpp` — the same JSON grammar built with `set_skipper`
+  instead of manual `>> ws >>` threading (Phase 3 "after" picture)
 - `lua_lex.cpp`, `lua.cpp` — Lua 5.4 lexer + grammar (another real-world
   example; full Lua interpreter lives in
   [yueshi](https://github.com/jiarui/yueshi))
@@ -236,9 +295,9 @@ per-header:
 ## Roadmap
 
 The library targets generic PEG-authoring features: a textual grammar format
-(Phase 2), automatic whitespace handling (Phase 3), error recovery
-(Phase 4), tracing/profiling (Phase 5), and parameterized rules (Phase 6).
-See [TODO.md](TODO.md) for the full roadmap.
+(Phase 2, done), automatic whitespace handling (Phase 3, done), error
+recovery (Phase 4), tracing/profiling (Phase 5, to_dot() slice done), and
+parameterized rules (Phase 6). See [TODO.md](TODO.md) for the full roadmap.
 
 For a real-world grammar built on peglib, see
 [yueshi](https://github.com/jiarui/yueshi) — a Lua 5.4 interpreter.

@@ -32,9 +32,7 @@ namespace
 // the caller can assign it to g["ws"] (or any name) in their own Grammar.
 auto ws_body()
 {
-    return *terminal<char>([](char c) {
-        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-    });
+    return *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 }
 } // namespace
 
@@ -225,10 +223,9 @@ TEST_CASE("skipper: recursive rule preserves memoization invariants")
 
 TEST_CASE("skipper: compiled grammar (GrammarCompiler) honours set_skipper")
 {
-    auto g = GrammarCompiler::from_string(
-        "Expr  <- Term ('+' Term)*\n"
-        "Term  <- Factor ('*' Factor)*\n"
-        "Factor <- [0-9]+ / '(' Expr ')'\n");
+    auto g = GrammarCompiler::from_string("Expr  <- Term ('+' Term)*\n"
+                                          "Term  <- Factor ('*' Factor)*\n"
+                                          "Factor <- [0-9]+ / '(' Expr ')'\n");
     g.set_start("Expr");
 
     // GrammarCompiler does NOT inject a ws rule, so referring to an
@@ -243,18 +240,15 @@ TEST_CASE("skipper: user-added ws rule in compiled grammar works")
     // Compile a grammar and THEN add a ws rule + skipper. The compiled
     // DynSequenceExpr path must honour the skipper exactly as the static
     // path does.
-    auto g = GrammarCompiler::from_string(
-        "Expr  <- Term ('+' Term)*\n"
-        "Term  <- Factor ('*' Factor)*\n"
-        "Factor <- [0-9]+ / '(' Expr ')'\n");
+    auto g = GrammarCompiler::from_string("Expr  <- Term ('+' Term)*\n"
+                                          "Term  <- Factor ('*' Factor)*\n"
+                                          "Factor <- [0-9]+ / '(' Expr ')'\n");
     g.set_start("Expr");
 
     // Add a whitespace rule after compilation. Compiled rules reference
     // each other by name through the Grammar map, so adding a new rule
     // post-compile is fine.
-    g["ws"] = *terminal<char>([](char c) {
-        return c == ' ' || c == '\t';
-    });
+    g["ws"] = *terminal<char>([](char c) { return c == ' ' || c == '\t'; });
     g.set_skipper(g["ws"]);
 
     CHECK(g.parse_string("1+2*3"));
@@ -269,9 +263,7 @@ TEST_CASE("skipper: user-added ws rule in compiled grammar works")
 TEST_CASE("skipper: char32_t context supports set_skipper")
 {
     Grammar<char32_t> g;
-    g["ws"] = *terminal<char32_t>([](char32_t c) {
-        return c == U' ' || c == U'\t' || c == U'\n';
-    });
+    g["ws"] = *terminal<char32_t>([](char32_t c) { return c == U' ' || c == U'\t' || c == U'\n'; });
     g["ab"] = terminal(U'a') >> terminal(U'b');
     g.set_start("ab");
     g.set_skipper(g["ws"]);
