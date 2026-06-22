@@ -55,6 +55,13 @@ protected:
     bool parseSeq(Context& context, ParseTreeNodePtr& node) const
     {
         if constexpr (Index < sizeof...(Children)) {
+            // Auto-skip between adjacent sequence children (not before the
+            // first: leading whitespace, if desired, must be matched
+            // explicitly in the start rule — pest/yhirose share this
+            // convention). No-op when no skipper is configured.
+            if constexpr (Index > 0) {
+                context.run_skipper();
+            }
             auto result = std::get<Index>(m_children).parse(context);
             if (result.success) {
                 if (result.tree)
@@ -154,6 +161,15 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     typename Context::State lastSuccessState = initState;
 
     while (true) {
+        // Auto-skip between iterations (not before the first). No-op when
+        // no skipper is configured. NB: the zero-width termination guard
+        // below (startState == state()) is unaffected because a skipper
+        // written as *e always succeeds and may legitimately consume
+        // zero input — the child's own advancement is what the guard
+        // measures, and that happens after this skip.
+        if (loopCount > 0) {
+            context.run_skipper();
+        }
         auto startState = context.state();
         context.cut(false);
         auto result = parse_child(context);

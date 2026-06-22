@@ -40,7 +40,14 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
         auto state = context.state();
         auto node = std::make_shared<typename Context::ParseTreeNode>();
         node->start_offset = context.mark();
+        bool first = true;
         for (const auto& child : m_children) {
+            // Auto-skip between adjacent children (not before the first),
+            // mirroring SequenceExpr. No-op when no skipper is configured.
+            if (!first) {
+                context.run_skipper();
+            }
+            first = false;
             auto result = child->parse(context);
             if (!result.success) {
                 context.state(state);
