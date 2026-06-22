@@ -2,6 +2,7 @@
 #include "peglib/SourceMap.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <optional>
 #include <set>
@@ -42,15 +43,55 @@ struct ExpectedItem
     }
 };
 
+// Render a single value_type for display in expected-set messages, as a
+// UTF-8 std::string (without surrounding quotes). This is the generic
+// rendering hook: char passes through directly; wider character types
+// (char32_t codepoints, etc.) are UTF-8 encoded.
+template<typename CharT>
+std::string to_display(CharT c)
+{
+    // Common case: byte-oriented char. Pass through; escaping is applied by
+    // the caller (escape_char_for_expected).
+    if constexpr (sizeof(CharT) == 1) {
+        return std::string{static_cast<char>(c)};
+    } else {
+        // Encode a single codepoint (char32_t / wchar_t / etc.) as UTF-8.
+        std::uint32_t cp = static_cast<std::uint32_t>(c);
+        std::string out;
+        if (cp <= 0x7F) {
+            out += static_cast<char>(cp);
+        } else if (cp <= 0x7FF) {
+            out += static_cast<char>(0xC0 | (cp >> 6));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else if (cp <= 0xFFFF) {
+            out += static_cast<char>(0xE0 | (cp >> 12));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        } else {
+            out += static_cast<char>(0xF0 | (cp >> 18));
+            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        return out;
+    }
+}
+
 // Escape a single character for display in expected-set messages.
 //   - Printable ASCII (0x20..0x7E): the character itself, wrapped in single quotes.
 //   - Tab/newline/etc: C-style escapes, wrapped in single quotes.
-//   - Other: hex form '\xNN', wrapped in single quotes.
-inline std::string escape_char_for_expected(char c)
+//   - Other (char): hex form '\xNN', wrapped in single quotes.
+//   - Other (wider CharT, e.g. char32_t): UTF-8 encoded via to_display, then
+//     hex-escaped if non-printable, wrapped in single quotes.
+template<typename CharT>
+std::string escape_char_for_expected(CharT c)
 {
     std::string s;
     s += '\'';
-    switch (c) {
+    // Handle C-style escapes for the common control characters regardless of
+    // CharT width (a char32_t '\n' is still U+000A).
+    const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(c));
+    switch (v) {
     case '\t':
         s += "\\t";
         break;
@@ -67,12 +108,17 @@ inline std::string escape_char_for_expected(char c)
         s += "\\'";
         break;
     default:
-        if (static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) <= 0x7E) {
-            s += c;
-        } else {
-            // hex form
+        if (v >= 0x20 && v <= 0x7E) {
+            s += static_cast<char>(v);
+        } else if constexpr (sizeof(CharT) == 1) {
+            // Single-byte non-printable: hex \xNN.
             char buf[8];
             std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
+            s += buf;
+        } else {
+            // Wider non-printable: hex \UNNNNNNNN (full codepoint width).
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
             s += buf;
         }
         break;
@@ -83,6 +129,8 @@ inline std::string escape_char_for_expected(char c)
 
 // Escape a string (e.g. multi-char terminal sequence) for display.
 // Uses double quotes. Control characters use C-style escapes.
+// Overload for the common char case: takes std::string_view so string
+// literals ("abc") bind without including their trailing NUL byte.
 inline std::string escape_string_for_expected(std::string_view s)
 {
     std::string out;
@@ -110,6 +158,49 @@ inline std::string escape_string_for_expected(std::string_view s)
             } else {
                 char buf[8];
                 std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
+                out += buf;
+            }
+            break;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+// Overload for wide-character basic_strings (std::u32string, std::wstring, ...).
+// Encodes each codepoint to UTF-8 / \UNNNNNNNN as appropriate. Sized ranges
+// only — string literals would include their NUL byte; pass a basic_string or
+// basic_string_view instead.
+template<typename CharT>
+    requires(!std::is_same_v<CharT, char>)
+std::string escape_string_for_expected(const std::basic_string<CharT>& s)
+{
+    std::string out;
+    out += '"';
+    for (auto e : s) {
+        const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(e));
+        switch (v) {
+        case '\t':
+            out += "\\t";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        default:
+            if (v >= 0x20 && v <= 0x7E) {
+                out += static_cast<char>(v);
+            } else {
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
                 out += buf;
             }
             break;

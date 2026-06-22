@@ -55,8 +55,10 @@ private:
                                  std::get<1>(m_terminalValue);
                              }) {
             // Array-of-2 / pair: range terminal. Produces "'lo'..'hi'".
-            char lo = static_cast<char>(std::get<0>(m_terminalValue));
-            char hi = static_cast<char>(std::get<1>(m_terminalValue));
+            // Keep the element types intact so escape_char_for_expected can
+            // render them correctly for any value_type (char, char32_t, ...).
+            auto lo = std::get<0>(m_terminalValue);
+            auto hi = std::get<1>(m_terminalValue);
             std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
             context.record_failure(
                 pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
@@ -71,7 +73,7 @@ private:
                 if (!first)
                     text += ", ";
                 first = false;
-                text += escape_char_for_expected(static_cast<char>(v));
+                text += escape_char_for_expected(v);
             }
             context.record_failure(
                 pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
@@ -113,11 +115,12 @@ private:
     void record_expected(Context& context) const
     {
         std::size_t pos = context.mark();
-        // Build a printable form of the sequence. We use std::string to
-        // accumulate since SeqType is typically std::basic_string<char>.
+        // Build a printable form of the sequence. to_display() renders each
+        // element to UTF-8 so non-char sequences (e.g. u32string) display
+        // correctly instead of being truncated by static_cast<char>.
         std::string text;
         for (const auto& v : m_terminalValues) {
-            text += static_cast<char>(v);
+            text += to_display(v);
         }
         context.record_failure(
             pos,
