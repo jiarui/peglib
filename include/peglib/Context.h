@@ -248,7 +248,10 @@ struct Context
         m_cut.top().pos = mark();
     }
 
-    bool cut() { return m_cut.top().cut; }
+    // Outside any Alternation/Repetition scope the cut stack is empty and
+    // nothing has been committed. Reading cut() there returns false (no
+    // active commitment) rather than crashing on the empty stack.
+    bool cut() { return m_cut.empty() ? false : m_cut.top().cut; }
 
     void init_cut() { m_cut.emplace(mark(), false); }
 
@@ -360,6 +363,34 @@ struct Context
         return diag;
     }
 
+    // -----------------------------------------------------------------------
+    // Multi-diagnostic accumulator.
+    //
+    // The furthest-failure path above keeps a single "best" diagnostic
+    // (furthest-wins) — the right default for single-error reporting.
+    // Production parsers (IDEs, linters) need to report many errors per
+    // file: after a recoverable failure, the parser resyncs to a sync
+    // token and continues, accumulating each recovered failure as its own
+    // diagnostic.
+    //
+    // Append-only and unordered. Each recovered rule calls
+    // record_diagnostic() once; the caller drains via take_diagnostics()
+    // after the top-level parse returns. Independent of the furthest-wins
+    // logic above.
+    // -----------------------------------------------------------------------
+    void record_diagnostic(Diagnostic diag) { m_diagnostics.push_back(std::move(diag)); }
+
+    [[nodiscard]] const std::vector<Diagnostic>& diagnostics() const noexcept
+    {
+        return m_diagnostics;
+    }
+
+    // Move all accumulated diagnostics out and clear the vector.
+    [[nodiscard]] std::vector<Diagnostic> take_diagnostics()
+    {
+        return std::move(m_diagnostics);
+    }
+
 protected:
     std::unique_ptr<InputSourceBase<CharT>> m_input;
     // Non-null for contiguous (span) sources, null for paged (FileSource).
@@ -375,6 +406,10 @@ protected:
     std::size_t m_furthest_failure_pos = 0;
     expected_set m_expected;
     bool m_has_error = false;
+
+    // Multi-diagnostic accumulator. Parallel to the furthest-failure state
+    // above; populated by record_diagnostic() at recovery points.
+    std::vector<Diagnostic> m_diagnostics;
 
     // Skipper: a transparent rule invoked between adjacent sequence
     // elements and between repetition iterations. nullptr = no auto-skip.

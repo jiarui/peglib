@@ -1,5 +1,6 @@
 #pragma once
 #include "peglib/ParserFwd.h"
+#include "peglib/Recover.h"
 
 #include <cassert>
 #include <memory>
@@ -60,6 +61,19 @@ public:
     void set_label(std::string label) { m_label = std::move(label); }
     [[nodiscard]] const std::string& label() const noexcept { return m_label; }
 
+    // Configure recovery for this rule. When the body fails AND no cut is
+    // committed at the failure site, the rule scans forward to the next
+    // sync token (per spec.is_sync_token), records a diagnostic at the
+    // original failure position, consumes the sync token, and reports
+    // success with a transparent null tree. Parsing then continues from
+    // the sync point.
+    void set_recovery(RecoverSpec<typename Context::value_type> spec)
+    {
+        m_recover = std::move(spec);
+    }
+
+    [[nodiscard]] bool has_recovery() const noexcept { return m_recover.configured(); }
+
     [[nodiscard]] bool is_defined() const noexcept { return m_rule != nullptr; }
 
     // Debug-only lifetime aid: ~Grammar() calls this on every NonTerminal
@@ -90,6 +104,31 @@ public:
             } else if (!m_name.empty()) {
                 context.record_failure(
                     start_pos, ExpectedItem{.kind = ExpectedKind::RuleName, .text = m_name});
+            }
+            // Recovery: if a RecoverSpec is configured and no cut is
+            // committed at this site, resync to the next sync token and
+            // report success with a transparent null tree. Cut-committed
+            // failures are NOT recovered — cut is an explicit programmer
+            // commitment that this branch must succeed.
+            if (m_recover.configured() && !context.cut()) {
+                std::size_t scan = start_pos;
+                while (scan < context.input_size() && !m_recover.is_sync_token(context.at(scan))) {
+                    ++scan;
+                }
+                // Position past the sync token if one was found; at EOF
+                // otherwise (recover_eof reaches here with scan == size).
+                std::size_t resume_at =
+                    (scan < context.input_size()) ? scan + 1 : context.input_size();
+                context.reset(resume_at);
+                context.record_diagnostic(Diagnostic{
+                    start_pos,
+                    {ExpectedItem{ExpectedKind::RuleLabel,
+                                  m_recover.label.empty() ? m_name : m_recover.label}}});
+                ParseResult recovered{true, nullptr};
+                rule_state.m_cached_result = recovered;
+                rule_state.m_last_pos = resume_at;
+                context.update_rule_state(this, start_pos, rule_state);
+                return recovered;
             }
             ParseResult fail{false, nullptr};
             rule_state.m_cached_result = fail;
@@ -173,6 +212,7 @@ protected:
     std::shared_ptr<ParsingExprInterface<Context>> m_rule;
     std::string m_name;
     std::string m_label;
+    RecoverSpec<typename Context::value_type> m_recover;
 };
 
 // ---------------------------------------------------------------------------
@@ -267,6 +307,15 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
         m_impl->set_label(std::move(label));
         return *this;
     }
+
+    // Configure recovery on the underlying NonTerminal.
+    Rule& set_recovery(RecoverSpec<typename Context::value_type> spec)
+    {
+        m_impl->set_recovery(std::move(spec));
+        return *this;
+    }
+
+    [[nodiscard]] bool has_recovery() const noexcept { return m_impl->has_recovery(); }
 
     ParseResult parse(Context& context) const override { return m_impl->parse(context); }
 

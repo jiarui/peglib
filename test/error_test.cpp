@@ -318,3 +318,93 @@ TEST_CASE("grammar-set-label-works")
     CHECK(g["my_thing"].name() == "my_thing");
     CHECK(g["my_thing"].label() == "a specific thing");
 }
+
+// ---------------------------------------------------------------------------
+// Multi-diagnostic accumulator (record_diagnostic / diagnostics / take_diagnostics)
+//
+// The furthest-failure path (record_failure / take_error) keeps a single
+// "best" diagnostic. The multi-diagnostic channel is append-only, parallel,
+// and independent — populated by recovery points so a parser can report
+// many errors per file.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("multi-diagnostic-record-appends-unconditionally")
+{
+    std::string input = "hello";
+    Context context(input);
+
+    CHECK(context.diagnostics().empty());
+
+    context.record_diagnostic(Diagnostic{1, {ExpectedItem{ExpectedKind::Literal, "'a'"}}});
+    context.record_diagnostic(Diagnostic{5, {ExpectedItem{ExpectedKind::Literal, "'b'"}}});
+    context.record_diagnostic(Diagnostic{2, {ExpectedItem{ExpectedKind::Literal, "'c'"}}});
+
+    // All three kept — no furthest-wins filtering.
+    REQUIRE(context.diagnostics().size() == 3);
+    CHECK(context.diagnostics()[0].position() == 1);
+    CHECK(context.diagnostics()[1].position() == 5);
+    CHECK(context.diagnostics()[2].position() == 2);
+}
+
+TEST_CASE("multi-diagnostic-take-clears")
+{
+    std::string input = "hello";
+    Context context(input);
+
+    context.record_diagnostic(Diagnostic{3, {ExpectedItem{ExpectedKind::RuleName, "X"}}});
+    context.record_diagnostic(Diagnostic{4, {ExpectedItem{ExpectedKind::RuleName, "Y"}}});
+
+    auto taken = context.take_diagnostics();
+    REQUIRE(taken.size() == 2);
+    CHECK(taken[0].position() == 3);
+    CHECK(taken[1].position() == 4);
+
+    // After take, the accumulator is empty.
+    CHECK(context.diagnostics().empty());
+    CHECK(context.take_diagnostics().empty());
+}
+
+TEST_CASE("multi-diagnostic-independent-of-furthest-failure")
+{
+    std::string input = "hello";
+    Context context(input);
+
+    // Populate furthest-failure path.
+    context.record_failure(5, ExpectedItem{ExpectedKind::Literal, "'z'"});
+    // Populate multi-diagnostic path.
+    context.record_diagnostic(Diagnostic{1, {ExpectedItem{ExpectedKind::Literal, "'a'"}}});
+
+    // Both channels hold their own data, unaffected by each other.
+    CHECK(context.has_error());
+    CHECK(context.furthest_failure_pos() == 5);
+    CHECK(context.diagnostics().size() == 1);
+
+    auto err = context.take_error();
+    REQUIRE(err.has_value());
+    CHECK(err->position() == 5);
+
+    auto diags = context.take_diagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].position() == 1);
+
+    // Both now cleared.
+    CHECK_FALSE(context.has_error());
+    CHECK(context.diagnostics().empty());
+}
+
+TEST_CASE("multi-diagnostic-format-each")
+{
+    std::string_view src = "ab\ncd";
+    SourceMap map{src};
+
+    std::string input = "ab\ncd";
+    Context context(input);
+    context.record_diagnostic(Diagnostic{0, {ExpectedItem{ExpectedKind::Literal, "'x'"}}});
+    context.record_diagnostic(Diagnostic{3, {ExpectedItem{ExpectedKind::Literal, "'y'"}}});
+
+    auto diags = context.take_diagnostics();
+    REQUIRE(diags.size() == 2);
+    // Both format independently using the shared SourceMap.
+    CHECK(diags[0].format(map, "f") == "f:1:1: error: expected 'x'");
+    CHECK(diags[1].format(map, "f") == "f:2:1: error: expected 'y'");
+}
