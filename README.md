@@ -43,10 +43,24 @@ real-world case study.
 - **Grammar validation**: `undefined_rules()` and `unreachable_rules()` helpers.
 - **Concept-constrained**: the `PegContext<C>` concept mirrors the full Context
   API that combinators depend on, and is applied as a constraint on `Grammar`'s
-  template parameter — a custom Context type that's missing a method fails
-  fast with a single concept diagnostic instead of a deep template error.
-- **Pluggable input sources**: in-memory (`std::string`, `std::vector`) and
-  streaming file I/O (`FileSource` with double buffering + cut-driven eviction).
+  template parameter — a malformed Context fails fast with a single concept
+  diagnostic instead of a deep template error.
+- **Pluggable input sources, type-erased**: `Context<CharT, NodeType>` drives
+  either an in-memory range (`std::string`, `std::vector`) or a streaming
+  `FileSource` — the storage strategy is selected at construction and invisible
+  to the template signature. A single `Grammar<char>` can parse a string and a
+  file. The contiguous (span) path fills a raw-pointer cache so the
+  per-character hot path has zero virtual dispatch; `FileSource` goes through
+  one virtual call per character (I/O-bound anyway).
+- **Non-char `value_type` is first-class**: `Context<char32_t>` works for
+  matching and diagnostics. `escape_char_for_expected` / `escape_string_for_expected`
+  are templated; wider codepoints render as `\UNNNNNNNN` instead of being
+  truncated to `\xNN`. (PEG-text compilation still produces char-only grammars;
+  a UTF-8 decoder and codepoint-aware `.` are Tier 2/3 future work.)
+- **`FileSource` is embedded-friendly**: `FileSource<CharT, PageSize>` uses a
+  fixed-size `std::array` per buffer page (compile-time `PageSize`, no per-page
+  heap allocation) — suitable for freestanding use and with better cache
+  locality than the old `std::vector` buffers.
 - **Parses its own grammar spec**: the C++ meta-grammar can parse `meta/peg.peg`,
   and `GrammarCompiler` can compile that spec into a working grammar. (A full
   bootstrap-equivalence test — compiled grammar produces the same AST as the
@@ -116,6 +130,29 @@ If you only need to parse input, `Grammar::parse_string(input)` and
 `Grammar::parse(ctx)` are all you need — you never have to name the `Rule`
 type yourself.
 
+## `NodeType` — what your actions return
+
+`Grammar<CharT, NodeType>` (default `NodeType = std::monostate`) determines
+the type of `ParseTreeNode::value`, which semantic actions populate. The
+library does **not** force a storage policy — you pick whichever fits:
+
+| `NodeType`                          | Use case                        | Storage cost                |
+| ---                                 | ---                             | ---                         |
+| `std::monostate` (default)          | pure recognizer (match / no match) | zero (1-byte placeholder) |
+| a value type (e.g. `struct IntNode`)| lightweight product             | inline, stack-allocated     |
+| `std::shared_ptr<T>` (e.g. `PegAstNodePtr`) | polymorphic / shared AST | heap + refcount, nullable   |
+
+Passing `std::shared_ptr<PegAstNode>` as the template argument (rather than
+`PegAstNode` with the library wrapping it in `shared_ptr` internally) is
+deliberate: it lets `std::monostate` and value-type products stay zero-cost,
+and lets you choose `unique_ptr`, `boost::intrusive_ptr`, or a custom handle
+if you prefer. A `nullptr` action return marks a transparent rule (its node
+is kept on the tree for positional stability, but parent actions skip it
+when building the user-facing AST). Storage-policy generalization (making
+the pointer wrapper itself a template policy parameter) is a tracked future
+refactor; today's design trades a slightly verbose `shared_ptr<T>` argument
+for full control over the recognizer/value/polymorphic spectrum.
+
 ## Requirements
 
 | Toolchain          | Minimum version |
@@ -152,6 +189,7 @@ ctest --test-dir build --output-on-failure
 include/peglib/      header-only library
   peglib.h           umbrella (includes everything)
   Context.h          parsing context (state, memo, cut, error tracking)
+  InputSource.h      InputSourceBase polymorphic interface + SpanSource/FileSourceSource adapters
   ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
   Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
   Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr

@@ -6,6 +6,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — source erasure + FixSizeBuffer + Tier 1 char (6-phase refactor)
+
+A structural refactor that decouples the storage strategy from the Context
+type, makes FileSource embedded-friendly, and clears the char debt so a
+non-char `value_type` is first-class. Each phase is an independently
+revertable commit.
+
+#### Phase 2 — Source erasure: `Context<CharT, NodeType>`
+- **`Context` is now `Context<CharT, NodeType = std::monostate>`** (was
+  `Context<InputSource, NodeType>`). The storage strategy (contiguous span
+  vs paged FileSource) is type-erased behind `InputSourceBase<CharT>`,
+  selected at construction, invisible to the template signature.
+- **A single `Grammar<char>` can now drive either a string or a file.**
+  Previously `Grammar<>` (span-backed) could not parse a
+  `Context<FileSource<char>>` — the type mismatch was structural. This
+  friction is gone.
+- **`Context::get_input()` is removed.** Use `ctx.substr(off, count)` and
+  `ctx.at(off)` (offset-based slice access that works for both span and
+  FileSource sources). Meta-grammar actions and all tests migrated.
+- **`SpanSource` fills a raw-pointer cache** (`m_fast_data`) at construction;
+  the per-character hot path (`current()` / `at()`) indexes it directly with
+  zero virtual dispatch for span-backed inputs. FileSource-backed parses go
+  through one virtual call per character (I/O-bound anyway).
+
+#### Phase 3 — FixSizeBuffer: `FileSource<CharT, PageSize>`
+- **`FileSource` is now `FileSource<CharT, PageSize>`** — each of the two
+  buffer pages is a fixed-size `std::array<CharT, PageSize>` instead of a
+  `std::vector` that `resize()`d on every read. This drops the per-page heap
+  allocation, makes FileSource suitable for embedded/freestanding use, and
+  improves cache locality.
+- **`FileSource(path)` constructor** drops the runtime `buffer_byte_size`
+  parameter; `PageSize` is a compile-time constant. `from_file<CharT,
+  PageSize = 4096>(path)` defaults to 4096 so existing calls are unaffected.
+- **`SourceMap`'s FileSource constructor is a template over PageSize**; the
+  source is held type-erased (`const void*` + size/at function pointers) so
+  SourceMap itself stays non-templated.
+
+#### Phase 4 — Tier 1 char: value_type≠char is first-class
+- **`escape_char_for_expected` / `escape_string_for_expected` are templated
+  over `CharT`.** `char` path preserved; wider non-printable codepoints
+  (e.g. `char32_t`) render as `\UNNNNNNNN` (full-width hex) instead of
+  `\xNN` (which truncated to the low byte). A minimal UTF-8 encoder
+  (`to_display`) renders codepoints for the sequence terminal path.
+- **`record_expected` no longer truncates via `static_cast<char>`** — the
+  three sites (range lo/hi, set elements, sequence elements) preserve the
+  original value_type so diagnostics are correct for any character type.
+- **`Context<char32_t>` is a first-class specialization** (satisfies
+  `PegContext`), tested by `test/char32_smoke_test.cpp`. Tier 2/3 (UTF-8
+  decoder, codepoint-aware `.`, templated `GrammarCompiler`) remain future
+  work.
+
+### Removed — custom Context extension point (semantic change)
+- **Source erasure removes the ability to plug in a fully custom Context
+  type.** Previously a user could write any type satisfying `PegContext` and
+  use it as `Grammar`'s template argument. After erasure, `Grammar<CharT,
+  NodeType>` instantiates a `Context<CharT, NodeType>` internally — the
+  InputSource is no longer a template parameter you control. This is a
+  deliberate trade: type-safety and the Grammar-drives-any-source property
+  replace the open extension point. If you had a custom Context, port it to
+  the `Context<CharT, NodeType>` + custom `InputSourceBase<CharT>` adapter
+  pattern (see `SpanSource` / `FileSourceSource` in `InputSource.h`).
+
 ### Changed — parse API error contract
 - **`Grammar::parse` / `parse_tree` / `parse_string` no longer throw
   `peg::ParseError` for cut-committed failures.** Previously, a cut operator
