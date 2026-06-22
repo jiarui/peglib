@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
 // peglib core test driver.
 //
-// Individual test cases live in their per-header TUs:
-//   rule_test.cpp        - operator DSL (>>, |, *, +, -, !, &, recursion)
-//   parser_test.cpp      - low-level ParsingExpr + cut semantics
-//   context_test.cpp     - Context state/position/cut lifecycle
-//   file_source_test.cpp - FileSource streaming IO
-//   error_test.cpp       - error reporting (Phase 1 placeholder)
+// Individual test cases live in their per-header TUs (rule_test, parser_test,
+// context_test, file_source_test, sourcemap_test, error_test, parse_tree_test,
+// dynexpr_test, meta_grammar_test, self_parse_test, from_string_test,
+// recursive_leak_test, negative_path_test, char32_smoke_test, skipper_test,
+// to_dot_test).
 //
 // doctest main() is provided by doctest_main.cpp (shared object).
 // ---------------------------------------------------------------------------

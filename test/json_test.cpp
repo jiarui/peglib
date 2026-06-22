@@ -6,7 +6,7 @@
 //   - Mutually recursive rules (value → object/array → value) — no forward
 //     declaration needed; Grammar::operator[] lazily creates rules.
 //   - Auto-naming — rule names come from the map key (for error reporting).
-//   - Whitespace handling (manual; auto-skipper arrives in Phase 3).
+//   - Whitespace handling (manual threading of a `ws` rule).
 //   - Error reporting integration (Diagnostic on parse failure).
 //
 // The grammar uses the default Context (NodeType = std::monostate). AST
@@ -38,9 +38,7 @@ inline Grammar<> g;
 [[maybe_unused]] const bool grammar_initialized = [] {
     auto cut_ = cut<Context<char>>();
 
-    // Whitespace: space, tab, newline, carriage return. (Phase 3 will
-    // introduce Context::set_skipper so users won't need to thread this
-    // manually.)
+    // Whitespace: space, tab, newline, carriage return.
     g["ws"] =
         *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 
@@ -312,7 +310,7 @@ TEST_CASE("[json] error-on-malformed-reports-position")
     bool matched = g.parse(ctx);
     CHECK(!(matched && ctx.ended()));
 
-    // Phase 1 error tracking: a Diagnostic should be available.
+    // A Diagnostic should be available after a failed parse.
     if (auto diag = ctx.take_error()) {
         SourceMap map{std::string_view{input}};
         std::string formatted = diag->format(map, "input");

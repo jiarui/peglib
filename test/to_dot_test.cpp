@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Phase 5 slice: Grammar::to_dot() — Graphviz DOT export.
+// Grammar::to_dot() — Graphviz DOT export tests.
 //
 // The DOT format is structural text; these tests assert on substrings
 // rather than exact output, so cosmetic changes (spacing, ordering) do

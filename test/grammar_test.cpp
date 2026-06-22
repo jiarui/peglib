@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Grammar API tests — the primary user-facing API (Phase 2).
+// Grammar API tests — the primary user-facing API.
 //
 // Tests cover:
 //   - Basic rule definition and parsing

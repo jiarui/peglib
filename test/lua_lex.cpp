@@ -105,11 +105,9 @@ struct TokenizerTest
     void run(const std::string& input)
     {
         g["names"].set_action(
-            [this](Context<char>& context,
-                   Context<char>::ParseTreeNodePtr node)
-                -> std::monostate {
-                std::string m = context.substr(node->start_offset,
-                                               node->end_offset - node->start_offset);
+            [this](Context<char>& context, Context<char>::ParseTreeNodePtr node) -> std::monostate {
+                std::string m =
+                    context.substr(node->start_offset, node->end_offset - node->start_offset);
                 if (m == "if") {
                     m_token_buf.emplace_back(TokenID::TK_IF);
                 } else if (node->end_offset > node->start_offset) {
@@ -149,12 +147,11 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        g["names"].set_action(
-            ([](decltype(context)& c, decltype(context)::ParseTreeNodePtr node) -> std::monostate {
-                CHECK(c.substr(node->start_offset, node->end_offset - node->start_offset) ==
-                      "print");
-                return {};
-            }));
+        g["names"].set_action(([](decltype(context)& c,
+                                  decltype(context)::ParseTreeNodePtr node) -> std::monostate {
+            CHECK(c.substr(node->start_offset, node->end_offset - node->start_offset) == "print");
+            return {};
+        }));
 
         g["ws"] = WS;
         bool ok = g.parse("ws", context);

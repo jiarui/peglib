@@ -268,12 +268,12 @@ struct Context
     }
 
     // -------------------------------------------------------------------
-    // Auto-skip (Phase 3). The skipper is a transparent rule invoked
-    // between adjacent sequence elements and between repetition
-    // iterations. It is owned by Grammar and stamped onto the Context at
-    // Grammar::parse entry. These accessors are public only because the
-    // expression types that call run_skipper() live in peg::parsers;
-    // end users should drive this via Grammar::set_skipper / lexeme().
+    // Auto-skip. The skipper is a transparent rule invoked between
+    // adjacent sequence elements and between repetition iterations. It is
+    // owned by Grammar and stamped onto the Context at Grammar::parse
+    // entry. These accessors are public only because the expression types
+    // that call run_skipper() live in peg::parsers; end users should drive
+    // this via Grammar::set_skipper / lexeme().
     // -------------------------------------------------------------------
 
     // Invoke the skipper if one is set and auto-skip is enabled. Called

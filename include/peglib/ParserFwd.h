@@ -61,7 +61,7 @@ struct ParsingExprInterface
 // ParsingExpr: CRTP base providing semantic-action storage.
 // NodeType is derived from the Context (defaults to std::monostate).
 //
-// Post-parse action model (Phase 2 refactor):
+// Post-parse action model:
 //   The action receives the ParseTreeNodePtr for this rule's match. The
 //   node's children contain the sub-rule results (each child's ->value
 //   is already computed by the child's action). The action returns a

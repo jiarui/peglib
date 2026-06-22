@@ -562,19 +562,17 @@ TEST_CASE("left-recursion-arithmetic")
 }
 
 // ---------------------------------------------------------------------------
-// Phase 2.0 regression: local Rule variables in a lambda must not dangle.
-//
-// In the old design, NonTerminalRef stored a bare const NonTerminal&. When
-// the referenced NonTerminal went out of scope (e.g. a local Rule<> in a
-// grammar-construction lambda), the reference dangled — causing "pure virtual
-// method called" crashes. With the shared_ptr-based Rule design, the
-// NonTerminal's lifetime is extended by all Rule copies that reference it.
+// Local Rule variables inside a lambda must not dangle after the lambda
+// returns. Rule is a non-owning view (bare NonTerminal* + copied name); the
+// Grammar returned from the lambda owns the NonTerminal via shared_ptr, so
+// the Rule handles that were captured into expression trees stay valid as
+// long as the Grammar is alive.
 // ---------------------------------------------------------------------------
 TEST_CASE("local-rule-in-lambda-does-not-dangle")
 {
     // Build a grammar inside a lambda using local named rules, then return
-    // the Grammar by value. The locals (RuleProxies) go out of scope, but
-    // the returned Grammar (and its shared_ptr-backed NonTerminals) keeps
+    // the Grammar by value. The Rule handles returned by operator[] go out
+    // of scope, but the Grammar (sole owner of the NonTerminals) keeps
     // everything alive.
     auto build_grammar = []() -> Grammar<> {
         Grammar<> g;

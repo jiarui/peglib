@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// DynExpr smoke tests — W1 of Phase 2 textual grammar format.
+// DynExpr smoke tests.
 //
 // Verifies that the type-erased dynamic combinators can build a working
 // expression tree at runtime (without the compile-time DSL) and that they

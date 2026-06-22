@@ -113,7 +113,7 @@ public:
     [[nodiscard]] const std::string& start_rule() const noexcept { return m_start; }
 
     // -----------------------------------------------------------------------
-    // Auto-skip (Phase 3).
+    // Auto-skip.
     //
     // Set a transparent "skipper" rule that is invoked automatically
     //   - between adjacent children of a Sequence (static and Dyn),
@@ -374,7 +374,7 @@ protected:
     std::map<std::string, std::shared_ptr<NonTerminalType>> m_rules;
     std::string m_start;
 
-    // Auto-skip rule (Phase 3). Non-owning pointer into m_rules; set by
+    // Auto-skip rule. Non-owning pointer into m_rules; set by
     // set_skipper, cleared by clear_skipper. nullptr = no auto-skip.
     // Stamped onto each Context at parse()/parse_tree() entry so that
     // Sequence / Repetition expressions can call ctx.run_skipper() with

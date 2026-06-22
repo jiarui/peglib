@@ -1,8 +1,8 @@
 # peglib clang-tidy config.
 #
-# Phase 0 scope: catch real bugs and suggest modern idioms, without
-# enforcing naming conventions (the codebase mixes snake_case and
-# camelCase; a naming pass is deferred to a dedicated cleanup commit).
+# Scope: catch real bugs and suggest modern idioms, without enforcing
+# naming conventions (the codebase mixes snake_case and camelCase; a
+# naming pass is deferred to a dedicated cleanup commit).
 #
 # Run with: cmake -DPEGLIB_ENABLE_CLANG_TIDY=ON ...
 

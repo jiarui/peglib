@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Phase 3 auto-skip (Grammar::set_skipper + lexeme) — permanent test suite.
+// Auto-skip (Grammar::set_skipper + lexeme) test suite.
 //
 // Covers:
 //   - Basic inter-token whitespace elimination between adjacent sequence
@@ -14,8 +14,7 @@
 //   - Dyn-sequence path (GrammarCompiler-compiled grammar + set_skipper).
 //   - char32_t context: the skipper is not char-specific.
 //
-// See json_skipper_test.cpp for a real-world grammar comparison and
-// to_dot_test.cpp for the Phase 5 slice that ships alongside this.
+// See json_skipper_test.cpp for a real-world grammar comparison.
 // ---------------------------------------------------------------------------
 
 #include "peglib.h"

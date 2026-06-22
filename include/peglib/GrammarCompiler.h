@@ -57,7 +57,7 @@ public:
     // false and fills `err` with diagnostic details.
     static bool try_from_string(std::string_view text, DefaultGrammar& out, Diagnostic& err)
     {
-        // Phase 1: parse PEG text with the meta-grammar.
+        // Step 1: parse PEG text with the meta-grammar.
         auto& mg = meta_grammar();
         std::string input{text};
         PegParseCtx ctx{input};
@@ -71,7 +71,7 @@ public:
             return false;
         }
 
-        // Phase 2: collect all Definition AST nodes.
+        // Step 2: collect all Definition AST nodes.
         auto defs = collect_definitions(tree);
         if (defs.empty()) {
             err =
@@ -79,7 +79,7 @@ public:
             return false;
         }
 
-        // Phase 3: compile each definition into the output Grammar.
+        // Step 3: compile each definition into the output Grammar.
         // Wrap in try/catch so try_from_string honours its non-throwing
         // contract even if compile() hits an unexpected internal error.
         try {
@@ -107,7 +107,7 @@ public:
             return false;
         }
 
-        // Phase 4: validate — report undefined rule references. Report ALL
+        // Step 4: validate — report undefined rule references. Report ALL
         // undefined names (not just the first) so the user can fix every typo
         // in one pass. Position at the first definition's offset (best
         // available source location) rather than a hardcoded 0.

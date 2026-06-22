@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Self-parse test — W2.5 of Phase 2 textual grammar format.
+// Self-parse test.
 //
 // Verifies that the C++ reference meta-grammar can parse the canonical
 // textual PEG spec (meta/peg.peg), and that GrammarCompiler can compile

@@ -85,9 +85,9 @@ target_compile_definitions(peglib_json_test PRIVATE
 add_test(NAME peglib_json_test COMMAND peglib_json_test)
 
 # ---------------------------------------------------------------------------
-# JSON-with-auto-skip comparison test (Phase 3 demonstration). A separate
-# target so the two JSON grammars (manual ws threading vs set_skipper)
-# live in independent TUs and can be compared directly.
+# JSON-with-auto-skip comparison test. A separate target so the two JSON
+# grammars (manual ws threading vs set_skipper) live in independent TUs and
+# can be compared directly.
 # ---------------------------------------------------------------------------
 add_executable(peglib_json_skipper_test
     json_skipper_test.cpp)

@@ -1,20 +1,16 @@
 // ---------------------------------------------------------------------------
-// Regression: shared_ptr cycle leak in recursive grammars.
+// Regression: recursive grammars must not leak on destruction.
 //
-// Discovered Phase 2 W3 (GrammarCompiler). Before the X4 redesign, recursive
-// rules formed a shared_ptr cycle that prevented destruction:
+// Recursive rules reference themselves in their own body, so the rule tree
+// contains edges that point back to the originating NonTerminal. Rule is a
+// non-owning handle (bare NonTerminal*); Grammar is the sole owner of every
+// NonTerminal via shared_ptr. Destruction releases the map and everything
+// dies in one pass — no cycle-breaking needed.
 //
-//   NonTerminal.m_rule → body tree → RuleProxy.m_rule
-//     → shared_ptr<NonTerminal>  ← cycle back to start
-//
-// The X4 redesign (Rule is now a non-owning handle storing a bare
-// NonTerminal*) eliminates the cycle at the source. `~Grammar()` needs no
-// special handling — the map releases all shared_ptrs and everything dies.
-//
-// This TU compiles + destroys N recursive grammars in a loop so that a leak
+// This TU compiles + destroys N recursive grammars in a loop so a leak
 // regression is observable at process exit. Under ASan (detect_leaks=1,
-// already set in the CI sanitizer job), any leak here fails the job. Without
-// sanitizers, the test still guards against crashes/hangs from
+// already set in the CI sanitizer job), any leak here fails the job.
+// Without sanitizers, the test still guards against crashes/hangs from
 // create/destroy churn.
 // ---------------------------------------------------------------------------
 
@@ -34,9 +30,8 @@ TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
 {
     SUBCASE("textual-grammar path (GrammarCompiler)")
     {
-        // 100 self-recursive grammars compiled from PEG text.
-        // Before X4: each one leaked its NonTerminal + body.
-        // After X4: no cycle, no leak.
+        // 100 self-recursive grammars compiled from PEG text. Any leak
+        // here is unmistakable under ASan.
         for (int i = 0; i < 100; ++i) {
             auto g = GrammarCompiler::from_string("A <- A 'x' / 'y'");
             g.set_start("A");
@@ -53,10 +48,10 @@ TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
 
     SUBCASE("static-grammar-API path (primary user API)")
     {
-        // The primary API (g["add"] = g["add"] ...) forms a cycle via the
-        // static AlternationExpr / SequenceExpr tree, which held RuleProxy
-        // copies by value. With X4, these are now Rule copies holding bare
-        // NonTerminal* — no shared_ptr cycle.
+        // The primary API (g["add"] = g["add"] ...) forms the recursive
+        // reference through the static AlternationExpr / SequenceExpr
+        // tree, which embeds Rule copies by value. Rule is non-owning, so
+        // no shared_ptr cycle forms.
         for (int i = 0; i < 100; ++i) {
             Grammar<> g;
             g["num"] = +terminal('0', '9');

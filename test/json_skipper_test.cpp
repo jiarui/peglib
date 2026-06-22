@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// JSON grammar with auto-skip — the "after" picture for Phase 3.
+// JSON grammar with auto-skip — the "after" picture.
 //
 // Compare with json_test.cpp, which threads `>> g["ws"] >>` manually
 // between every pair of terminals (5 occurrences). Here, a single

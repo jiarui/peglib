@@ -294,18 +294,42 @@ Grammar bugs are subtle; a tracer is essential during development.
 - [ ] Optional `PEGLIB_TRACE` macro for verbose stdout logging when building
       test grammars
 
-## Phase 6 — Parameterized Rules & Composition
+## Phase 6 — Grammar Composition
 
-Reduce grammar duplication.
+Reduce grammar duplication across multi-file / multi-team grammars.
 
-- [ ] **Rule templates**: `List(Item, Sep)` macro-style — a single definition
-      instantiated with different item/separator rules
+**Scope note (revised after Phase 3)**: true runtime parameterized rules
+(`List(Item, Sep)` as a PEG-text-level template) are **out of scope** —
+they conflict with the X4 non-owning Rule design (parameter threading
+would require widening `parse(Context&)` across all 17 expression types,
+and per-instantiation NonTerminals would break the `(pos, NonTerminal*)`
+memo key). The same ergonomics are available today as a **user-level C++
+helper** with zero library support — see the "Common patterns" section
+of the README. What remains in Phase 6 is grammar-level composition.
+
 - [ ] **Grammar imports**: compose a `Grammar` from multiple sources / files
-      (`import { list_rule } from "lists.peg"`)
-- [ ] **Rule override**: allow downstream grammars to override a rule from an
-      imported grammar (inheritance-style composition)
+      (`import { list_rule } from "lists.peg"`). Mechanically a map-level
+      merge of two `Grammar` objects' `m_rules`; the design question is the
+      import syntax (PEG-text directive vs C++ API vs both).
+- [ ] **Rule override**: allow downstream grammars to override a rule from
+      an imported grammar (inheritance-style composition). Builds on
+      imports — `g2["expr"] = my_better_expr` after `g2.import(g1)` should
+      rebind just `g2`'s entry without touching `g1`.
 - [ ] **Capture/backreference**: `$name<...>` captures a sub-match, `$name`
-      references it later in the same production (regex-style, like yhirose)
+      references it later in the same production (regex-style, like
+      yhirose). Self-contained — needs a capture stack on Context (similar
+      in shape to the deleted value stack) but does not touch the
+      expression virtual hierarchy.
+
+### Deferred — parameterized rules (ruled out for X4)
+- ~~**Rule templates**: `List(Item, Sep)` macro-style — a single definition
+      instantiated with different item/separator rules.~~ **Not pursued**:
+      conflicts with the non-owning Rule design. Equivalent ergonomics
+      available today via user-level C++ helpers (`List(item, sep) =
+      item >> *(sep >> item)`); see README "Common patterns". A future
+      C++-macro form (`PEG_RULE_TEMPLATE`) that expands at C++ compile time
+      (no runtime parameterization) is the only viable path and is not
+      currently scheduled.
 
 ## Future (not currently scheduled)
 
@@ -322,7 +346,7 @@ Reduce grammar duplication.
 
 | Decision | Choice | Rationale |
 | ---      | ---    | ---       |
-| AST node typing | `Context<InputSource, NodeType>` template | Library stays AST-agnostic; default `std::monostate` keeps backward compatibility |
+| AST node typing | `Context<CharT, NodeType>` template | Library stays AST-agnostic; default `std::monostate` keeps backward compatibility. CharT and NodeType are orthogonal template params; Source is type-erased behind InputSourceBase (Phase 2 refactor). |
 | Error model | Mixed (cut throws, normal returns false) | Cut-committed failures are programmer errors; regular parse failures are queryable |
 | `ParseError` vs `Diagnostic` | `ParseError` (exception, PascalCase) + `Diagnostic` (value object) | Exception type for throws; value object for queries/format |
 | SourceMap | O(n) prescan + lazy line re-read for FileSource | Streaming 1 MB+ inputs need lazy evaluation; full load unacceptable |
@@ -340,4 +364,5 @@ Reduce grammar duplication.
 | Rule ownership | Grammar sole owner via shared_ptr; Rule is non-owning handle (raw pointer) | X4 design: eliminates shared_ptr cycles at the source. Rule cannot outlive Grammar by design. Consolidates Rule + RuleProxy + RuleRefWrapper into one type. |
 | Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |
 | Skipper storage | Grammar-owned, stamped to Context at parse entry | Avoids polluting Context construction; zero overhead when unset (Context's `m_skipper` defaults to nullptr, so `run_skipper()` early-returns before any virtual dispatch). `lexeme()` toggles a separate `skip_enabled` flag with save/restore. |
+| Parameterized rules | Ruled out for runtime; C++ helper suffices for compile time | Conflicts with X4 non-owning Rule design — `parse(Context&)` has no parameter slot, and per-instantiation NonTerminals break the `(pos, NonTerminal*)` memo key. `List(item, sep) = item >> *(sep >> item)` as a user-level C++ function delivers the same ergonomics with zero library cost (see README "Common patterns"). |
 | Grammar-Context relationship | Grammar typed to Context, no Context owned (Level 1) | Same Grammar reusable across many parses; fresh Context per parse (fresh memo, position, value stack). |

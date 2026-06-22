@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
-// Meta-grammar tests — W2 of Phase 2 textual grammar format.
+// Meta-grammar tests.
 //
 // Verifies that the C++ reference meta-grammar (MetaGrammar.h) correctly
 // parses PEG text into PegAstNode trees via the post-parse action model.
-// The shape of these trees is what GrammarCompiler (W3) will walk to build
-// a runtime Grammar.
+// The shape of these trees is what GrammarCompiler walks to build a runtime
+// Grammar.
 //
 // Post-parse model: the Grammar rule's ParseTreeNode has a child for each
 // Definition. Each Definition child's ->value is the PegAstNode for that

@@ -18,7 +18,7 @@ namespace parsers
 // key and seed-grow anchor. Users interact via Rule (a bare-pointer,
 // non-owning handle), never directly with NonTerminal.
 //
-// Post-parse action model (Phase 2 refactor):
+// Post-parse action model:
 //   parse() returns ParseResult { success, tree }. On the first successful
 //   match at a given position, a ParseTreeNode is built from the body's
 //   result tree, the semantic action is invoked (receiving the node so it

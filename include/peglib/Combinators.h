@@ -127,8 +127,7 @@ protected:
 // (seed-grow loop, cut handling, zero-width termination, failure rollback).
 //
 // Both the static Repetition<C,Child> and the type-erased DynRepeatExpr<C>
-// delegate here, so a fix (e.g. the zero-width memo / position-restore bug
-// from commit d29699a) only has to be applied once. `parse_child` is any
+// delegate here, so a fix only has to be applied once. `parse_child` is any
 // callable returning ParseResult for one child match — typically a lambda
 // capturing `this` and forwarding to the concrete child's parse().
 //

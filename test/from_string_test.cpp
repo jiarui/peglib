@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// GrammarCompiler tests — W3 of Phase 2 textual grammar format.
+// GrammarCompiler tests.
 //
 // Verifies that GrammarCompiler::from_string() produces working Grammar<>
 // objects from PEG text. Each test compiles a small grammar and checks

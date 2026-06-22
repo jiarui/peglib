@@ -9,14 +9,8 @@ using namespace peg;
 // ---------------------------------------------------------------------------
 // Parse-tree + PegContext concept tests
 //
-// Originally covered the value-stack API (push_node / pop_node / peek_node /
-// node_count / clear_stack). The post-parse-action refactor removed the
-// value stack entirely — AST data now flows through the parse tree returned
-// by parse() (ParseResult.tree). These tests were rewritten to exercise the
-// equivalent behaviour through the parse-tree API.
-//
 // Covers:
-//   - Context<InputSource, NodeType> template parameter
+//   - Context<CharT, NodeType> template parameter
 //   - Default NodeType == std::monostate
 //   - Action return value stored on ParseTreeNode::value
 //   - Parse-tree shape after sequence / alternation / predicates
@@ -207,12 +201,10 @@ static_assert(!PegContext<BadContextNoCut>, "a Context missing the cut API must 
 // ---------------------------------------------------------------------------
 // Parse-tree shape after backtracking combinators.
 //
-// Originally "Value-stack rollback on backtracking (W2 of Phase 2)".
-// When a combinator fails, any value pushed by partially-matched children
-// had to be rolled back. In the parse-tree model, each parse() call returns
-// its own ParseResult; a failed child contributes no tree to its parent, so
-// the equivalent guarantee is: the parent's tree contains exactly the
-// successful children (failed siblings contribute nothing).
+// Each parse() call returns its own ParseResult; a failed child contributes
+// no tree to its parent. So the equivalent guarantee is: the parent's tree
+// contains exactly the successful children (failed siblings contribute
+// nothing).
 // ---------------------------------------------------------------------------
 
 TEST_CASE("value-stack-rollback-on-sequence-failure")
