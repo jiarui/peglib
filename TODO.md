@@ -254,12 +254,46 @@ production — a feature every comparable PEG library offers.
 - **`GrammarCompiler::from_string`** does NOT auto-inject a skipper rule —
   users call `set_skipper` after compilation.
 
-### Deferred (Phase 3 sub-item)
-- [ ] **Atomic rules** — "no-skip + no inner backtracking" mode for lexical
-      rules (pest's `@{}` / yhirose's `< ... >`). The "no-skip" half is
-      already covered by `lexeme`; the "no inner backtracking" half is a
-      separate semantic worth its own design pass (interacts with cut and
-      memoization). Punt until a real consumer needs it.
+### Ruled out — Atomic rules (`@{}` / `<...>`)
+
+pest's `@{}` and yhirose's `< ... >` bundle two orthogonal semantics —
+no-skip and no-inner-backtracking — into one construct, because pest lacks
+independent primitives for either. peglib already has both as separate,
+composable combinators:
+
+  - **no-skip** → `lexeme(expr)` (Phase 3)
+  - **no-inner-backtrack** → `cut()` (Phase 1)
+
+Users express atomic semantics directly with `lexeme(... >> cut() >> ...)`,
+with cut remaining explicit. An `atomic()` sugar that auto-inserts cut
+between sequence children would violate the "cut must be a visible,
+programmer-authored commitment" contract — a hidden cut silently escalates
+a normal parse failure into a thrown `ParseError`, which the user did not
+opt into at the failure site. No real consumer demand. The library does
+not provide a separate `atomic()` form.
+
+### Known asymmetry — DynExpr lacks Lexeme / Cut
+
+`LexemeExpr` and `CutExpr` exist only in the static DSL. There is no
+`DynLexemeExpr`, no `DynCutExpr`, and no PEG-text syntax for either. This
+is intentional:
+
+- **Lexeme**: the `GrammarCompiler` path does not set a skipper (Phase 3
+  design contract — see Whitespace model row in this table). With no
+  skipper in effect, `lexeme(...)` would be a no-op, so a DynLexemeExpr
+  would be dead code. If `GrammarCompiler` ever grows a `%whitespace`
+  directive that auto-installs a default skipper, a DynLexemeExpr + text
+  syntax becomes necessary and should be added then.
+- **Cut**: `DynAlternationExpr` already honors `Context::cut()` state
+  correctly, but there is no standard PEG syntax for cut (Ford 2004 and
+  yhirose's peglib both lack one). Designing an unambiguous text syntax
+  is the real blocker — not the trivial DynCutExpr implementation. Defer
+  until Phase 4/6 extend the PEG syntax anyway; cut's text syntax can be
+  settled in the same pass.
+
+When Phase 4 (recover) and Phase 6 (capture) extend the PEG text grammar,
+the cut-syntax question should be revisited in the same design pass so
+the new constructs and cut share a coherent syntax.
 
 ## Phase 4 — Error Recovery
 
@@ -276,50 +310,76 @@ file, not just the first one.
 - [ ] **Sync token selection helpers**: common patterns (`;`, `}`, EOL, statement
       boundaries)
 
-## Phase 5 — Tracing & Profiling
+## Phase 5 — Visualization
 
-Grammar bugs are subtle; a tracer is essential during development.
+Grammar visualization via `to_dot()` is shipped. The remaining tracer items
+originally listed here (per-rule trace callbacks, hit counter, time-per-rule
+profiling) are **ruled out** — see rationale below.
 
-- [ ] **Rule trace callbacks**: `Context::on_rule_enter / on_rule_leave /
-      on_rule_fail` — user-supplied callbacks fired per `NonTerminal::parse`
-- [ ] **Hit counter**: per-rule invocation count + cache-hit ratio
-- [ ] **Time-per-rule profiling**: cumulative wall time per rule, sorted
-      descending (helps identify grammar hotspots)
 - [x] **Grammar visualization**: `Grammar::to_dot()` exports a Graphviz DOT
       digraph of rule dependencies (DONE — shipped as a Phase 3 companion
       since `collect_rule_refs` was already in place; ~30 lines reusing the
       existing DFS). Every defined rule is a node (start rule gets
       `peripheries=2`), every rule-reference is an edge, undefined references
       appear as dangling edge targets for typo detection.
-- [ ] Optional `PEGLIB_TRACE` macro for verbose stdout logging when building
-      test grammars
+- [ ] Optional `PEGLIB_TRACE` macro for verbose stdout logging. Low priority:
+      useful only when debugging peglib itself (not a user-facing feature);
+      punt until someone actually needs it.
 
-## Phase 6 — Grammar Composition
+### Ruled out — per-rule tracer callbacks / hit counter / time-per-rule
 
-Reduce grammar duplication across multi-file / multi-team grammars.
+The yhirose original peglib exposes a `log` callback, and a "PEG library
+should have a tracer" was carried over as a roadmap item without re-checking
+its value against peglib's actual model. Re-evaluated: **no real user
+need in peglib's setting**.
 
-**Scope note (revised after Phase 3)**: true runtime parameterized rules
-(`List(Item, Sep)` as a PEG-text-level template) are **out of scope** —
-they conflict with the X4 non-owning Rule design (parameter threading
-would require widening `parse(Context&)` across all 17 expression types,
-and per-instantiation NonTerminals would break the `(pos, NonTerminal*)`
-memo key). The same ergonomics are available today as a **user-level C++
-helper** with zero library support — see the "Common patterns" section
-of the README. What remains in Phase 6 is grammar-level composition.
+- The post-parse action model already gives users the full `ParseTreeNode`
+  tree — they can directly observe which rules succeeded and what AST they
+  produced, without an observation hook.
+- Phase 1's furthest-failure position + expected-set already pinpoints *where*
+  a grammar failed and *what* was expected — the dominant "why did my grammar
+  fail" question. A tracer would only re-report the same failures as discrete
+  events.
+- Per-rule timing is strictly better served by a system profiler (perf /
+  VTune / Instruments): finer granularity, no in-process measurement
+  perturbation, no instrumentation tax on every parse.
+- The one thing a tracer would uniquely provide — packrat cache-hit ratio —
+  is niche: PEG memo hit rates are structural, not a tuning knob the user
+  pulls, and there is no consumer asking for the number.
 
-- [ ] **Grammar imports**: compose a `Grammar` from multiple sources / files
-      (`import { list_rule } from "lists.peg"`). Mechanically a map-level
-      merge of two `Grammar` objects' `m_rules`; the design question is the
-      import syntax (PEG-text directive vs C++ API vs both).
-- [ ] **Rule override**: allow downstream grammars to override a rule from
-      an imported grammar (inheritance-style composition). Builds on
-      imports — `g2["expr"] = my_better_expr` after `g2.import(g1)` should
-      rebind just `g2`'s entry without touching `g1`.
+In short: the tracer is a vestige of a no-AST PEG library's debugging
+story. With `ParseTreeNode` visible and Phase 1 error tracking in place,
+it has no equivalent value here.
+
+## Phase 6 — Capture & Backreference
+
+Regex-style capture within a single production: `$name<...>` captures a
+sub-match, `$name` references it later. Self-contained — needs a capture
+stack on Context (similar in shape to the deleted value stack) but does
+not touch the expression virtual hierarchy or the X4 Rule-ownership
+model.
+
 - [ ] **Capture/backreference**: `$name<...>` captures a sub-match, `$name`
       references it later in the same production (regex-style, like
-      yhirose). Self-contained — needs a capture stack on Context (similar
-      in shape to the deleted value stack) but does not touch the
-      expression virtual hierarchy.
+      yhirose). The capture stack lives on Context; entries are pushed by
+      a new `CaptureExpr` and popped on backtrack via the existing
+      state-restore mechanism.
+
+### Ruled out — grammar composition (X4 design conflict)
+
+- ~~**Grammar imports**~~ and ~~**Rule override**~~: not pursued. Both
+  require either deep-cloning a `Grammar`'s `NonTerminal`s (which breaks
+  the `(pos, NonTerminal*)` memo key and left-recursion seed identity,
+  and forces a `collect_rule_refs` pointer-rewrite pass across all 17
+  expression types to reconnect the `Rule` handles embedded by value in
+  the tree) or shallow-aliasing across `Grammar` objects (which violates
+  "Rule cannot outlive its Grammar"). Neither brings new capability:
+  multi-source grammar composition is already expressible by
+  constructing a single `Grammar` and adding rules from several code
+  paths, and text-level file splitting is a trivial `#include`-style
+  preprocessing pass over the PEG source (concatenate, then
+  `from_string`) — no library support needed. No real consumer demand;
+  yhirose's peglib has no imports either.
 
 ### Deferred — parameterized rules (ruled out for X4)
 - ~~**Rule templates**: `List(Item, Sep)` macro-style — a single definition
@@ -333,6 +393,171 @@ of the README. What remains in Phase 6 is grammar-level composition.
 
 ## Future (not currently scheduled)
 
+- **CharBitmap for char classes**: micro-optimization, low priority. Today
+  `GrammarCompiler::compile_charclass` builds `[a-z]` / `[^0-9_]` as a
+  `std::set<char>`, and every `TerminalExpr::parse` does a `set.find()` —
+  a red-black-tree descent with heap-allocated nodes. For the common case
+  (small ASCII character classes), a 256-bit bitmap is strictly better:
+
+  ```cpp
+  struct CharBitmap {
+      std::array<bool, 256> bits{};
+      constexpr void set(char c) { bits[static_cast<unsigned char>(c)] = true; }
+      constexpr bool contains(char c) const { return bits[static_cast<unsigned char>(c)]; }
+  };
+  ```
+
+  Lookup drops from `O(log n)` tree descent to `O(1)` array index;
+  construction drops from N heap allocations to a fixed 32-byte stack
+  object; the type is `constexpr`-constructible, so static DSL char classes
+  could in principle be compile-time constants. `symbolConsumable` already
+  has `std::set<elem>` and `std::array<elem, 2>` overloads; a `CharBitmap`
+  overload slots in alongside them with no API churn. Not a hot path
+  today — defer until profiling shows char-class matching matters. Worth
+  recording because the current `std::set<char>` choice is a naive
+  implementation detail, not a deliberate design.
+
+- **Bytecode VM execution**: strategically significant, deferred. A bytecode
+  execution backend layered alongside the existing tree-walk interpreter.
+  The existing `DynExpr` tree is already a type-erased object graph, so a VM
+  is a compile pass over it rather than a library rewrite. Not pursued now:
+  no consumer needs the non-performance value yet, and the permanent
+  dual-track maintenance cost is real (every future semantic change —
+  Phase 4 recovery, Phase 6 capture, etc. — must be implemented twice).
+
+  **Seven value dimensions** (most are non-performance; this is *not* a
+  performance-only item):
+
+  1. **Grammar persistence** — `compile()` once, `save_bytecode()` to disk,
+     `load_bytecode()` on later runs skips the whole setup / textual-grammar
+     compile. Matters for start-latency-sensitive consumers (CLI tools, IDE
+     plugins, embedded).
+  2. **Cross-language bindings** — bytecode is a language-neutral IR; the
+     same `.pegbc` can be executed by a C++ / Rust / Python VM. Current
+     expression-tree object graph cannot cross language boundaries.
+  3. **Untrusted-grammar sandboxing** — VM execution is interruptible and
+     budgetable (`max_instructions`, `max_backtracks`, `max_memo_entries`,
+     `max_stack_depth`). Tree-walk cannot bound cost; virtual dispatch is
+     open-ended. Matters for SaaS parsing services, online playgrounds.
+  4. **AOT / JIT precondition** — bytecode is the substrate for ahead-of-time
+     codegen and runtime JIT. This is where LPEG's real speed comes from
+     (`lpegre.so`), not the VM itself. Expression trees cannot be JIT'd
+     because virtual-dispatch targets are unknown until runtime.
+  5. **Static analysis & optimization passes** — bytecode is an explicit IR;
+     rule reachability, redundant-choice merging, peephole, and
+     profile-guided layout all operate on a linear instruction stream, not
+     an object graph via visitors.
+  6. **Predictable memory budget** — VM stack depth is statically bounded by
+     the call graph; memo size is bounded by `input_len × rule_count`;
+     bytecode itself is fixed-size. Tree-walk memory is dynamic (shared_ptr
+     allocation timing is runtime-dependent). Matters for embedded / real-time.
+  7. **Observability & pedagogy** — `disassemble()` produces a readable
+     instruction listing. The tree-walk's virtual-dispatch chain is opaque;
+     bytecode makes PEG semantics visible (useful for teaching, debugging
+     subtle grammar bugs, and library-internal instrumentation).
+
+  Performance (dimension zero) is bounded at **1.5-2.5×**, *not* 5-10×:
+  the VM removes virtual dispatch at NonTerminal boundaries and shared_ptr
+  refcounting in the expression tree, but memo lookup (still needed for the
+  PEG O(n) guarantee) and ParseTreeNode allocation (still needed for
+  semantic actions) remain. Packrat memo data-structure optimizations
+  (see Open Design Decisions) achieve 2-3× at ~200 lines with zero
+  semantic/API risk — for performance alone the VM is not worth it. The
+  VM's case rests on dimensions 1-7.
+
+  **API design** (opt-in, current API unchanged):
+
+  ```cpp
+  class Grammar {
+  public:
+    // === Existing API — unchanged ===
+    ParseResult parse(input);
+    ParseResult parse_tree(input);
+    Rule operator[](name);
+    void set_start(name);
+    void set_skipper(rule);
+
+    // === New VM API — opt-in ===
+    void compile();                       // tree → bytecode, throws CompileError
+    bool is_compiled() const noexcept;
+    ParseResult parse_vm(input);          // VM execution of compiled bytecode
+    ParseResult parse_tree_vm(input);
+
+    // Persistence
+    void save_bytecode(filename) const;
+    static Grammar load_bytecode(filename);   // skips expression-tree construction
+
+    // Debugging / introspection
+    std::string disassemble() const;
+    std::string disassemble(rule_name) const;
+    BytecodeStats bytecode_stats() const;
+  };
+  ```
+
+  Design choices:
+
+  - **Opt-in layer 2**, not automatic: explicit `compile()` + `parse_vm()`,
+    so users choose and can always fall back to `parse()`. Automatic
+    silent VM would make VM-only bugs unreproducible via existing code paths.
+  - **`compile()` is a separate step**, not implicit: bytecode generation is
+    a real cost; users control when to pay it and can cache the result via
+    `save_bytecode()`.
+  - **`from_string` unchanged** — returns the existing `Grammar` with a
+    DynExpr tree; `compile()` then lowers the tree to bytecode. Backward
+    compatible.
+  - **`set_action` signature unchanged** — actions live in an action table
+    indexed by bytecode `ACTION slot` instructions. The VM calls back into
+    the same `std::function<NodeType(Context&, NodePtr)>` the user already
+    registered; action invocation remains a virtual call. Users pay zero
+    migration cost; the VM does not accelerate actions (acceptable — the
+    VM's value is dimensions 1-7, not action speedup).
+  - **`CompileResult` / `CompileError`** — if the tree contains unsupported
+    constructs (e.g. arbitrary functor terminals that cannot be encoded as
+    bytecode), `compile()` fails explicitly; `parse_vm()` is unavailable
+    but `parse()` continues to work.
+  - **Bytecode format is a versioned custom binary**, not JSON/text — tight
+    and fast to load; a separate `disassemble()` provides human-readable
+    form for debugging.
+
+  **Engineering cost**: ~3000 lines / 2-4 weeks full-time. Breakdown:
+  bytecode ISA + builder (~200), tree → bytecode compiler visitor (~400),
+  VM interpreter dispatch loop (~700), action-table integration (~100),
+  cut / backtrack-frame management (~150), memo with `(pos, rule_id)` key
+  (~100), **left-recursion seed-grow on the VM** (~200, the hardest part —
+  `CALL` recursion detection + seed iteration in the state machine; academic
+  literature skips its interaction with cut and semantic actions, so this
+  is near-original work), skipper / lexeme embedding (~100), disassembler
+  (~200), tests (~1000).
+
+  **Trigger conditions** (any one): a non-C++ consumer appears (cross-
+  language value); start latency becomes a measured problem (persistence);
+  untrusted-grammar support is requested (sandbox); peglib's positioning
+  explicitly shifts from "C++ header-only library" to "general PEG platform".
+
+  **Permanent cost**: dual-track maintenance. Every future semantic change —
+  Phase 4 error recovery, Phase 6 capture/backreference, any new combinator —
+  must be implemented in both tree-walk (add expression type) and VM (add
+  bytecode instruction + compiler case + interpreter case). The test matrix
+  doubles (every test runs under both `parse()` and `parse_vm()`). This
+  ongoing cost exceeds the one-time engineering cost and is the primary
+  reason to defer until a trigger condition is real.
+
+- **Binary parsing**: non-core goal. The `CharT` template parameter already
+  provides an escape hatch — `Context<uint8_t>` switches the whole parse
+  stack to byte-level matching, and `terminal(std::array<uint8_t,2>{lo,hi})`
+  / `terminal(std::set<uint8_t>{...})` cover byte ranges and classes.
+  Multi-byte primitives (endianness-aware `u16le` / `u32be`, varint, bit
+  fields) are left to consumer projects as small custom `DynExpr` types —
+  the same "library provides orthogonal primitives, domain helpers live in
+  consumer code" decision as parameterized rules. For production binary
+  parsing, [Kaitai Struct](https://kaitai.io/) is the right tool: it
+  generates straight-line C++ with no memo / virtual-dispatch / shared_ptr
+  overhead, and ships a large format zoo. peglib's PEG model (backtracking,
+  packrat memo, per-match tree allocation) pays for capabilities that
+  unambiguous binary formats don't need; peglib is only competitive in
+  narrow niches — forensics, polyglot detection, corrupt-file best-effort
+  recovery — where ordered choice and predicate backtracking genuinely
+  earn their keep.
 - **Unicode support**: codepoint-aware `.`, `\p{...}` properties, case-folding.
   Currently all matching is byte-oriented (UTF-8 friendly but not semantic).
 - **`peglint` CLI**: standalone tool to validate a grammar, lint a source file,
@@ -365,4 +590,14 @@ of the README. What remains in Phase 6 is grammar-level composition.
 | Primary API | `Grammar<Ctx>` container (Phase 2) | Rules belong to a Grammar; auto-naming, lazy creation, and recursive references are handled automatically. Rule is internal. |
 | Skipper storage | Grammar-owned, stamped to Context at parse entry | Avoids polluting Context construction; zero overhead when unset (Context's `m_skipper` defaults to nullptr, so `run_skipper()` early-returns before any virtual dispatch). `lexeme()` toggles a separate `skip_enabled` flag with save/restore. |
 | Parameterized rules | Ruled out for runtime; C++ helper suffices for compile time | Conflicts with X4 non-owning Rule design — `parse(Context&)` has no parameter slot, and per-instantiation NonTerminals break the `(pos, NonTerminal*)` memo key. `List(item, sep) = item >> *(sep >> item)` as a user-level C++ function delivers the same ergonomics with zero library cost (see README "Common patterns"). |
+| Grammar composition (imports / override) | Ruled out (X4 design conflict + no demand) | Deep clone breaks the `(pos, NonTerminal*)` memo key and left-recursion seed identity and requires a `collect_rule_refs` pointer-rewrite pass across all 17 expression types; shallow alias violates "Rule cannot outlive Grammar". Multi-source composition is already expressible by adding rules to a single Grammar from several code paths, and text-level file splitting is a trivial `#include` preprocessing pass (concatenate, then `from_string`). No consumer demand; yhirose's peglib has no imports either. |
 | Grammar-Context relationship | Grammar typed to Context, no Context owned (Level 1) | Same Grammar reusable across many parses; fresh Context per parse (fresh memo, position, value stack). |
+| Binary parsing support | Ruled out as core goal; `Context<uint8_t>` is the escape hatch | CharT template already provides byte-level matching at zero library cost; multi-byte primitives (u32le, varint, bit fields) belong in consumer code as custom DynExpr types (same precedent as parameterized rules). Kaitai Struct dominates mainstream binary parsing — it generates straight-line C++ with no memo / virtual-dispatch / shared_ptr overhead and ships a large format zoo. peglib's PEG model pays for backtracking + packrat + per-match tree allocation that unambiguous binary formats don't need; only competitive in narrow niches (forensics, polyglot detection, corrupt-file recovery). |
+| Static zero-virtual grammar path | Ruled out | A fully static, compile-time-fixed grammar (Spirit X3 model) would eliminate the NonTerminal → body virtual dispatch, but at the cost of the textual-grammar compiler, the runtime `Grammar` API (operator[] assignment, forward references, recursive types), and a large compile-time / template-depth burden — all for ~5-10% hot-path speedup. peglib's differentiation is the runtime API + `from_string`; the static niche is already well-served by Spirit X3. |
+| Packrat memo optimization | Analyzed, deferred until a real bottleneck appears | Five feasible, semantics-preserving, API-neutral optimizations identified: (1) `std::map` → `std::unordered_map` / open-addressing hash for both outer (pos) and inner (NonTerminal*) layers; (2) split succeed-memo (needs cached ParseResult) from fail-memo (existence-only, fits a set/bitmap, and fail is the high-frequency case under ordered choice); (3) passthrough skip for rules with no action and a single-NonTerminal body; (4) paged cut-eviction replacing the current O(n) erase_if sweep; (5) intrusive_ptr replacing shared_ptr in RuleState. Combined projected speedup 2-3×. Not pursued now: premature without profiling evidence; all five are mechanical changes that can land in a day once a bottleneck is real. |
+| Phase 5 tracer callbacks | Ruled out | The `on_rule_enter` / `on_rule_leave` / `on_rule_fail` callbacks (plus hit counter and per-rule timing) were a vestige of yhirose's no-AST `log` API. In peglib's model the full `ParseTreeNode` tree is already observable post-parse, Phase 1's furthest-failure + expected-set already pinpoints parse failures, and system profilers cover per-rule timing with finer granularity and zero instrumentation tax. The unique capability — packrat cache-hit ratio — is niche and ungovernable (PEG hit rates are structural). See Phase 5 section above. |
+| Atomic rules (`@{}` / `<...>`) | Ruled out; `lexeme` + `cut` already express it | pest bundles no-skip + no-inner-backtrack because it lacks independent primitives; peglib has `lexeme` (Phase 3) and `cut` (Phase 1) as orthogonal combinators the user composes directly. An auto-cutting `atomic()` sugar would hide a `ParseError`-throwing commitment inside sequence children, violating the "cut is a visible, programmer-authored commitment" contract. No real consumer demand. |
+| Bytecode VM execution | Strategically significant, deferred; opt-in layer-2 API when triggered | Not a performance-only item: it unlocks seven orthogonal value dimensions — grammar persistence (start latency), cross-language bindings, untrusted-grammar sandboxing (budgetable execution), AOT/JIT precondition, static-analysis/optimization passes, predictable memory budget, and observability/pedagogy via `disassemble()`. Performance itself is bounded at 1.5-2.5× (memo lookup and ParseTreeNode allocation remain). Existing API stays unchanged; new `compile()` + `parse_vm()` + `save/load_bytecode()` + `disassemble()` are opt-in. `set_action` signature preserved via an action table indexed by bytecode `ACTION` slots. Engineering cost ~3000 lines / 2-4 weeks; the dominant subtask is left-recursion seed-grow on the VM (no academic coverage of its interaction with cut + actions). Permanent cost is dual-track maintenance (every future semantic change implemented twice). Triggered by: non-C++ consumer, measured start-latency problem, untrusted-grammar request, or an explicit positioning shift to "general PEG platform". Until then, packrat memo data-structure optimizations deliver comparable speedup at far lower cost. |
+| ChildContainer Concept (storage-model unification) | Long-term architectural direction, not a Phase 4/6 prerequisite | The static DSL is the first-class citizen; DynExpr exists only to serve `GrammarCompiler::from_string`. Each expression type today has two implementations (static: `std::tuple` storage + compile-time recursive template; dynamic: `std::vector<std::shared_ptr<ParsingExprInterface>>` storage + runtime loop). Introducing a `ChildContainer<Context>` concept (`{ child_count(), parse_child(c, i), collect_child_refs(i, refs) }`) lets `SequenceExpr<C, Container>` take the storage as a template parameter, forces both containers to honor the same interface contract, and lets a single `sequence_parse_impl(Ctx, Container)` instantiate for either. **What it gains**: explicit interface alignment (drift becomes a compile error), Concept-constrained tests that automatically cover both paths, a single parse shell per expression. **What it cannot eliminate**: the two storage models (tuple vs vector is fundamental), the two algorithm bodies (compile-time recursion for inlining vs runtime loop for type-erased children), and therefore the per-new-expression-type dual-track cost that Phase 4/6 will still pay. Static-DSL zero-virtual-dispatch performance must be preserved (the whole point of keeping the static path), so the static container's `parse_child(i)` needs a compile-time dispatch (recursion or jump table over `index_sequence`); the dynamic container's is a vector index. Deferred: the immediate value is interface discipline, not code reduction; Phase 4/6's dominant cost is MetaGrammar + GrammarCompiler extension, not expression-type duplication.
+
+**Alternative considered — `constexpr std::array` instead of `std::tuple`**: evaluated and rejected. A homogeneous container (`std::array<T, N>`) cannot hold heterogeneous children without type-erasing them to a common `T` (shared_ptr<Interface> or variant), which collapses the static DSL back to DynExpr's virtual-dispatch model and destroys the static path's reason to exist. A `std::variant<TerminalExpr, SequenceExpr, ...>` array is a closed set (users cannot add expression types), hits recursive-variant problems (SequenceExpr contains a variant that contains SequenceExpr), and `std::visit` is a jump table anyway. A tuple-with-range-adapter lets `range-for` work but its `parse_at(i)` is still an indirect call because `i` is a runtime value. The divergence between static DSL and DynExpr is not at the storage layer — it is at compile-time-vs-runtime knowability of each child's type, which no container choice can erase. |
