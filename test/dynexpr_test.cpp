@@ -31,7 +31,7 @@ DynExpr<Ctx> dyn(std::shared_ptr<ParsingExprInterface<Ctx>> p)
 // ---------------------------------------------------------------------------
 TEST_CASE("[dynexpr] sequence-success-and-failure")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     std::vector<std::shared_ptr<ParsingExprInterface<Ctx>>> children;
     children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('a'));
     children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('b'));
@@ -67,7 +67,7 @@ TEST_CASE("[dynexpr] sequence-success-and-failure")
 // ---------------------------------------------------------------------------
 TEST_CASE("[dynexpr] alternation-first-success-wins")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     std::vector<std::shared_ptr<ParsingExprInterface<Ctx>>> children;
     children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('a'));
     children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('b'));
@@ -101,7 +101,7 @@ TEST_CASE("[dynexpr] alternation-first-success-wins")
 // ---------------------------------------------------------------------------
 TEST_CASE("[dynexpr] repeat-zero-or-more")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     auto child = std::make_shared<TerminalExpr<Ctx, char>>('a');
     // * : min=0, max=-1
     DynRepeatExpr<Ctx> star{child, 0, -1};
@@ -123,7 +123,7 @@ TEST_CASE("[dynexpr] repeat-zero-or-more")
 
 TEST_CASE("[dynexpr] repeat-one-or-more")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     auto child = std::make_shared<TerminalExpr<Ctx, char>>('a');
     // + : min=1, max=-1
     DynRepeatExpr<Ctx> plus{child, 1, -1};
@@ -144,7 +144,7 @@ TEST_CASE("[dynexpr] repeat-one-or-more")
 
 TEST_CASE("[dynexpr] repeat-optional")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     auto child = std::make_shared<TerminalExpr<Ctx, char>>('a');
     // ? : min=0, max=1
     DynRepeatExpr<Ctx> opt{child, 0, 1};
@@ -170,7 +170,7 @@ TEST_CASE("[dynexpr] repeat-optional")
 // ---------------------------------------------------------------------------
 TEST_CASE("[dynexpr] and-predicate-zero-width")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     auto child = std::make_shared<TerminalExpr<Ctx, char>>('a');
     DynAndExpr<Ctx> a{child};
 
@@ -182,7 +182,7 @@ TEST_CASE("[dynexpr] and-predicate-zero-width")
 
 TEST_CASE("[dynexpr] not-predicate-zero-width")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     auto child = std::make_shared<TerminalExpr<Ctx, char>>('a');
     DynNotExpr<Ctx> n{child};
 
@@ -206,7 +206,7 @@ TEST_CASE("[dynexpr] not-predicate-zero-width")
 // ---------------------------------------------------------------------------
 TEST_CASE("[dynexpr] handle-interop-with-dsl")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     // A DynExpr wrapping a terminal can be sequenced with a static terminal
     // via the public operator>>. This is what GrammarCompiler will do.
     auto term_a = std::make_shared<TerminalExpr<Ctx, char>>('a');

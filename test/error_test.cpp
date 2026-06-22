@@ -8,7 +8,7 @@
 using namespace peg;
 
 // Concrete Context type alias for Grammar template argument.
-using Ctxt = Context<std::span<const char>>;
+using Ctxt = Context<char>;
 
 // ---------------------------------------------------------------------------
 // ParseError.h / Context error tracking tests
@@ -297,7 +297,7 @@ TEST_CASE("grammar-auto-names-rules")
     Context context(input);
 
     // Grammar::operator[] auto-names the rule from the map key.
-    Grammar<Ctxt> g;
+    Grammar<char> g;
     g["my_digit"] = peg::terminal('0') | peg::terminal('1');
     (void)context;
 
@@ -310,7 +310,7 @@ TEST_CASE("grammar-set-label-works")
     std::string input = "x";
     Context context(input);
 
-    Grammar<Ctxt> g;
+    Grammar<char> g;
     g["my_thing"] = peg::terminal('z');
     g["my_thing"].set_label("a specific thing");
     (void)context;

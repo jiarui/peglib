@@ -47,17 +47,17 @@ TEST_CASE("value-stack-default-node-type-is-monostate")
 
 TEST_CASE("value-stack-custom-node-type")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     static_assert(std::is_same_v<MyContext::node_type, IntNode>);
 
     std::string input = "4";
     MyContext context(input);
 
     using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["num"] = DigitTerm({'0', '9'});
     g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
-        char c = ctx.get_input()[node->start_offset];
+        char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
 
@@ -72,13 +72,13 @@ TEST_CASE("value-stack-clear")
     // exists; each parse produces an independent ParseResult.tree with no
     // shared mutable state to clear. Verify that successive parses do not
     // interfere with one another's trees.
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
 
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["num"] = DigitTerm({'0', '9'});
     g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
-        char c = ctx.get_input()[node->start_offset];
+        char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
 
@@ -100,7 +100,7 @@ TEST_CASE("value-stack-clear")
 
 TEST_CASE("value-stack-action-result-pushed")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
 
     std::string input = "42";
     MyContext context(input);
@@ -109,10 +109,10 @@ TEST_CASE("value-stack-action-result-pushed")
     // Construct a TerminalExpr that matches any digit using std::set<char>.
     std::set<char> digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
     using DigitTerminal = TerminalExpr<MyContext, std::set<char>>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["num"] = DigitTerminal(digits);
     g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
-        char c = ctx.get_input()[node->start_offset];
+        char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
 
@@ -130,11 +130,11 @@ TEST_CASE("value-stack-action-result-pushed")
 TEST_CASE("value-stack-monostate-action-returns-default")
 {
     // Default Context: action must return std::monostate.
-    using DefaultCtxt = Context<std::span<const char>>;
+    using DefaultCtxt = Context<char>;
     std::string input = "a";
     DefaultCtxt context(input);
 
-    Grammar<DefaultCtxt> g;
+    Grammar<char> g;
     g["rule"] = terminal('a');
     g["rule"].set_action([](DefaultCtxt& /*ctx*/, DefaultCtxt::ParseTreeNodePtr /*node*/) {
         return std::monostate{};
@@ -157,15 +157,15 @@ TEST_CASE("value-stack-monostate-action-returns-default")
 
 TEST_CASE("concept-default-context-satisfies-pegcontext")
 {
-    using C = Context<std::span<const char>>;
+    using C = Context<char>;
     static_assert(PegContext<C>);
-    static_assert(is_peg_context_v<std::span<const char>, std::monostate>);
+    static_assert(is_peg_context_v<char, std::monostate>);
     CHECK(PegContext<C>);
 }
 
 TEST_CASE("concept-custom-context-satisfies-pegcontext")
 {
-    using C = Context<std::span<const char>, IntNode>;
+    using C = Context<char, IntNode>;
     static_assert(PegContext<C>);
     CHECK(PegContext<C>);
 }
@@ -179,7 +179,11 @@ TEST_CASE("concept-int-does-not-satisfy-pegcontext")
 
 TEST_CASE("concept-filesource-context-satisfies-pegcontext")
 {
-    using C = Context<FileSource<char>>;
+    // After source erasure, a FileSource-backed Context is the same type as a
+    // span-backed one: Context<char>. The distinction lives in the
+    // type-erased InputSourceBase held inside, not in the Context type.
+    // Verify it still satisfies PegContext and can actually drive a parse.
+    using C = Context<char>;
     static_assert(PegContext<C>);
     CHECK(PegContext<C>);
 }
@@ -213,16 +217,16 @@ static_assert(!PegContext<BadContextNoCut>, "a Context missing the cut API must 
 
 TEST_CASE("value-stack-rollback-on-sequence-failure")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["digit"] = DigitTerm({'0', '9'});
     g["digit"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
-        return IntNode{ctx.get_input()[node->start_offset] - '0'};
+        return IntNode{ctx.at(node->start_offset) - '0'};
     });
     g["nonzero"] = DigitTerm({'1', '9'});
     g["nonzero"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
-        return IntNode{ctx.get_input()[node->start_offset] - '0'};
+        return IntNode{ctx.at(node->start_offset) - '0'};
     });
     // "fail_seq" succeeds only on "<digit><nonzero>"; on "11" the second
     // child ('nonzero' expects 1-9; '1' matches) succeeds, but on "1x" the
@@ -250,9 +254,9 @@ TEST_CASE("value-stack-rollback-on-sequence-failure")
 
 TEST_CASE("value-stack-rollback-on-alternation-failure")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     using ATerm = TerminalExpr<MyContext, char>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
     g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     g["b_node"] = ATerm('b');
@@ -292,9 +296,9 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
 
 TEST_CASE("value-stack-rollback-on-not-predicate")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     using ATerm = TerminalExpr<MyContext, char>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
     g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     // !a_node succeeds (because lookahead doesn't match), and must leave
@@ -310,9 +314,9 @@ TEST_CASE("value-stack-rollback-on-not-predicate")
 
 TEST_CASE("value-stack-rollback-on-and-predicate")
 {
-    using MyContext = Context<std::span<const char>, IntNode>;
+    using MyContext = Context<char, IntNode>;
     using ATerm = TerminalExpr<MyContext, char>;
-    Grammar<MyContext> g;
+    Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
     g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
     // &a_node succeeds (lookahead matches 'a'), and must leave zero children

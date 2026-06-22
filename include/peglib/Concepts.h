@@ -57,12 +57,11 @@ concept PegContext =
         { c.ended() } -> std::convertible_to<bool>;
         { c.state() } -> std::same_as<typename C::State>;
         { c.state(s) } -> std::same_as<void>;
-        // get_input() returns a const reference to the underlying source. Actions
-        // index into it (get_input()[offset]) and iterate it; we only require the
-        // expression to be well-formed, not a specific type — the concrete return
-        // type is the InputSource template argument, which is not a public
-        // typedef.
-        cc.get_input();
+        // Character / slice access (replaces the old get_input() that exposed
+        // the underlying source). Actions read matched text via substr().
+        { c.current() } -> std::same_as<typename C::value_type>;
+        { c.at(pos) } -> std::same_as<typename C::value_type>;
+        { c.substr(pos, pos) } -> std::same_as<std::basic_string<typename C::value_type>>;
 
         // Memo ----------------------------------------------------------------
         // rule_state returns {inserted?, RuleState&}; we only constrain the
@@ -86,21 +85,18 @@ concept PegContext =
         { c.take_error() } -> std::same_as<std::optional<Diagnostic>>;
     };
 
-// Static helpers: true iff the default Context specialization with the given
-// InputSource / NodeType satisfies PegContext. Provided for user-facing
-// static_asserts and self-checks.
-template<typename S, typename N>
-inline constexpr bool is_peg_context_v = PegContext<Context<S, N>>;
+// Static helper: true iff Context<CharT, NodeType> satisfies PegContext.
+template<typename CharT, typename NodeType>
+inline constexpr bool is_peg_context_v = PegContext<Context<CharT, NodeType>>;
 
-// Self-checks: the three Context specializations peglib ships with must all
-// satisfy PegContext. If one of these fails, the concept has drifted from the
-// real Context implementation and must be reconciled.
-static_assert(PegContext<Context<std::span<const char>>>,
-              "default span-backed Context must satisfy PegContext");
-static_assert(PegContext<Context<std::span<const char>, PegAstNodePtr>>,
+// Self-checks: the Context specializations peglib ships with must all satisfy
+// PegContext. If one of these fails, the concept has drifted from the real
+// Context implementation and must be reconciled.
+static_assert(PegContext<Context<char>>, "default char Context must satisfy PegContext");
+static_assert(PegContext<Context<char, PegAstNodePtr>>,
               "meta-grammar Context (PegAstNodePtr) must satisfy PegContext");
-static_assert(PegContext<Context<FileSource<char>>>,
-              "FileSource-backed Context must satisfy PegContext");
+static_assert(PegContext<Context<char32_t>>,
+              "char32_t Context must satisfy PegContext (Tier 1 char)");
 
 // Negative self-check: a type that does not provide the Context API must NOT
 // satisfy PegContext. Guards against an over-permissive concept.

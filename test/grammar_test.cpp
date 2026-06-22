@@ -180,13 +180,13 @@ TEST_CASE("[grammar] forward-reference")
 // ---------------------------------------------------------------------------
 TEST_CASE("[grammar] semantic-action")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     Grammar<> g;
     g["digit"] = terminal('0', '9');
 
     int value = -1;
     g["digit"].set_action([&value](Ctx& ctx, Ctx::ParseTreeNodePtr node) -> std::monostate {
-        value = ctx.get_input()[node->start_offset] - '0';
+        value = ctx.at(node->start_offset) - '0';
         return {};
     });
 
@@ -201,7 +201,7 @@ TEST_CASE("[grammar] semantic-action")
 // ---------------------------------------------------------------------------
 TEST_CASE("[grammar] rule-chaining")
 {
-    using Ctx = Context<std::span<const char>>;
+    using Ctx = Context<char>;
     Grammar<> g;
     int count = 0;
     g["token"] = terminal('a');

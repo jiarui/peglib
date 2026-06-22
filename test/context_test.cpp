@@ -88,15 +88,17 @@ TEST_CASE("context-cut-stack-lifecycle")
     context.remove_cut();
 }
 
-TEST_CASE("context-get-input-returns-stable-reference")
+TEST_CASE("context-substr-and-at-read-by-offset")
 {
     std::string input = "xyz";
     Context context(input);
 
-    const auto& in1 = context.get_input();
-    const auto& in2 = context.get_input();
-    CHECK(in1.data() == in2.data());
-    CHECK(in1.size() == 3);
+    // input_size / at / substr replace the old get_input() accessors.
+    CHECK(context.input_size() == 3);
+    CHECK(context.at(0) == 'x');
+    CHECK(context.at(2) == 'z');
+    CHECK(context.substr(0, 3) == "xyz");
+    CHECK(context.substr(1, 2) == "yz");
 }
 
 // ---------------------------------------------------------------------------

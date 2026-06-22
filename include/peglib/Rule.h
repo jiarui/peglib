@@ -21,25 +21,25 @@ using parsers::ZeroOrMoreExpr;
 template<typename elem>
 auto terminal(const std::predicate<elem> auto& f)
 {
-    return TerminalExpr<Context<std::span<const elem>>, decltype(f)>(f);
+    return TerminalExpr<Context<elem>, decltype(f)>(f);
 }
 
 template<typename elem>
 auto terminal(elem value)
 {
-    return TerminalExpr<Context<std::span<const elem>>, elem>(value);
+    return TerminalExpr<Context<elem>, elem>(value);
 }
 
 template<typename elem>
 auto terminal(const std::set<elem>& values)
 {
-    return TerminalExpr<Context<std::span<const elem>>, std::set<elem>>(values);
+    return TerminalExpr<Context<elem>, std::set<elem>>(values);
 }
 
 template<typename elem>
 auto terminal(const std::array<elem, 2>& values)
 {
-    return TerminalExpr<Context<std::span<const elem>>, std::array<elem, 2>>(values);
+    return TerminalExpr<Context<elem>, std::array<elem, 2>>(values);
 }
 
 template<typename elem>
@@ -52,24 +52,23 @@ auto terminal(const elem& value_min, const elem& value_max)
 template<typename SeqType>
 auto terminalSeq(const SeqType& valueSeq)
 {
-    return TerminalSeqExpr<Context<std::span<const typename SeqType::value_type>>, SeqType>(
-        valueSeq);
+    return TerminalSeqExpr<Context<typename SeqType::value_type>, SeqType>(valueSeq);
 }
 
 template<typename CharType>
 auto terminalSeq(const CharType* str)
 {
-    return TerminalSeqExpr<Context<std::span<const CharType>>, std::basic_string<CharType>>(
+    return TerminalSeqExpr<Context<CharType>, std::basic_string<CharType>>(
         std::basic_string<CharType>{str});
 }
 
-template<typename C = Context<std::span<const std::string::value_type>>>
+template<typename C = Context<char>>
 auto empty()
 {
     return EmptyExpr<C>();
 }
 
-template<typename C = Context<std::span<const std::string::value_type>>>
+template<typename C = Context<char>>
 auto cut()
 {
     return CutExpr<C>();

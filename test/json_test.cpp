@@ -36,7 +36,7 @@ namespace json_grammar
 inline Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
-    auto cut_ = cut<Context<std::span<const char>>>();
+    auto cut_ = cut<Context<char>>();
 
     // Whitespace: space, tab, newline, carriage return. (Phase 3 will
     // introduce Context::set_skipper so users won't need to thread this

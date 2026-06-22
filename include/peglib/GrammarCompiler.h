@@ -38,8 +38,8 @@ namespace peg
 class GrammarCompiler
 {
 public:
-    using DefaultCtx = Context<std::span<const char>>;
-    using DefaultGrammar = Grammar<DefaultCtx>;
+    using DefaultCtx = Context<char>;
+    using DefaultGrammar = Grammar<char>;
 
     // Parse PEG text and compile into a working Grammar.
     // Throws peg::ParseError if the text is not valid PEG.

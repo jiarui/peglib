@@ -4,15 +4,17 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <span>
 #include <stack>
+#include <string>
 #include <tuple>
 #include <variant>
 #include <vector>
 
-#include "FileSource.h"
+#include "InputSource.h"
 #include "ParseError.h"
 namespace peg
 {
@@ -26,51 +28,56 @@ template<typename Context>
 struct Rule;
 } // namespace parsers
 
-// std::string std::vector file
-
-template<typename T>
-concept InputSourceType = requires(T t) {
-    { t.begin() };
-    { t.end() };
-    typename T::value_type;
-    typename T::iterator;
-};
-
-template<InputSourceType InputType>
-struct ContextInputSource
-{
-    using type = std::span<const typename InputType::value_type>;
-};
-
-template<typename vt>
-struct ContextInputSource<FileSource<vt>>
-{
-    using type = FileSource<vt>;
-};
-
-// Does the given InputSource support `release_before` (i.e. cut-driven
-// buffer eviction)? Contiguous span-backed sources do not; only FileSource
-// does, because it owns the only paged/evictable storage.
-template<typename>
-inline constexpr bool is_context_releasable_v = false;
-
-template<typename vt>
-inline constexpr bool is_context_releasable_v<FileSource<vt>> = true;
-
-template<InputSourceType InputSource, typename NodeType = std::monostate>
+// ===========================================================================
+// Context: the parse state carried through every expression's parse() call.
+//
+// Three orthogonal axes are now cleanly separated:
+//   - CharT   : the character type (char, char32_t, ...). Determines matching
+//               semantics and the terminal literal types.
+//   - NodeType: the semantic-action product type stored on ParseTreeNode.
+//               std::monostate (default) = pure recognizer; a value type =
+//               lightweight product; std::shared_ptr<T> = polymorphic shared
+//               AST. The library does not force a storage policy on NodeType.
+//   - Source  : the input storage strategy. Erased behind InputSourceBase;
+//               SpanSource (contiguous, zero-virtual-call hot path) or
+//               FileSourceSource (paged, cut-evictable). Selected at
+//               construction, invisible to the template signature.
+//
+// The source is type-erased so that a single Context<CharT, NodeType> can
+// drive either storage strategy. SpanSource fills a raw-pointer cache
+// (m_fast_data) that the per-character hot path indexes directly — zero
+// virtual dispatch for the common in-memory case.
+// ===========================================================================
+template<typename CharT, typename NodeType = std::monostate>
 struct Context
 {
     using node_type = NodeType;
+    using value_type = CharT;
+    using char_type = CharT;
 
-    // Construct from a contiguous range (std::string, std::vector, ...).
-    // The Context stores a std::span into `t` — it does NOT copy. The caller
-    // must keep the input alive for the Context's lifetime. For a self-
-    // contained copy, use Grammar::parse_string (which makes its own string).
-    // Passing a temporary here dangles silently.
-    template<typename InputType>
-    Context(const InputType& t)
-        : m_input{std::span(t)}, m_position{0}, m_last_cut{0},
-          m_input_size{static_cast<std::size_t>(m_input.end() - m_input.begin())}
+    // -----------------------------------------------------------------------
+    // Construction.
+    //
+    // (1) From a contiguous range (std::string, std::vector, ...): the
+    //     Context stores a non-owning SpanSource pointing into `t`. The
+    //     caller must keep the input alive for the Context's lifetime.
+    //     Passing a temporary here dangles silently. For a self-contained
+    //     copy, use Grammar::parse_string (which makes its own string).
+    //
+    // (2) From a FileSource rvalue: the Context takes ownership (moved into
+    //     a FileSourceSource adapter). No lifetime obligation on the caller.
+    // -----------------------------------------------------------------------
+    template<typename Range>
+    Context(const Range& t)
+        : m_input{std::make_unique<SpanSource<CharT>>(std::span<const CharT>(t).data(),
+                                                      std::span<const CharT>(t).size())},
+          m_fast_data{m_input->contiguous_data()}, m_input_size{m_input->size()}
+    {}
+
+    template<typename C>
+    Context(FileSource<C>&& fs)
+        : m_input{std::make_unique<FileSourceSource<C>>(std::move(fs))}, m_fast_data{nullptr},
+          m_input_size{m_input->size()}
     {}
 
     // A Context owns a memo table, cut stack, and (for FileSource) paged
@@ -83,17 +90,7 @@ struct Context
     Context(Context&&) noexcept = default;
     Context& operator=(Context&&) noexcept = default;
 
-    using iterator = typename InputSource::iterator;
-    using value_type = typename InputSource::value_type;
-    using NonTerminalType = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
-
-    // Position within the input is tracked as a byte/item offset (std::size_t)
-    // rather than an iterator. This decouples the memo key and all position
-    // state from the InputSource's iterator type, which is the prerequisite
-    // for the source-erasure refactor (Phase 2). For span-backed sources the
-    // offset is pointer-difference-equivalent; for FileSource the iterator's
-    // ordering (FileSource.h) is already defined in terms of the same size_t
-    // m_pos, so the migration is semantically exact.
+    using NonTerminalType = peg::parsers::NonTerminal<Context<CharT, NodeType>>;
 
     // -------------------------------------------------------------------
     // ParseTreeNode: immutable record of a successful match.
@@ -152,8 +149,7 @@ struct Context
         }
     };
 
-    // The input length, in items. Computed once at construction; used by
-    // ended()/next()/reset() so they no longer need to compare iterators.
+    // The input length, in items. Computed once at construction.
     std::size_t input_size() const noexcept { return m_input_size; }
 
     State state() { return State{m_position}; }
@@ -162,21 +158,37 @@ struct Context
 
     bool ended() const noexcept { return m_position >= m_input_size; }
 
-    // Current position as a byte/item offset. Replaces the iterator-returning
-    // mark(); all position state is now offset-based.
+    // Current position as a byte/item offset.
     std::size_t mark() const noexcept { return m_position; }
 
-    // Value at the current position. TerminalExpr / TerminalSeqExpr use this
-    // instead of dereferencing an iterator. Dispatches to the contiguous
-    // buffer (span) or the paged accessor (FileSource) at compile time.
+    // Value at the current position. Uses the contiguous cache when available
+    // (span-backed — zero virtual dispatch); falls back to the virtual at()
+    // for paged sources (FileSource).
     value_type current() const
     {
         assert(m_position < m_input_size && "current() past end of input");
-        if constexpr (is_context_releasable_v<InputSource>) {
-            return m_input.at(m_position);
-        } else {
-            return m_input[m_position];
+        if (m_fast_data) {
+            return m_fast_data[m_position];
         }
+        return m_input->at(m_position);
+    }
+
+    // Value at an arbitrary offset. Same fast-path logic as current().
+    value_type at(std::size_t offset) const
+    {
+        assert(offset < m_input_size && "at() past end of input");
+        if (m_fast_data) {
+            return m_fast_data[offset];
+        }
+        return m_input->at(offset);
+    }
+
+    // Slice [offset, offset+count) as an owned string. Semantic actions use
+    // this to extract matched text by offset (replacing the old
+    // get_input().data() + offset idiom that only worked for span sources).
+    std::basic_string<CharT> substr(std::size_t offset, std::size_t count) const
+    {
+        return m_input->substr(offset, count);
     }
 
     void next() noexcept
@@ -195,8 +207,6 @@ struct Context
         assert(pos <= m_input_size && "reset past end of input");
         m_position = pos;
     }
-
-    const InputSource& get_input() const { return m_input; }
 
     std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, std::size_t pos)
     {
@@ -250,9 +260,9 @@ struct Context
                 const auto& [pos, record] = item;
                 return pos < m_last_cut;
             });
-            if constexpr (is_context_releasable_v<InputSource>) {
-                m_input.release_before(m_last_cut);
-            }
+            // Virtual dispatch: no-op for SpanSource, evicts pages for
+            // FileSourceSource. Replaces the old if-constexpr trait branch.
+            m_input->release_before(m_last_cut);
         }
         m_cut.pop();
     }
@@ -304,13 +314,11 @@ struct Context
         return diag;
     }
 
-    template<typename value_type>
-    Context(FileSource<value_type>&& s)
-        : m_input{std::move(s)}, m_position{0}, m_last_cut{0}, m_input_size{m_input.size()}
-    {}
-
 protected:
-    InputSource m_input;
+    std::unique_ptr<InputSourceBase<CharT>> m_input;
+    // Non-null for contiguous (span) sources, null for paged (FileSource).
+    // Cached at construction so current()/at() skip the virtual dispatch.
+    const CharT* m_fast_data;
     std::size_t m_position = 0;
     std::size_t m_last_cut = 0;
     std::size_t m_input_size = 0;
@@ -323,13 +331,14 @@ protected:
     bool m_has_error = false;
 };
 
-template<typename value_type>
+template<typename CharT>
 auto from_file(const std::string& path, size_t bufsize)
 {
-    return Context<FileSource<value_type>>(FileSource<value_type>(bufsize, path));
+    return Context<CharT>(FileSource<CharT>(bufsize, path));
 }
 
-template<InputSourceType InputType>
-Context(const InputType&) -> Context<typename ContextInputSource<InputType>::type>;
+// CTAD: Context(someString) deduces to Context<char>, etc.
+template<typename Range>
+Context(const Range&) -> Context<typename Range::value_type>;
 
 } // namespace peg

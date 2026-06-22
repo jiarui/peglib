@@ -87,6 +87,6 @@ using PegAstNodePtr = std::shared_ptr<PegAstNode>;
 // Context type used by the meta-grammar. NodeType is PegAstNodePtr so the
 // meta-grammar's actions can return PegAstNode values via the parse tree;
 // the default std::monostate users are unaffected.
-using PegParseCtx = Context<std::span<const char>, PegAstNodePtr>;
+using PegParseCtx = Context<char, PegAstNodePtr>;
 
 } // namespace peg

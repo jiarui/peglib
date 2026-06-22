@@ -142,8 +142,10 @@ TEST_CASE("sourcemap-filesource-equivalent-to-contiguous")
 
     SourceMap contiguous{std::string_view{full}};
 
-    auto filectx = from_file<char>(license_path, 4096);
-    const auto& fsource = filectx.get_input();
+    // SourceMap needs the raw FileSource for its line-prescan. Construct it
+    // directly rather than extracting it from a Context (Context type-erases
+    // the source behind InputSourceBase now).
+    FileSource<char> fsource{4096, license_path};
     SourceMap filed{fsource};
 
     CHECK(filed.num_lines() == contiguous.num_lines());

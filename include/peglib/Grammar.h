@@ -34,11 +34,12 @@ namespace peg
 // recursive grammars at the source — ~Grammar() needs no special handling.
 // The constraint is that Rule cannot outlive its Grammar (intentional).
 // ---------------------------------------------------------------------------
-template<PegContext Ctx = Context<std::span<const char>>>
+template<typename CharT = char, typename NodeType = std::monostate>
+    requires PegContext<Context<CharT, NodeType>>
 class Grammar
 {
 public:
-    using Context = Ctx;
+    using Context = peg::Context<CharT, NodeType>;
     using Rule = parsers::Rule<Context>;
     using NonTerminalType = parsers::NonTerminal<Context>;
 
