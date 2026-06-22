@@ -353,5 +353,49 @@ struct CutExpr : ParsingExpr<Context, CutExpr<Context>>
     }
 };
 
+// ---------------------------------------------------------------------------
+// LexemeExpr: disable auto-skip for a sub-expression's subtree.
+//
+// When a skipper is configured (Grammar::set_skipper), auto-skip fires
+// between adjacent sequence children and between repetition iterations.
+// For tokens whose characters must be contiguous (numbers, identifiers,
+// string literals), wrap the token body in lexeme(...) to suppress
+// auto-skip within it:
+//
+//   g["number"]  = lexeme(+terminal('0', '9'));   // "12 34" -> matches "12"
+//   g["ident"]   = lexeme(terminal('a','z') >> *terminal('a','z'));
+//
+// Implemented as a save/restore of Context::skip_enabled via ScopeGuard,
+// so lexeme nests safely (lexeme inside lexeme is a no-op-on-the-flag).
+// Even if the wrapped expression throws peg::ParseError, the ScopeGuard
+// destructor restores the prior skip_enabled before stack unwinding
+// continues.
+// ---------------------------------------------------------------------------
+template<typename Context, typename Child>
+struct LexemeExpr : ParsingExpr<Context, LexemeExpr<Context, Child>>
+{
+    using ParseResult = typename ParsingExpr<Context, LexemeExpr<Context, Child>>::ParseResult;
+
+    explicit LexemeExpr(Child child) : m_child(std::move(child)) {}
+
+    [[nodiscard]] const Child& child() const noexcept { return m_child; }
+
+    ParseResult parse(Context& context) const override
+    {
+        bool prev = context.skip_enabled();
+        context.skip_enabled(false);
+        ScopeGuard restore{[&context, prev]() { context.skip_enabled(prev); }};
+        return m_child.parse(context);
+    }
+
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        m_child.collect_rule_refs(refs);
+    }
+
+protected:
+    Child m_child;
+};
+
 } // namespace parsers
 } // namespace peg

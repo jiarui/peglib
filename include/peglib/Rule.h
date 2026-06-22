@@ -8,6 +8,7 @@ using parsers::AlternationExpr;
 using parsers::AndExpr;
 using parsers::CutExpr;
 using parsers::EmptyExpr;
+using parsers::LexemeExpr;
 using parsers::NotExpr;
 using parsers::NTimesExpr;
 using parsers::OneOrMoreExpr;
@@ -72,6 +73,24 @@ template<typename C = Context<char>>
 auto cut()
 {
     return CutExpr<C>();
+}
+
+// lexeme(expr): disable auto-skip within `expr`'s subtree.
+//
+// When a Grammar has a skipper configured (Grammar::set_skipper), the
+// skipper fires between adjacent sequence elements and between
+// repetition iterations. lexeme(...) locally suppresses that for the
+// wrapped expression, so tokens whose characters must be contiguous
+// (numbers, identifiers, string literals) are not split by inter-token
+// whitespace.
+//
+// The template parameter (the Context type) is deduced from `expr` via
+// ParsingExpr::context_type; users never write it explicitly:
+//   g["number"] = lexeme(+terminal('0','9'));
+template<typename Expr>
+auto lexeme(const Expr& expr)
+{
+    return LexemeExpr<typename Expr::context_type, Expr>(expr);
 }
 
 // ---------------------------------------------------------------------------
