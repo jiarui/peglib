@@ -116,10 +116,15 @@ struct FileSource
 
     // Release buffer content strictly before `pos`. Called by Context on cut.
     // After release, any iterator with position < pos must not be dereferenced.
-    void release_before(iterator pos)
+    void release_before(iterator pos) { release_before(pos.m_pos); }
+
+    // Offset-based overload. Context tracks positions as std::size_t offsets
+    // (Phase 1 refactor), so this is the primary entry point; the iterator
+    // overload above delegates here.
+    void release_before(std::size_t pos)
     {
         for (int idx = 0; idx < 2; ++idx) {
-            if (m_bufs[idx].m_buf_to <= pos.m_pos) {
+            if (m_bufs[idx].m_buf_to <= pos) {
                 m_bufs[idx].clear();
             }
         }

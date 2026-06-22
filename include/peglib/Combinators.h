@@ -36,9 +36,9 @@ struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
     {
         auto state = context.state();
         auto node = std::make_shared<typename Context::ParseTreeNode>();
-        node->start_offset = context.offset_of(context.mark());
+        node->start_offset = context.mark();
         if (parseSeq<0>(context, node)) {
-            node->end_offset = context.offset_of(context.mark());
+            node->end_offset = context.mark();
             return {true, node};
         }
         context.state(state);
@@ -147,7 +147,7 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     }};
     auto initState = context.state();
     auto node = std::make_shared<typename Context::ParseTreeNode>();
-    node->start_offset = context.offset_of(context.mark());
+    node->start_offset = context.mark();
 
     std::size_t loopCount = 0;
     bool exited_via_failure = false;
@@ -192,7 +192,7 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
             throw ParseError{context.furthest_failure_pos(), context.expected()};
         }
     }
-    node->end_offset = context.offset_of(context.mark());
+    node->end_offset = context.mark();
     return {true, node};
 }
 

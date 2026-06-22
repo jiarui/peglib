@@ -39,7 +39,7 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
     {
         auto state = context.state();
         auto node = std::make_shared<typename Context::ParseTreeNode>();
-        node->start_offset = context.offset_of(context.mark());
+        node->start_offset = context.mark();
         for (const auto& child : m_children) {
             auto result = child->parse(context);
             if (!result.success) {
@@ -49,7 +49,7 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
             if (result.tree)
                 node->children.push_back(result.tree);
         }
-        node->end_offset = context.offset_of(context.mark());
+        node->end_offset = context.mark();
         return {true, node};
     }
 

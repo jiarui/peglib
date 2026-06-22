@@ -97,7 +97,7 @@ TEST_CASE("lua-test-start")
             Context context(t);
             auto start = context.mark();
             CHECK(g.parse("unop", context));
-            CHECK(std::string(start, context.mark()) == t);
+            CHECK(std::string(context.get_input().data() + start, context.mark() - start) == t);
         }
     }
     {
@@ -105,14 +105,14 @@ TEST_CASE("lua-test-start")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("expr", context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
     {
         std::string input = R"(a=10+10+10)";
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse(context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
 }
 
@@ -124,6 +124,6 @@ TEST_CASE("lua-keyword-or-name")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("bbbb", context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
 }

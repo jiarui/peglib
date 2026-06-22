@@ -105,8 +105,8 @@ public:
             node = std::make_shared<typename Context::ParseTreeNode>();
         }
         node->name = m_name;
-        node->start_offset = context.offset_of(start_pos);
-        node->end_offset = context.offset_of(context.mark());
+        node->start_offset = start_pos;
+        node->end_offset = context.mark();
 
         // Execute semantic action (if any). The action receives the node
         // and can read node->children[i]->value to access sub-rule results.
@@ -132,7 +132,7 @@ public:
 
 protected:
     ParseResult parseImpl(Context& context,
-                          typename Context::iterator start_pos,
+                          std::size_t start_pos,
                           typename Context::RuleState& rule_state) const
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");

@@ -17,10 +17,10 @@ TEST_CASE("context-basic-position")
     Context context(input);
 
     CHECK_FALSE(context.ended());
-    CHECK(*context.mark() == 'h');
+    CHECK(context.current() == 'h');
 
     context.next();
-    CHECK(*context.mark() == 'e');
+    CHECK(context.current() == 'e');
 
     for (int i = 0; i < 10; ++i)
         context.next();
@@ -34,15 +34,15 @@ TEST_CASE("context-state-save-restore")
 
     context.next();
     context.next();
-    CHECK(*context.mark() == 'c');
+    CHECK(context.current() == 'c');
 
     auto s = context.state();
     context.next();
     context.next();
-    CHECK(*context.mark() == 'e');
+    CHECK(context.current() == 'e');
 
     context.state(s);
-    CHECK(*context.mark() == 'c');
+    CHECK(context.current() == 'c');
 }
 
 TEST_CASE("context-reset-allows-rewind-past-last-cut")
@@ -60,18 +60,17 @@ TEST_CASE("context-reset-allows-rewind-past-last-cut")
     context.next();
     context.next();
     context.next();
-    CHECK(*context.mark() == 'd');
+    CHECK(context.current() == 'd');
     context.init_cut();
     context.cut(true); // commits; m_last_cut advances on remove_cut
     context.remove_cut();
 
     // Rewind to the beginning — strictly before m_last_cut. Legal per contract.
-    auto begin = context.get_input().begin();
-    context.reset(begin);
-    CHECK(*context.mark() == 'a');
+    context.reset(0);
+    CHECK(context.current() == 'a');
     // And we can walk forward again from scratch (memo was erased, re-parse OK).
     context.next();
-    CHECK(*context.mark() == 'b');
+    CHECK(context.current() == 'b');
 }
 
 TEST_CASE("context-cut-stack-lifecycle")
@@ -131,9 +130,9 @@ TEST_CASE("context-release-before-invoked-for-filesource")
     constexpr size_t tiny_buffer = 64;
     auto context = from_file<char>(license_path, tiny_buffer);
 
-    // Capture start character before any eviction.
+    // Capture start offset and character before any eviction.
     auto start = context.mark();
-    char start_char = *start;
+    char start_char = context.current();
 
     // Walk forward past the first buffer window so release_before will
     // actually evict buffer 0 (m_buf_to <= 64 < 100).
@@ -151,6 +150,6 @@ TEST_CASE("context-release-before-invoked-for-filesource")
     // has been cleared. Re-reading from start must still produce the
     // same character (FileSource re-reads from disk on cache miss).
     context.reset(start);
-    char c = *context.mark();
+    char c = context.current();
     CHECK(c == start_char);
 }

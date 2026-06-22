@@ -29,7 +29,7 @@ TEST_CASE("filesource-reads-file-consistently-with-ifstream")
 
     auto expected_it = expected.begin();
     while (!context.ended()) {
-        CHECK(*context.mark() == *expected_it);
+        CHECK(context.current() == *expected_it);
         ++expected_it;
         context.next();
     }

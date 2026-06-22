@@ -75,12 +75,12 @@ TEST_CASE("[negative] filesource-non-char-value-type")
 
     auto ctx = from_file<std::uint16_t>(path, 64);
     CHECK_FALSE(ctx.ended());
-    CHECK(*ctx.mark() == 1000);
+    CHECK(ctx.current() == 1000);
     ctx.next();
-    CHECK(*ctx.mark() == 2000);
+    CHECK(ctx.current() == 2000);
     ctx.next();
     ctx.next();
-    CHECK(*ctx.mark() == 4000);
+    CHECK(ctx.current() == 4000);
     ctx.next();
     CHECK(ctx.ended());
 

@@ -52,7 +52,7 @@ TEST_CASE("[dynexpr] sequence-success-and-failure")
         Ctx ctx(input);
         CHECK_FALSE(seq.parse(ctx));
         // On failure, position is restored to the start.
-        CHECK(ctx.mark() == ctx.get_input().begin());
+        CHECK(ctx.mark() == 0);
     }
     SUBCASE("fails on short input")
     {

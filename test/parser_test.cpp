@@ -17,7 +17,7 @@ TEST_CASE("empty-expression-always-succeeds")
     Context context(input);
     auto grammar = empty();
     CHECK(grammar.parse(context));
-    CHECK(*context.mark() == 'a'); // empty does not consume
+    CHECK(context.current() == 'a'); // empty does not consume
 }
 
 TEST_CASE("terminalseq-rollback-on-partial-match")
@@ -26,13 +26,13 @@ TEST_CASE("terminalseq-rollback-on-partial-match")
     Context context(input);
     auto grammar = terminalSeq("int");
     CHECK(grammar.parse(context));
-    CHECK(*context.mark() == 'x');
+    CHECK(context.current() == 'x');
 
     // A non-matching sequence must restore position.
     std::string input2 = "inx";
     Context context2(input2);
     CHECK_FALSE(terminalSeq("int").parse(context2));
-    CHECK(context2.mark() == context2.get_input().begin());
+    CHECK(context2.mark() == 0);
 }
 
 TEST_CASE("cut-committed-failure-surfaces-via-take-error")
@@ -71,7 +71,7 @@ TEST_CASE("repetition-stops-on-no-progress")
     Grammar<> g;
     g["g"] = *empty();
     CHECK(g.parse("g", context));
-    CHECK(*context.mark() == 'a');
+    CHECK(context.current() == 'a');
 }
 
 TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
@@ -91,7 +91,7 @@ TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
     Grammar<> g;
     g["g"] = *((&terminal('a')) >> cut());
     CHECK(g.parse("g", context));
-    CHECK(*context.mark() == 'a');
+    CHECK(context.current() == 'a');
 }
 
 TEST_CASE("terminalseq-records-expected-on-failure")

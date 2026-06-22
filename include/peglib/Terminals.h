@@ -24,7 +24,7 @@ struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueTy
     {}
     typename Context::ParseResult parse(Context& context) const override
     {
-        if (!context.ended() && symbolConsumable(*context.mark(), m_terminalValue)) {
+        if (!context.ended() && symbolConsumable(context.current(), m_terminalValue)) {
             context.next();
             return {true, nullptr};
         }
@@ -39,7 +39,7 @@ private:
     // Record the expected item at the current position for error reporting.
     void record_expected(Context& context) const
     {
-        std::size_t pos = context.offset_of(context.mark());
+        std::size_t pos = context.mark();
         // Visit the terminal value to produce an ExpectedItem.text.
         // We handle shapes in order of specificity:
         //   1. Single value (char): print as 'x'
@@ -94,7 +94,7 @@ struct TerminalSeqExpr : ParsingExpr<Context, TerminalSeqExpr<Context, SeqType>>
     {
         auto initState = context.state();
         for (const auto& i : m_terminalValues) {
-            if (!context.ended() && symbolConsumable(*context.mark(), i)) {
+            if (!context.ended() && symbolConsumable(context.current(), i)) {
                 context.next();
             } else {
                 context.state(initState);
@@ -112,7 +112,7 @@ private:
     // Record the expected sequence as a single Literal item.
     void record_expected(Context& context) const
     {
-        std::size_t pos = context.offset_of(context.mark());
+        std::size_t pos = context.mark();
         // Build a printable form of the sequence. We use std::string to
         // accumulate since SeqType is typically std::basic_string<char>.
         std::string text;

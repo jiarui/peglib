@@ -163,7 +163,7 @@ TEST_CASE("lua-lex-names")
         CHECK(ok);
         auto start = context.mark();
         CHECK(g.parse("names", context));
-        CHECK(std::string(start, context.mark()) == "print");
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == "print");
     }
 }
 
@@ -187,7 +187,7 @@ TEST_CASE("lua-lex-number")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("numeral", context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
 }
 
@@ -201,7 +201,7 @@ TEST_CASE("lua-lex-comment")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("comment", context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
 }
 
@@ -213,7 +213,7 @@ TEST_CASE("lua-lex-string")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("string_literal", context));
-        CHECK(std::string(start, context.mark()) == input);
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == input);
     }
 }
 
@@ -227,21 +227,21 @@ TEST_CASE("lua-lex-tokens")
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(std::string(start, context.mark()) == "print");
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == "print");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(std::string(start, context.mark()) == "(");
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == "(");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(std::string(start, context.mark()) == "'hello world'");
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == "'hello world'");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(std::string(start, context.mark()) == ")");
+        CHECK(std::string(context.get_input().data() + start, context.mark() - start) == ")");
     }
 }

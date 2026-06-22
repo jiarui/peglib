@@ -69,7 +69,8 @@ struct Context
     // Passing a temporary here dangles silently.
     template<typename InputType>
     Context(const InputType& t)
-        : m_input{std::span(t)}, m_position{m_input.begin()}, m_last_cut{m_position}
+        : m_input{std::span(t)}, m_position{0}, m_last_cut{0},
+          m_input_size{static_cast<std::size_t>(m_input.end() - m_input.begin())}
     {}
 
     // A Context owns a memo table, cut stack, and (for FileSource) paged
@@ -85,6 +86,14 @@ struct Context
     using iterator = typename InputSource::iterator;
     using value_type = typename InputSource::value_type;
     using NonTerminalType = peg::parsers::NonTerminal<Context<InputSource, NodeType>>;
+
+    // Position within the input is tracked as a byte/item offset (std::size_t)
+    // rather than an iterator. This decouples the memo key and all position
+    // state from the InputSource's iterator type, which is the prerequisite
+    // for the source-erasure refactor (Phase 2). For span-backed sources the
+    // offset is pointer-difference-equivalent; for FileSource the iterator's
+    // ordering (FileSource.h) is already defined in terms of the same size_t
+    // m_pos, so the migration is semantically exact.
 
     // -------------------------------------------------------------------
     // ParseTreeNode: immutable record of a successful match.
@@ -118,10 +127,10 @@ struct Context
 
     struct RuleState
     {
-        explicit RuleState(iterator pos) : m_last_pos{pos} {}
+        explicit RuleState(std::size_t pos) : m_last_pos{pos} {}
         RuleState(const RuleState&) = default;
         RuleState& operator=(const RuleState&) = default;
-        iterator m_last_pos;
+        std::size_t m_last_pos;
         // Cached ParseResult from the first successful parse at this
         // (position, rule) pair. On a memo hit, the caller receives this
         // cached result — including the tree and action value — without
@@ -132,8 +141,8 @@ struct Context
 
     struct State
     {
-        explicit State(iterator pos) : m_pos(pos) {}
-        iterator m_pos;
+        explicit State(std::size_t pos) : m_pos(pos) {}
+        std::size_t m_pos;
         // Comparable so combinators can detect zero-width progress
         // (e.g. a repetition body that matched without advancing) without
         // reaching into m_pos directly.
@@ -143,34 +152,53 @@ struct Context
         }
     };
 
+    // The input length, in items. Computed once at construction; used by
+    // ended()/next()/reset() so they no longer need to compare iterators.
+    std::size_t input_size() const noexcept { return m_input_size; }
+
     State state() { return State{m_position}; }
 
     void state(const State& state) { m_position = state.m_pos; }
 
-    bool ended() const { return m_position == m_input.end(); }
+    bool ended() const noexcept { return m_position >= m_input_size; }
 
-    iterator mark() const { return m_position; }
+    // Current position as a byte/item offset. Replaces the iterator-returning
+    // mark(); all position state is now offset-based.
+    std::size_t mark() const noexcept { return m_position; }
 
-    void next()
+    // Value at the current position. TerminalExpr / TerminalSeqExpr use this
+    // instead of dereferencing an iterator. Dispatches to the contiguous
+    // buffer (span) or the paged accessor (FileSource) at compile time.
+    value_type current() const
     {
-        if (m_position < m_input.end()) {
+        assert(m_position < m_input_size && "current() past end of input");
+        if constexpr (is_context_releasable_v<InputSource>) {
+            return m_input.at(m_position);
+        } else {
+            return m_input[m_position];
+        }
+    }
+
+    void next() noexcept
+    {
+        if (m_position < m_input_size) {
             ++m_position;
         }
     }
 
-    void reset(iterator pos)
+    void reset(std::size_t pos) noexcept
     {
         // Upper bound is always enforced. The lower bound (m_last_cut) is
         // NOT enforced: after a cut, memo data for earlier positions has
         // been intentionally released, but it is still valid to rewind
         // there and re-parse from scratch.
-        assert(pos <= m_input.end() && "reset past end of input");
+        assert(pos <= m_input_size && "reset past end of input");
         m_position = pos;
     }
 
     const InputSource& get_input() const { return m_input; }
 
-    std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, iterator pos)
+    std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, std::size_t pos)
     {
         auto [iter_records, ins] =
             m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
@@ -178,8 +206,9 @@ struct Context
         return std::tuple<bool, RuleState>{ok, iter->second};
     }
 
-    bool
-    update_rule_state(const NonTerminalType* rule, iterator start_pos, const RuleState& rule_state)
+    bool update_rule_state(const NonTerminalType* rule,
+                           std::size_t start_pos,
+                           const RuleState& rule_state)
     {
         auto memos = m_mem.find(start_pos);
         if (memos == m_mem.end()) {
@@ -198,9 +227,9 @@ struct Context
 
     struct CutRecord
     {
-        iterator pos;
+        std::size_t pos;
         bool cut = false;
-        CutRecord(iterator i, bool c) : pos{i}, cut{c} {}
+        CutRecord(std::size_t i, bool c) : pos{i}, cut{c} {}
     };
 
     void cut(bool c)
@@ -252,12 +281,6 @@ struct Context
         // else: pos < furthest — ignore
     }
 
-    // Convenience overload: takes iterator, converts to offset automatically.
-    void record_failure(iterator pos_it, ExpectedItem item)
-    {
-        record_failure(offset_of(pos_it), std::move(item));
-    }
-
     [[nodiscard]] std::size_t furthest_failure_pos() const noexcept
     {
         return m_furthest_failure_pos;
@@ -281,27 +304,17 @@ struct Context
         return diag;
     }
 
-    // Convert an iterator to a byte offset. Works for both span-backed
-    // (random-access iterators) and FileSource-backed (custom iterators).
-    [[nodiscard]] std::size_t offset_of(iterator it) const noexcept
-    {
-        if constexpr (is_context_releasable_v<InputSource>) {
-            return it.position();
-        } else {
-            return static_cast<std::size_t>(it - m_input.begin());
-        }
-    }
-
     template<typename value_type>
     Context(FileSource<value_type>&& s)
-        : m_input{std::move(s)}, m_position{m_input.begin()}, m_last_cut{m_position}
+        : m_input{std::move(s)}, m_position{0}, m_last_cut{0}, m_input_size{m_input.size()}
     {}
 
 protected:
     InputSource m_input;
-    iterator m_position;
-    iterator m_last_cut;
-    std::map<iterator, std::map<const NonTerminalType*, RuleState>> m_mem;
+    std::size_t m_position = 0;
+    std::size_t m_last_cut = 0;
+    std::size_t m_input_size = 0;
+    std::map<std::size_t, std::map<const NonTerminalType*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
 
     // Error tracking state

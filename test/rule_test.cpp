@@ -23,7 +23,7 @@ TEST_CASE("and-expression (lookahead)")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("does not match 'b'")
     {
@@ -31,7 +31,7 @@ TEST_CASE("and-expression (lookahead)")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -70,7 +70,7 @@ TEST_CASE("alternation-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -109,7 +109,7 @@ TEST_CASE("zero-or-more-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("empty input")
     {
@@ -117,7 +117,7 @@ TEST_CASE("zero-or-more-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -148,7 +148,7 @@ TEST_CASE("one-or-more-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("empty input (no match)")
     {
@@ -156,7 +156,7 @@ TEST_CASE("one-or-more-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -180,7 +180,7 @@ TEST_CASE("n-times-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == std::next(context.get_input().begin()));
+        CHECK(context.mark() == 1);
     }
     SUBCASE("2 * 'a' on 'a' fails")
     {
@@ -190,7 +190,7 @@ TEST_CASE("n-times-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("2 * 'a' on 'aa' succeeds")
     {
@@ -215,7 +215,7 @@ TEST_CASE("not-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("does not match 'a'")
     {
@@ -223,7 +223,7 @@ TEST_CASE("not-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK_FALSE(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -246,7 +246,7 @@ TEST_CASE("optional-expression")
         Context context(input);
         bool ok = g.parse("grammar", context);
         CHECK(ok);
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -305,7 +305,7 @@ TEST_CASE("non-terminal-recursion")
         const std::string input = "b";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -326,14 +326,14 @@ TEST_CASE("sequence-expression")
         const std::string input = "dabc";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
     SUBCASE("adbc (no match)")
     {
         const std::string input = "adbc";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -354,7 +354,7 @@ TEST_CASE("terminal-range-expression")
         const std::string input = "b";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -389,7 +389,7 @@ TEST_CASE("terminal-set-expression")
         const std::string input = "b";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -410,7 +410,7 @@ TEST_CASE("terminal-seq-expression")
         const std::string input = "b";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
@@ -431,7 +431,7 @@ TEST_CASE("terminal-predicate-expression")
         const std::string input = "b";
         Context context(input);
         CHECK_FALSE(g.parse("grammar", context));
-        CHECK(context.mark() == context.get_input().begin());
+        CHECK(context.mark() == 0);
     }
 }
 
