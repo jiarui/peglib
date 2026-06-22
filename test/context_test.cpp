@@ -125,12 +125,11 @@ TEST_CASE("context-release-before-invoked-for-filesource")
     // buffer content before the cut position. After release, re-reading
     // from earlier positions must still work (FileSource re-reads from disk).
     //
-    // We use a tiny 64-byte buffer so that advancing 100 positions puts
+    // We use a tiny 64-byte page so that advancing 100 positions puts
     // us past the first buffer window. release_before(pos=100) then
     // actually evicts buffer 0 (whose m_buf_to <= 64 <= 100).
     const std::string license_path = std::string(PEGLIB_TEST_DATA_DIR) + "/../LICENSE";
-    constexpr size_t tiny_buffer = 64;
-    auto context = from_file<char>(license_path, tiny_buffer);
+    auto context = from_file<char, 64>(license_path);
 
     // Capture start offset and character before any eviction.
     auto start = context.mark();

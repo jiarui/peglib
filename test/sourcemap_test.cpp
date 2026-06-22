@@ -145,7 +145,7 @@ TEST_CASE("sourcemap-filesource-equivalent-to-contiguous")
     // SourceMap needs the raw FileSource for its line-prescan. Construct it
     // directly rather than extracting it from a Context (Context type-erases
     // the source behind InputSourceBase now).
-    FileSource<char> fsource{4096, license_path};
+    FileSource<char, 4096> fsource{license_path};
     SourceMap filed{fsource};
 
     CHECK(filed.num_lines() == contiguous.num_lines());

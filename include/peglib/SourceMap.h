@@ -60,14 +60,19 @@ public:
     // Construct from a contiguous source (string_view, std::span<const char>, etc.)
     // Prescan is O(n). The SourceMap does NOT take ownership; caller must keep
     // `source` alive while line_view() is used.
-    explicit SourceMap(std::string_view source) : m_contiguous{source}, m_file_source{nullptr}
-    {
-        prescan();
-    }
+    explicit SourceMap(std::string_view source) : m_contiguous{source} { prescan(); }
 
-    // Construct from a FileSource. Reads through the FileSource once to
-    // populate line_starts; the FileSource must outlive this SourceMap.
-    explicit SourceMap(const FileSource<char>& source) : m_file_source{&source} { prescan_file(); }
+    // Construct from a FileSource<char, PageSize>. Reads through the FileSource
+    // once to populate line_starts; the FileSource must outlive this SourceMap.
+    // PageSize is deduced from the argument; the source is held type-erased so
+    // SourceMap itself stays non-templated.
+    template<std::size_t PageSize>
+    explicit SourceMap(const FileSource<char, PageSize>& source)
+        : m_file_source{&source}, m_file_size{&SourceMap::impl_size<FileSource<char, PageSize>>},
+          m_file_at{&SourceMap::impl_at<FileSource<char, PageSize>>}
+    {
+        prescan_file();
+    }
 
     SourceMap(const SourceMap&) = default;
     SourceMap(SourceMap&&) noexcept = default;
@@ -140,19 +145,19 @@ public:
         // FileSource path: compute byte range, re-read from disk.
         std::size_t start = m_line_starts[line - 1];
         std::size_t end;
-        std::size_t source_size = m_file_source->size();
+        std::size_t source_size = m_file_size(m_file_source);
         if (line < m_line_starts.size()) {
             end = m_line_starts[line] - 1; // skip \n
             if (end > start) {
                 // Peek at the byte before \n to check for \r.
-                if (m_file_source->at(end - 1) == '\r') {
+                if (m_file_at(m_file_source, end - 1) == '\r') {
                     --end;
                 }
             }
         } else {
             end = source_size;
             if (end > start) {
-                if (m_file_source->at(end - 1) == '\r') {
+                if (m_file_at(m_file_source, end - 1) == '\r') {
                     --end;
                 }
             }
@@ -160,7 +165,7 @@ public:
         std::string result;
         result.reserve(end - start);
         for (std::size_t i = start; i < end; ++i) {
-            result.push_back(m_file_source->at(i));
+            result.push_back(m_file_at(m_file_source, i));
         }
         return result;
     }
@@ -187,18 +192,37 @@ private:
     {
         m_line_starts.clear();
         m_line_starts.push_back(0);
-        std::size_t end_pos = m_file_source->size();
+        std::size_t end_pos = m_file_size(m_file_source);
         for (std::size_t i = 0; i < end_pos; ++i) {
-            char c = m_file_source->at(i);
+            char c = m_file_at(m_file_source, i);
             if (c == '\n') {
                 m_line_starts.push_back(i + 1);
             }
         }
     }
 
+    // Type-erased FileSource accessors. The concrete FileSource<char, PageSize>
+    // type varies by PageSize; these function pointers bridge to it without
+    // making SourceMap itself a template.
+    template<typename Fs>
+    static std::size_t impl_size(const void* p)
+    {
+        return static_cast<const Fs*>(p)->size();
+    }
+    template<typename Fs>
+    static char impl_at(const void* p, std::size_t i)
+    {
+        return static_cast<const Fs*>(p)->at(i);
+    }
+
+    using size_fn_t = std::size_t (*)(const void*);
+    using at_fn_t = char (*)(const void*, std::size_t);
+
     std::vector<std::size_t> m_line_starts;
-    std::string_view m_contiguous;           // empty for FileSource-backed maps
-    const FileSource<char>* m_file_source{}; // nullptr for contiguous maps
+    std::string_view m_contiguous; // empty for FileSource-backed maps
+    const void* m_file_source{};   // nullptr for contiguous maps
+    size_fn_t m_file_size{};       // valid iff m_file_source != nullptr
+    at_fn_t m_file_at{};           // valid iff m_file_source != nullptr
 };
 
 } // namespace peg

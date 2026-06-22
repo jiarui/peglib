@@ -88,11 +88,14 @@ private:
 // FileSourceSource: adapter for FileSource. Owns the FileSource by move,
 // forwarding offset-based access. Overrides release_before to drive the
 // cut-eviction that FileSource supports natively.
+//
+// PageSize is forwarded to FileSource (FixSizeBuffer: each page is a
+// fixed-size std::array, no per-page heap allocation).
 // ---------------------------------------------------------------------------
-template<typename CharT>
+template<typename CharT, std::size_t PageSize>
 struct FileSourceSource : InputSourceBase<CharT>
 {
-    explicit FileSourceSource(FileSource<CharT>&& fs) : m_fs{std::move(fs)} {}
+    explicit FileSourceSource(FileSource<CharT, PageSize>&& fs) : m_fs{std::move(fs)} {}
 
     CharT at(std::size_t offset) const override { return m_fs.at(offset); }
 
@@ -112,10 +115,10 @@ struct FileSourceSource : InputSourceBase<CharT>
 
     // Expose the underlying FileSource for SourceMap, which walks the file
     // directly (prescanning line offsets) rather than through the parser.
-    const FileSource<CharT>& file_source() const noexcept { return m_fs; }
+    const FileSource<CharT, PageSize>& file_source() const noexcept { return m_fs; }
 
 private:
-    FileSource<CharT> m_fs;
+    FileSource<CharT, PageSize> m_fs;
 };
 
 } // namespace peg

@@ -73,7 +73,7 @@ TEST_CASE("[negative] filesource-non-char-value-type")
         out.write(reinterpret_cast<const char*>(data), sizeof(data));
     }
 
-    auto ctx = from_file<std::uint16_t>(path, 64);
+    auto ctx = from_file<std::uint16_t, 64>(path);
     CHECK_FALSE(ctx.ended());
     CHECK(ctx.current() == 1000);
     ctx.next();
@@ -123,7 +123,7 @@ TEST_CASE("[negative] sourcemap-from-empty-file")
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
     } // create 0-byte file
 
-    FileSource<char> fs{64, path};
+    FileSource<char, 64> fs{path};
     SourceMap map{fs};
     // A 0-byte file still has line 1, column 1 at offset 0.
     auto loc = map.locate(0);

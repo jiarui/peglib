@@ -24,7 +24,7 @@ std::string read_all(const std::string& path)
 TEST_CASE("filesource-reads-file-consistently-with-ifstream")
 {
     const std::string license_path = std::string(PEGLIB_TEST_DATA_DIR) + "/../LICENSE";
-    auto context = from_file<char>(license_path, 4096);
+    auto context = from_file<char>(license_path);
     const std::string expected = read_all(license_path);
 
     auto expected_it = expected.begin();
@@ -39,7 +39,7 @@ TEST_CASE("filesource-reads-file-consistently-with-ifstream")
 TEST_CASE("filesource-begin-and-end-iterate-full-file")
 {
     const std::string license_path = std::string(PEGLIB_TEST_DATA_DIR) + "/../LICENSE";
-    auto fs = FileSource<char>(4096, license_path);
+    auto fs = FileSource<char, 4096>(license_path);
 
     size_t count = 0;
     for (auto it = fs.begin(); it != fs.end(); ++it) {
@@ -52,7 +52,7 @@ TEST_CASE("filesource-begin-and-end-iterate-full-file")
 TEST_CASE("filesource-iterator-comparisons-consistent")
 {
     const std::string license_path = std::string(PEGLIB_TEST_DATA_DIR) + "/../LICENSE";
-    auto fs = FileSource<char>(4096, license_path);
+    auto fs = FileSource<char, 4096>(license_path);
 
     auto a = fs.begin();
     auto b = fs.begin();
@@ -78,7 +78,7 @@ TEST_CASE("filesource-tiny-buffer-exercises-cache-miss-and-rewind")
     REQUIRE(expected.size() > 64);
 
     // 8-byte buffer: the 11 KB LICENSE file spans many pages.
-    auto fs = FileSource<char>(8, license_path);
+    auto fs = FileSource<char, 8>(license_path);
     const auto end = fs.end();
 
     // Walk forward to the middle of the file, reading every byte.
@@ -94,7 +94,7 @@ TEST_CASE("filesource-tiny-buffer-exercises-cache-miss-and-rewind")
     CHECK(*back == expected[0]);
 
     // Forward jump well past the current window (forces read_to into buf[0]).
-    FileSource<char>::iterator jump = fs.begin();
+    FileSource<char, 8>::iterator jump = fs.begin();
     // Manual position increment via dereference drives the page loads.
     const size_t jump_target = expected.size() - 4;
     for (size_t i = 0; i < jump_target; ++i) {
@@ -120,7 +120,7 @@ TEST_CASE("filesource-reread-after-eviction-is-stable")
     const std::string license_path = std::string(PEGLIB_TEST_DATA_DIR) + "/../LICENSE";
     const std::string expected = read_all(license_path);
 
-    auto fs = FileSource<char>(16, license_path);
+    auto fs = FileSource<char, 16>(license_path);
 
     // Read byte at offset 0, then walk far enough to evict page 0, then
     // re-read offset 0 — values must match.

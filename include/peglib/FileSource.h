@@ -1,17 +1,23 @@
 #pragma once
+#include <array>
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <vector>
 namespace peg
 {
 // Streaming, double-buffered file-backed input source.
 //
+// PageSize is a compile-time constant: each of the two buffers is a
+// fixed-size std::array<CharT, PageSize>. This drops the per-page heap
+// allocation that the old std::vector buffer incurred (vector resize on
+// every read), making FileSource suitable for embedded/freestanding use
+// and improving cache locality (the buffer data lives inline in the
+// FileSource struct rather than behind a heap pointer).
+//
 // Unit convention:
-//   - Constructor parameter `buffer_byte_size` is in BYTES.
-//   - All internal sizes (`m_buffer_size`, `m_filesize`) are in ITEMS
+//   - All internal sizes (PageSize, m_filesize) are in ITEMS
 //     (i.e. number of `value_type` elements), not bytes.
 //
 // Iterator validity:
@@ -28,20 +34,16 @@ namespace peg
 // platforms where `long` is 32-bit (e.g. 32-bit Linux) cannot address files
 // larger than ~2 GiB. On LP64 platforms (64-bit Linux/macOS) `long` is
 // 64-bit and this is not a concern.
-template<typename value_type_>
+template<typename value_type_, std::size_t PageSize>
 struct FileSource
 {
-    // `buffer_byte_size` is the desired buffer size in BYTES. It is rounded
-    // up to a multiple of sizeof(value_type) and converted to item count.
-    FileSource(size_t buffer_byte_size, const std::string& path) : m_current_buf{0}
-    {
-        const size_t item_size = sizeof(value_type);
-        // Round byte size up to a whole number of items, then convert to item count.
-        size_t buffer_items = (buffer_byte_size + item_size - 1) / item_size;
-        if (buffer_items == 0)
-            buffer_items = 1;
-        m_buffer_size = buffer_items;
+    static_assert(PageSize > 0, "FileSource PageSize must be positive");
 
+    // Construct from a file path. Each of the two internal buffers is a
+    // fixed-size std::array<value_type, PageSize> — no runtime buffer-size
+    // parameter, no per-page heap allocation.
+    explicit FileSource(const std::string& path) : m_current_buf{0}
+    {
         // Binary mode is mandatory on Windows: text mode ("r") translates
         // CRLF -> LF on read, so fread() returns fewer bytes than
         // file_size() reports and buffer offsets become inconsistent.
@@ -53,11 +55,11 @@ struct FileSource
         // (the destructor won't run on a partially-constructed object).
         try {
             const size_t file_bytes = std::filesystem::file_size(path);
-            m_filesize = file_bytes / item_size;
+            m_filesize = file_bytes / sizeof(value_type);
 
-            const size_t n0 = m_bufs[0].read(m_fp, m_buffer_size);
-            if (n0 == m_buffer_size) {
-                m_bufs[1].read(m_fp, m_buffer_size);
+            const size_t n0 = m_bufs[0].read(m_fp, PageSize);
+            if (n0 == PageSize) {
+                m_bufs[1].read(m_fp, PageSize);
             }
         } catch (...) {
             std::fclose(m_fp);
@@ -70,14 +72,12 @@ struct FileSource
     FileSource& operator=(const FileSource&) = delete;
 
     FileSource(FileSource&& rhs) noexcept
-        : m_filesize{rhs.m_filesize}, m_buffer_size{rhs.m_buffer_size},
-          m_current_buf{rhs.m_current_buf}, m_fp{rhs.m_fp}
+        : m_filesize{rhs.m_filesize}, m_current_buf{rhs.m_current_buf}, m_fp{rhs.m_fp}
     {
         m_bufs[0] = std::move(rhs.m_bufs[0]);
         m_bufs[1] = std::move(rhs.m_bufs[1]);
         rhs.m_fp = nullptr;
         rhs.m_filesize = 0;
-        rhs.m_buffer_size = 0;
         rhs.m_current_buf = 0;
     }
 
@@ -118,9 +118,8 @@ struct FileSource
     // After release, any iterator with position < pos must not be dereferenced.
     void release_before(iterator pos) { release_before(pos.m_pos); }
 
-    // Offset-based overload. Context tracks positions as std::size_t offsets
-    // (Phase 1 refactor), so this is the primary entry point; the iterator
-    // overload above delegates here.
+    // Offset-based overload. Context tracks positions as std::size_t offsets,
+    // so this is the primary entry point; the iterator overload delegates here.
     void release_before(std::size_t pos)
     {
         for (int idx = 0; idx < 2; ++idx) {
@@ -202,6 +201,9 @@ struct FileSource
     size_t size() const { return m_filesize; }
 
 protected:
+    // Fixed-size buffer page. The storage is a std::array<value_type, PageSize>
+    // (no heap allocation); m_valid_count tracks how many items are actually
+    // live (the final page of a file may be short).
     struct buffer
     {
         buffer() = default;
@@ -211,21 +213,21 @@ protected:
         buffer& operator=(buffer&&) = default;
 
         // Reads up to `n_items` items from `fp` into this buffer.
-        // Returns the number of items actually read.
+        // Returns the number of items actually read. n_items must be <= PageSize.
         size_t read(FILE* fp, size_t n_items)
         {
-            m_buf.resize(n_items);
+            assert(n_items <= PageSize && "buffer::read: n_items exceeds PageSize");
             const size_t from_bytes = std::ftell(fp);
             m_buf_from = from_bytes / sizeof(value_type);
             const size_t read_items = std::fread(m_buf.data(), sizeof(value_type), n_items, fp);
-            m_buf.resize(read_items);
+            m_valid_count = read_items;
             m_buf_to = m_buf_from + read_items;
             return read_items;
         }
 
         void clear()
         {
-            m_buf.clear();
+            m_valid_count = 0;
             m_buf_from = 0;
             m_buf_to = 0;
         }
@@ -234,13 +236,13 @@ protected:
 
         value_type get_unchecked(iterator i) const { return m_buf[i.m_pos - m_buf_from]; }
 
-        std::vector<value_type> m_buf;
+        std::array<value_type, PageSize> m_buf;
+        size_t m_valid_count = 0; // items actually live in m_buf (<= PageSize)
         size_t m_buf_from = 0;
         size_t m_buf_to = 0;
     };
 
-    size_t m_filesize = 0;    // in items
-    size_t m_buffer_size = 0; // in items per buffer
+    size_t m_filesize = 0; // in items
     mutable buffer m_bufs[2];
     mutable int m_current_buf = 0;
     FILE* m_fp = nullptr;
@@ -250,11 +252,11 @@ protected:
         if (item_pos >= m_filesize) {
             return false;
         }
-        const size_t buf_pos = item_pos - (item_pos % m_buffer_size);
+        const size_t buf_pos = item_pos - (item_pos % PageSize);
         if (std::fseek(m_fp, static_cast<long>(buf_pos * sizeof(value_type)), SEEK_SET) != 0) {
             return false;
         }
-        return m_bufs[index].read(m_fp, m_buffer_size) > 0;
+        return m_bufs[index].read(m_fp, PageSize) > 0;
     }
 };
 } // namespace peg

@@ -74,10 +74,10 @@ struct Context
           m_fast_data{m_input->contiguous_data()}, m_input_size{m_input->size()}
     {}
 
-    template<typename C>
-    Context(FileSource<C>&& fs)
-        : m_input{std::make_unique<FileSourceSource<C>>(std::move(fs))}, m_fast_data{nullptr},
-          m_input_size{m_input->size()}
+    template<typename C, std::size_t PageSize>
+    Context(FileSource<C, PageSize>&& fs)
+        : m_input{std::make_unique<FileSourceSource<C, PageSize>>(std::move(fs))},
+          m_fast_data{nullptr}, m_input_size{m_input->size()}
     {}
 
     // A Context owns a memo table, cut stack, and (for FileSource) paged
@@ -331,10 +331,10 @@ protected:
     bool m_has_error = false;
 };
 
-template<typename CharT>
-auto from_file(const std::string& path, size_t bufsize)
+template<typename CharT, std::size_t PageSize = 4096>
+auto from_file(const std::string& path)
 {
-    return Context<CharT>(FileSource<CharT>(bufsize, path));
+    return Context<CharT>(FileSource<CharT, PageSize>(path));
 }
 
 // CTAD: Context(someString) deduces to Context<char>, etc.
