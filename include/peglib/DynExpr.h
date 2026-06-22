@@ -37,27 +37,14 @@ struct DynSequenceExpr : ParsingExpr<Context, DynSequenceExpr<Context>>
 
     ParseResult parse(Context& context) const override
     {
-        auto state = context.state();
-        auto node = std::make_shared<typename Context::ParseTreeNode>();
-        node->start_offset = context.mark();
-        bool first = true;
-        for (const auto& child : m_children) {
-            // Auto-skip between adjacent children (not before the first),
-            // mirroring SequenceExpr. No-op when no skipper is configured.
-            if (!first) {
-                context.run_skipper();
-            }
-            first = false;
-            auto result = child->parse(context);
-            if (!result.success) {
-                context.state(state);
-                return {false, nullptr};
-            }
-            if (result.tree)
-                node->children.push_back(result.tree);
-        }
-        node->end_offset = context.mark();
-        return {true, node};
+        // Delegate to the single shared implementation so the dynamic path
+        // stays in lockstep with future sequence-semantics changes. The
+        // static SequenceExpr keeps its compile-time recursive template for
+        // devirtualization (see sequence_parse_impl comment).
+        return sequence_parse_impl(
+            context,
+            [this](Context& c, std::size_t i) { return m_children[i]->parse(c); },
+            m_children.size());
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override
@@ -86,20 +73,13 @@ struct DynAlternationExpr : ParsingExpr<Context, DynAlternationExpr<Context>>
 
     ParseResult parse(Context& context) const override
     {
-        context.init_cut();
-        ScopeGuard guard{[&context]() {
-            context.remove_cut();
-        }};
-        for (const auto& child : m_children) {
-            auto result = child->parse(context);
-            if (result.success) {
-                return result;
-            }
-            if (context.cut()) {
-                throw ParseError{context.furthest_failure_pos(), context.expected()};
-            }
-        }
-        return {false, nullptr};
+        // Delegate to the single shared implementation (cut handling +
+        // first-success-wins). The static AlternationExpr keeps its
+        // compile-time recursive template for devirtualization.
+        return choice_parse_impl(
+            context,
+            [this](Context& c, std::size_t i) { return m_children[i]->parse(c); },
+            m_children.size());
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override
@@ -159,10 +139,8 @@ struct DynAndExpr : ParsingExpr<Context, DynAndExpr<Context>>
     explicit DynAndExpr(InterfacePtr child) : m_child(std::move(child)) {}
     typename Context::ParseResult parse(Context& context) const override
     {
-        auto state = context.state();
-        auto result = m_child->parse(context);
-        context.state(state);
-        return {result.success, nullptr};
+        return predicate_parse_impl(
+            context, [this](Context& c) { return m_child->parse(c); }, false);
     }
     void collect_rule_refs(std::set<std::string>& refs) const override
     {
@@ -182,10 +160,8 @@ struct DynNotExpr : ParsingExpr<Context, DynNotExpr<Context>>
     explicit DynNotExpr(InterfacePtr child) : m_child(std::move(child)) {}
     typename Context::ParseResult parse(Context& context) const override
     {
-        auto state = context.state();
-        auto result = m_child->parse(context);
-        context.state(state);
-        return {!result.success, nullptr};
+        return predicate_parse_impl(
+            context, [this](Context& c) { return m_child->parse(c); }, true);
     }
     void collect_rule_refs(std::set<std::string>& refs) const override
     {

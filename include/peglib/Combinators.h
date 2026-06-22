@@ -287,6 +287,111 @@ struct OptionalExpr : Repetition<Context, Child>
 };
 
 // ---------------------------------------------------------------------------
+// predicate_parse_impl: the single source of truth for predicate semantics
+// (lookahead `&e` and negation `!e`).
+//
+// Both the static AndExpr/NotExpr and the type-erased DynAndExpr/DynNotExpr
+// delegate here, so a fix only has to be applied once. `parse_child` is any
+// callable returning ParseResult for the operand expression — typically a
+// lambda capturing `this` and forwarding to the concrete child's parse().
+//
+// Predicate contract: the operand is executed speculatively; whatever it
+// consumed is rewound (the input position is restored to the pre-state);
+// the result tree is always discarded (no tree is built for predicates).
+//   - negate == false (& / AndExpr): success follows the operand's success.
+//   - negate == true  (! / NotExpr): success is the operand's failure.
+// ---------------------------------------------------------------------------
+template<typename Context, typename ChildOp>
+    requires std::invocable<ChildOp&, Context&>
+typename Context::ParseResult
+predicate_parse_impl(Context& context, ChildOp parse_child, bool negate)
+{
+    auto initState = context.state();
+    auto result = parse_child(context);
+    context.state(initState);
+    // Predicate: no tree, no consumed input.
+    return {negate ? !result.success : result.success, nullptr};
+}
+
+// ---------------------------------------------------------------------------
+// sequence_parse_impl: the single source of truth for sequence semantics
+// across a runtime-known number of children.
+//
+// Used by the type-erased DynSequenceExpr. The static SequenceExpr keeps its
+// compile-time recursive `parseSeq<Index>` template — forcing the static path
+// into this indexed form would introduce a runtime branch on `i > 0` for the
+// skipper inside what is currently a fully-inlined recursion, destroying the
+// static DSL's devirtualization (see TODO.md "ChildContainer Concept" row).
+// This impl is the indexed-child counterpart that future DynExpr types
+// (DynCaptureExpr, DynRecoverExpr, …) can reuse.
+//
+// `parse_at` is any callable returning ParseResult for child `i`.
+// `count` is the number of children. The skipper is run between adjacent
+// children (not before the first) — no-op when no skipper is configured.
+// ---------------------------------------------------------------------------
+template<typename Context, typename ChildOp>
+    requires std::invocable<ChildOp&, Context&, std::size_t>
+typename Context::ParseResult
+sequence_parse_impl(Context& context, ChildOp parse_at, std::size_t count)
+{
+    auto state = context.state();
+    auto node = std::make_shared<typename Context::ParseTreeNode>();
+    node->start_offset = context.mark();
+    bool first = true;
+    for (std::size_t i = 0; i < count; ++i) {
+        // Auto-skip between adjacent children (not before the first),
+        // mirroring SequenceExpr. No-op when no skipper is configured.
+        if (!first) {
+            context.run_skipper();
+        }
+        first = false;
+        auto result = parse_at(context, i);
+        if (!result.success) {
+            context.state(state);
+            return {false, nullptr};
+        }
+        if (result.tree)
+            node->children.push_back(result.tree);
+    }
+    node->end_offset = context.mark();
+    return {true, node};
+}
+
+// ---------------------------------------------------------------------------
+// choice_parse_impl: the single source of truth for ordered-choice semantics
+// across a runtime-known number of children.
+//
+// Used by the type-erased DynAlternationExpr. As with sequence_parse_impl,
+// the static AlternationExpr keeps its compile-time recursive `parseAlt<Index>`
+// template for devirtualization; this impl serves the dynamic path only.
+//
+// Cut contract: a fresh cut scope is pushed for the choice. The first
+// successful alternative wins. If an alternative fails after a cut was
+// committed inside it, the failure escalates to peg::ParseError (hard
+// error) — the programmer has explicitly committed this branch.
+// ---------------------------------------------------------------------------
+template<typename Context, typename ChildOp>
+    requires std::invocable<ChildOp&, Context&, std::size_t>
+typename Context::ParseResult
+choice_parse_impl(Context& context, ChildOp parse_at, std::size_t count)
+{
+    context.init_cut();
+    ScopeGuard _{[&context]() {
+        context.remove_cut();
+    }};
+    for (std::size_t i = 0; i < count; ++i) {
+        auto result = parse_at(context, i);
+        if (result.success) {
+            return result;
+        }
+        if (context.cut()) {
+            throw ParseError{context.furthest_failure_pos(), context.expected()};
+        }
+    }
+    return {false, nullptr};
+}
+
+// ---------------------------------------------------------------------------
 // NotExpr: negation predicate — succeeds if child fails, consumes nothing.
 // ---------------------------------------------------------------------------
 template<typename Context, typename Child>
@@ -296,11 +401,8 @@ struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>
     const Child& child() { return m_child; }
     typename Context::ParseResult parse(Context& context) const override
     {
-        auto initState = context.state();
-        auto result = m_child.parse(context);
-        context.state(initState);
-        // Predicate: no tree, no consumed input.
-        return {!result.success, nullptr};
+        return predicate_parse_impl(
+            context, [this](Context& c) { return m_child.parse(c); }, true);
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override
@@ -322,11 +424,8 @@ struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>
     const Child& child() { return m_child; }
     typename Context::ParseResult parse(Context& context) const override
     {
-        auto initState = context.state();
-        auto result = m_child.parse(context);
-        context.state(initState);
-        // Predicate: no tree, no consumed input.
-        return {result.success, nullptr};
+        return predicate_parse_impl(
+            context, [this](Context& c) { return m_child.parse(c); }, false);
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override

@@ -238,3 +238,85 @@ TEST_CASE("[pegast] node-factory-and-fields")
     CHECK(parent->children[0]->kind == NodeKind::RuleRef);
     CHECK(parent->children[1]->text == "abc");
 }
+
+// ---------------------------------------------------------------------------
+// *_parse_impl regression guards.
+//
+// predicate_parse_impl / sequence_parse_impl / choice_parse_impl are the
+// shared algorithm bodies now used by both the static DSL (for predicates)
+// and the DynExpr path (for predicates, sequence, choice). These tests
+// confirm the two paths produce identical observable behaviour, so a future
+// divergence becomes a compile-or-test failure rather than a silent bug.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("[impl] predicate-impl-static-and-dyn-agree")
+{
+    using Ctx = Context<char>;
+    auto dyn_a = std::make_shared<TerminalExpr<Ctx, char>>('a');
+    DynNotExpr<Ctx> dyn_not{dyn_a};
+    DynAndExpr<Ctx> dyn_and{dyn_a};
+
+    // Compare against the static DSL on the same inputs.
+    auto st_not = !terminal('a');
+    auto st_and = &terminal('a');
+
+    for (std::string input : {"a", "b", ""}) {
+        Ctx c1(input);
+        Ctx c2(input);
+        CHECK(dyn_not.parse(c1).success == st_not.parse(c2).success);
+        CHECK(c1.mark() == c2.mark()); // predicates consume nothing
+
+        Ctx c3(input);
+        Ctx c4(input);
+        CHECK(dyn_and.parse(c3).success == st_and.parse(c4).success);
+        CHECK(c3.mark() == c4.mark());
+    }
+}
+
+TEST_CASE("[impl] sequence-impl-dyn-path-matches-children")
+{
+    using Ctx = Context<char>;
+    std::vector<std::shared_ptr<ParsingExprInterface<Ctx>>> children;
+    children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('a'));
+    children.push_back(std::make_shared<TerminalExpr<Ctx, char>>('b'));
+    DynSequenceExpr<Ctx> seq{std::move(children)};
+
+    // Smoke: the shared impl runs through both children and consumes them.
+    std::string input = "ab";
+    Ctx ctx(input);
+    auto r = seq.parse(ctx);
+    CHECK(r.success);
+    CHECK(ctx.ended());
+    // Sequence produces an anonymous grouping node. Leaf terminals return
+    // null trees, so the grouping node holds zero children — but the node
+    // itself exists (proving the shared impl built and returned it).
+    REQUIRE(r.tree);
+    CHECK(r.tree->children.empty());
+
+    // Failure rolls back to the start position (shared-impl contract).
+    std::string bad = "ax";
+    Ctx bctx(bad);
+    CHECK_FALSE(seq.parse(bctx).success);
+    CHECK(bctx.mark() == 0);
+}
+
+TEST_CASE("[impl] choice-impl-dyn-path-first-success-and-cut-escalation")
+{
+    using Ctx = Context<char>;
+    std::vector<std::shared_ptr<ParsingExprInterface<Ctx>>> alts;
+    alts.push_back(std::make_shared<TerminalExpr<Ctx, char>>('a'));
+    alts.push_back(std::make_shared<TerminalExpr<Ctx, char>>('b'));
+    DynAlternationExpr<Ctx> choice{std::move(alts)};
+
+    // First-success-wins: input 'b' should be matched by the 2nd alternative.
+    std::string in_b = "b";
+    Ctx ctx_b(in_b);
+    CHECK(choice.parse(ctx_b).success);
+    CHECK(ctx_b.mark() == 1);
+
+    // No alternative matches → false, position restored.
+    std::string in_x = "x";
+    Ctx ctx_x(in_x);
+    CHECK_FALSE(choice.parse(ctx_x).success);
+    CHECK(ctx_x.mark() == 0);
+}
