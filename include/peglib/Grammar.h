@@ -112,6 +112,42 @@ public:
     void set_start(std::string name) { m_start = std::move(name); }
     [[nodiscard]] const std::string& start_rule() const noexcept { return m_start; }
 
+    // -----------------------------------------------------------------------
+    // Auto-skip (Phase 3).
+    //
+    // Set a transparent "skipper" rule that is invoked automatically
+    //   - between adjacent children of a Sequence (static and Dyn),
+    //   - between iterations of a repetition (* + n* ?),
+    // and nowhere else (not before the first child, not after the last,
+    // not inside Alternatives, predicates, or terminal-sequence literals).
+    //
+    // The rule is typically *e matching whitespace/comments:
+    //   g["ws"] = *terminal<char>([](char c){ return c==' '||c=='\t'||c=='\n'||c=='\r'; });
+    //   g.set_skipper(g["ws"]);
+    // After this, sequences no longer need to thread `>> g["ws"] >>`
+    // manually between every pair of terminals.
+    //
+    // To disable auto-skip for a single sub-expression, wrap it in
+    // lexeme(...). To disable globally, call clear_skipper() (or never
+    // call set_skipper at all — that is the default).
+    //
+    // The argument must be a *defined* rule of this Grammar. Grammar
+    // stores a non-owning pointer to the rule's NonTerminal (the rule
+    // body lives in m_rules for the Grammar's whole lifetime, so the
+    // pointer is valid as long as the Grammar is).
+    // -----------------------------------------------------------------------
+    void set_skipper(Rule r)
+    {
+        if (!r.is_defined()) {
+            throw std::invalid_argument{"Grammar::set_skipper: rule is not defined"};
+        }
+        m_skipper = r.impl();
+    }
+
+    void clear_skipper() noexcept { m_skipper = nullptr; }
+
+    [[nodiscard]] bool has_skipper() const noexcept { return m_skipper != nullptr; }
+
     // Parse using the start rule. Returns true on success, false on any
     // failure (including cut-committed failures). On failure, the Context
     // holds the diagnostic — retrieve it with `ctx.take_error()`. This method
@@ -139,6 +175,10 @@ public:
         if (it == m_rules.end()) {
             throw std::out_of_range{"Grammar::parse: rule '" + std::string{rule} + "' not found"};
         }
+        // Stamp the Grammar-owned skipper onto the Context for the duration
+        // of this parse. No-op (sets nullptr) when the user never called
+        // set_skipper, in which case run_skipper() is a zero-cost no-op.
+        ctx.internal_set_skipper(m_skipper);
         try {
             return it->second->parse(ctx).success;
         } catch (const ParseError&) {
@@ -161,6 +201,7 @@ public:
             throw std::out_of_range{"Grammar::parse_tree: rule '" + std::string{rule} +
                                     "' not found"};
         }
+        ctx.internal_set_skipper(m_skipper);
         try {
             return it->second->parse(ctx).tree;
         } catch (const ParseError&) {
@@ -249,6 +290,13 @@ protected:
     // by operator[]) hold bare NonTerminal* — no shared_ptr cycle possible.
     std::map<std::string, std::shared_ptr<NonTerminalType>> m_rules;
     std::string m_start;
+
+    // Auto-skip rule (Phase 3). Non-owning pointer into m_rules; set by
+    // set_skipper, cleared by clear_skipper. nullptr = no auto-skip.
+    // Stamped onto each Context at parse()/parse_tree() entry so that
+    // Sequence / Repetition expressions can call ctx.run_skipper() with
+    // zero per-parse setup.
+    NonTerminalType* m_skipper = nullptr;
 };
 
 } // namespace peg
