@@ -267,6 +267,40 @@ struct Context
         m_cut.pop();
     }
 
+    // -------------------------------------------------------------------
+    // Auto-skip (Phase 3). The skipper is a transparent rule invoked
+    // between adjacent sequence elements and between repetition
+    // iterations. It is owned by Grammar and stamped onto the Context at
+    // Grammar::parse entry. These accessors are public only because the
+    // expression types that call run_skipper() live in peg::parsers;
+    // end users should drive this via Grammar::set_skipper / lexeme().
+    // -------------------------------------------------------------------
+
+    // Invoke the skipper if one is set and auto-skip is enabled. Called
+    // by SequenceExpr / DynSequenceExpr / repeat_parse_impl between
+    // adjacent children. No-op (and zero virtual dispatch) when no
+    // skipper is set or when skip_enabled() is false (inside lexeme).
+    void run_skipper()
+    {
+        if (m_skip_enabled && m_skipper) {
+            // Transparent: discard the result. A skipper is always
+            // written as *e (zero-or-more), so it always succeeds.
+            m_skipper->parse(*this);
+        }
+    }
+
+    // For Grammar::parse use only — stamps the Grammar-owned skipper
+    // pointer onto this Context for the duration of one parse.
+    void internal_set_skipper(const NonTerminalType* s) noexcept { m_skipper = s; }
+
+    [[nodiscard]] bool has_skipper() const noexcept { return m_skipper != nullptr; }
+
+    // Toggled by lexeme() to disable auto-skip for a subtree. Use
+    // skip_enabled(prev) to restore the prior value (the lexeme wrapper
+    // does this via ScopeGuard).
+    void skip_enabled(bool e) noexcept { m_skip_enabled = e; }
+    [[nodiscard]] bool skip_enabled() const noexcept { return m_skip_enabled; }
+
     // -----------------------------------------------------------------------
     // Error tracking: furthest-failure position + expected set
     // -----------------------------------------------------------------------
@@ -329,6 +363,18 @@ protected:
     std::size_t m_furthest_failure_pos = 0;
     expected_set m_expected;
     bool m_has_error = false;
+
+    // Skipper: a transparent rule invoked between adjacent sequence
+    // elements and between repetition iterations. nullptr = no auto-skip.
+    // Owned by Grammar; Context holds a non-owning pointer stamped at
+    // Grammar::parse entry (see Grammar::set_skipper). Stays nullptr for
+    // Contexts not driven through Grammar::parse, so run_skipper() is a
+    // no-op in that case.
+    const NonTerminalType* m_skipper = nullptr;
+    // Toggled by lexeme() for the duration of its subtree so auto-skip
+    // can be locally disabled. Save/restore via skip_enabled(bool) keeps
+    // nesting safe (lexeme inside lexeme).
+    bool m_skip_enabled = true;
 };
 
 template<typename CharT, std::size_t PageSize = 4096>
