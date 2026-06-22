@@ -292,6 +292,82 @@ public:
         return result;
     }
 
+    // -----------------------------------------------------------------------
+    // to_dot: Graphviz DOT digraph of rule dependencies.
+    //
+    // Emits every defined rule as a node (the start rule gets a double
+    // border via peripheries=2), and every rule-reference (collected via
+    // collect_rule_refs) as a directed edge. Undefined references appear
+    // as dangling edge targets — useful for spotting typos. The output
+    // is suitable for piping through `dot -Tsvg` / `dot -Tpng`:
+    //
+    //   std::cout << g.to_dot();
+    //   // then:  ./my_parser | dot -Tsvg > grammar.svg
+    //
+    // Implementation reuses the same collect_rule_refs traversal that
+    // unreachable_rules() does (every expression type overrides it), so
+    // no new virtual is needed. Traversal is DFS over (rule -> direct
+    // refs); the visited set bounds work at O(rules + edges).
+    // -----------------------------------------------------------------------
+    [[nodiscard]] std::string to_dot() const
+    {
+        std::string out;
+        out.reserve(256);
+        out += "digraph peglib_grammar {\n";
+        out += "  node [shape=box];\n";
+        out += "  rankdir=LR;\n";
+
+        // Defined-rule nodes (start rule highlighted with a double border).
+        for (const auto& [name, nt] : m_rules) {
+            if (!nt->is_defined())
+                continue;
+            out += "  \"";
+            out += dot_escape(name);
+            out += "\"";
+            if (name == m_start) {
+                out += " [peripheries=2]";
+            }
+            out += ";\n";
+        }
+
+        // Edges via collect_rule_refs. Visit every defined rule (not just
+        // those reachable from start) so dead-code branches still render
+        // for inspection. The visited set prevents re-emitting a rule's
+        // edges when it appears multiple times in the queue.
+        std::set<std::string> visited;
+        std::vector<std::string> queue;
+        for (const auto& [name, nt] : m_rules) {
+            if (nt->is_defined()) {
+                queue.push_back(name);
+            }
+        }
+        while (!queue.empty()) {
+            auto name = queue.back();
+            queue.pop_back();
+            if (!visited.insert(name).second)
+                continue;
+            auto it = m_rules.find(name);
+            if (it == m_rules.end())
+                continue;
+
+            std::set<std::string> refs;
+            it->second->collect_rule_refs(refs);
+            for (const auto& ref : refs) {
+                out += "  \"";
+                out += dot_escape(name);
+                out += "\" -> \"";
+                out += dot_escape(ref);
+                out += "\";\n";
+                // Chase the reference (defined refs add their own edges).
+                if (m_rules.count(ref)) {
+                    queue.push_back(ref);
+                }
+            }
+        }
+        out += "}\n";
+        return out;
+    }
+
 protected:
     // Grammar is the sole owner of all NonTerminals. Rule handles (returned
     // by operator[]) hold bare NonTerminal* — no shared_ptr cycle possible.
@@ -304,6 +380,31 @@ protected:
     // Sequence / Repetition expressions can call ctx.run_skipper() with
     // zero per-parse setup.
     NonTerminalType* m_skipper = nullptr;
+
+    // Escape a rule name for safe embedding inside a DOT string literal.
+    // DOT recognises \" \\ and \n inside "..."; everything else passes
+    // through. Used only by to_dot().
+    static std::string dot_escape(std::string_view s)
+    {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            switch (c) {
+            case '"':
+                out += "\\\"";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            default:
+                out += c;
+            }
+        }
+        return out;
+    }
 };
 
 } // namespace peg
