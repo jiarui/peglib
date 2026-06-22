@@ -280,12 +280,24 @@ struct Context
     // by SequenceExpr / DynSequenceExpr / repeat_parse_impl between
     // adjacent children. No-op (and zero virtual dispatch) when no
     // skipper is set or when skip_enabled() is false (inside lexeme).
+    //
+    // Reentrancy guard: while the skipper itself runs, auto-skip is
+    // temporarily disabled so the skipper's own internal Repetition /
+    // Sequence children do not recursively invoke run_skipper() (which
+    // would double-consume input or, for a skipper written with
+    // adjacency, loop). This mirrors how lexeme() suppresses skip for
+    // its subtree. A skipper is therefore always written as a single
+    // self-contained rule (typically *e); it cannot rely on auto-skip
+    // itself — and that is the correct design.
     void run_skipper()
     {
         if (m_skip_enabled && m_skipper) {
+            bool prev = m_skip_enabled;
+            m_skip_enabled = false;
             // Transparent: discard the result. A skipper is always
             // written as *e (zero-or-more), so it always succeeds.
             m_skipper->parse(*this);
+            m_skip_enabled = prev;
         }
     }
 

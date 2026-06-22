@@ -179,6 +179,12 @@ public:
         // of this parse. No-op (sets nullptr) when the user never called
         // set_skipper, in which case run_skipper() is a zero-cost no-op.
         ctx.internal_set_skipper(m_skipper);
+        // Pest-style leading whitespace: consume at the grammar boundary
+        // so users don't have to prefix `g["ws"] >>` to their start rule.
+        // Trailing whitespace is intentionally NOT consumed here —
+        // parse_string does partial-match, and users who need full-input
+        // consumption append `>> !.` (EndOfFile) to their start rule.
+        ctx.run_skipper();
         try {
             return it->second->parse(ctx).success;
         } catch (const ParseError&) {
@@ -202,6 +208,7 @@ public:
                                     "' not found"};
         }
         ctx.internal_set_skipper(m_skipper);
+        ctx.run_skipper(); // leading whitespace (pest-style; see parse() above)
         try {
             return it->second->parse(ctx).tree;
         } catch (const ParseError&) {
