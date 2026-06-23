@@ -130,6 +130,8 @@ TEST_CASE("[grammar] auto-naming")
     // On failure, error messages should mention "my_rule"
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
+    // can't model doctest's macro control flow.
     const auto& diag_ref = *diag;
     bool found = false;
     for (const auto& item : diag_ref.expected()) {
@@ -291,6 +293,8 @@ TEST_CASE("[grammar] find-does-not-create-rule")
     // find() on an existing rule returns the handle, with the right name.
     auto h = g.find("real");
     REQUIRE(h.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
+    // can't model doctest's macro control flow.
     const auto& h_ref = *h;
     CHECK(h_ref.name() == "real");
     CHECK(h_ref.is_defined());
