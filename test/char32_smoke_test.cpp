@@ -61,9 +61,7 @@ TEST_CASE("char32-failure-diagnostic-renders-codepoint-not-garbled")
 
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
-    // can't model doctest's macro control flow.
-    const auto& diag_ref = *diag;
+    const auto& diag_ref = diag.value();
     REQUIRE_FALSE(diag_ref.expected().empty());
     // The expected set contains both the rule name ("cjk") and the literal
     // terminal. Find the Literal item — its text must carry the full-width
@@ -95,9 +93,7 @@ TEST_CASE("char32-ascii-codepoint-renders-as-itself")
 
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
-    // can't model doctest's macro control flow.
-    const auto& diag_ref = *diag;
+    const auto& diag_ref = diag.value();
     REQUIRE_FALSE(diag_ref.expected().empty());
     // Find the Literal item (the set also contains the rule name "a").
     std::string literal_text;

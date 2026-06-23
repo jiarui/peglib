@@ -115,9 +115,7 @@ TEST_CASE("error-context-take-error")
     context.record_failure(1, ExpectedItem{ExpectedKind::RuleName, "MyRule"});
     auto err = context.take_error();
     REQUIRE(err.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
-    // can't model doctest's macro control flow.
-    const auto& err_ref = *err;
+    const auto& err_ref = err.value();
     CHECK(err_ref.position() == 1);
     CHECK(err_ref.expected().size() == 1);
     CHECK(err_ref.expected().begin()->kind == ExpectedKind::RuleName);
@@ -384,9 +382,7 @@ TEST_CASE("multi-diagnostic-independent-of-furthest-failure")
 
     auto err = context.take_error();
     REQUIRE(err.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
-    // can't model doctest's macro control flow.
-    const auto& err_ref = *err;
+    const auto& err_ref = err.value();
     CHECK(err_ref.position() == 5);
 
     auto diags = context.take_diagnostics();

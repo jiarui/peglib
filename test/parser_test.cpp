@@ -57,9 +57,7 @@ TEST_CASE("cut-committed-failure-surfaces-via-take-error")
     CHECK_FALSE(g.parse("g2", context2));
     auto err = context2.take_error();
     REQUIRE(err);
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): guarded by REQUIRE above; clang-tidy
-    // can't model doctest's macro control flow.
-    const auto& err_ref = *err;
+    const auto& err_ref = err.value();
     // Position should be 1 (where 'x' was expected, after matching 'a').
     CHECK(err_ref.position() == 1);
     // The expected set reflects what the cut-committed branch wanted ('x').
