@@ -63,11 +63,29 @@ if(PEGLIB_ENABLE_CLANG_TIDY)
         # header (removed in C++20) that would otherwise abort the tidy run on
         # bleeding-edge libstdc++. This diagnostic does not appear on CI's
         # Ubuntu 24.04 + clang-22 toolchain, but the flag is harmless there.
-        # Note: do NOT add -Wno-c2y-extensions here. clang-tidy's frontend
-        # rejects it as an unknown option even when the compiler's own flag
-        # check accepts it, which aborts the tidy run on CI.
-        set(CMAKE_CXX_CLANG_TIDY
-            "${CLANG_TIDY_EXE};--quiet;--extra-arg=-Wno-#warnings")
+        set(tidy_extra_args "--extra-arg=-Wno-#warnings")
+
+        # clang 22+ flags __COUNTER__ (used by doctest's DOCTEST_ANONYMOUS
+        # macro) as a C2y extension. doctest is a SYSTEM header so its own
+        # internal uses are suppressed, but the diagnostic attaches to the
+        # macro *expansion point* in test code and clang-tidy escalates it via
+        # WarningsAsErrors. -Wno-c2y-extensions fixes this, but only very
+        # recent clang-tidy builds recognize the flag — older ones reject it
+        # as an unknown option (which itself aborts the run). Probe clang-tidy
+        # directly by running it on a trivial TU with the flag and checking
+        # whether it reports "unknown warning option".
+        set(_probe_src "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/tidy_c2y_probe.cpp")
+        file(WRITE ${_probe_src} "int main(){return 0;}\n")
+        execute_process(
+            COMMAND ${CLANG_TIDY_EXE} --quiet --extra-arg=-Wno-c2y-extensions ${_probe_src} --
+            OUTPUT_VARIABLE _probe_out
+            ERROR_VARIABLE _probe_err
+            RESULT_VARIABLE _probe_result)
+        if(NOT (_probe_err MATCHES "unknown warning option" OR _probe_out MATCHES "unknown warning option"))
+            string(APPEND tidy_extra_args ";--extra-arg=-Wno-c2y-extensions")
+        endif()
+
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--quiet;${tidy_extra_args}")
     else()
         message(WARNING "clang-tidy not found")
     endif()

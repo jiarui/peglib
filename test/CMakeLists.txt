@@ -7,7 +7,12 @@ set(doctest_include_dir ${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
 # and is linked into every test executable so the other TUs only need
 # `#include "doctest.h"`.
 add_library(peglib_test_main OBJECT doctest_main.cpp)
-target_include_directories(peglib_test_main PRIVATE ${doctest_include_dir})
+# SYSTEM: doctest is vendored third-party code; marking the include path as
+# system suppresses its diagnostics (notably the __COUNTER__ C2y warning on
+# clang 22+, which -Werror escalates). This also keeps clang-tidy from
+# analyzing doctest.h, which previously generated tens of thousands of
+# warnings per TU and triggered the "too many errors" cutoff.
+target_include_directories(peglib_test_main SYSTEM PRIVATE ${doctest_include_dir})
 
 # ---------------------------------------------------------------------------
 # Warning flags for the TEST targets only (not the INTERFACE peglib library,
@@ -47,7 +52,7 @@ add_executable(peglib_test
     peg_text_extensions_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)
-target_include_directories(peglib_test PRIVATE ${doctest_include_dir})
+target_include_directories(peglib_test SYSTEM PRIVATE ${doctest_include_dir})
 
 target_compile_definitions(peglib_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
@@ -66,7 +71,7 @@ add_executable(peglib_lua_test
     lua.cpp)
 
 target_link_libraries(peglib_lua_test PRIVATE peglib peglib_test_main peglib_test_warnings)
-target_include_directories(peglib_lua_test PRIVATE ${doctest_include_dir})
+target_include_directories(peglib_lua_test SYSTEM PRIVATE ${doctest_include_dir})
 target_compile_definitions(peglib_lua_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -80,7 +85,7 @@ add_executable(peglib_json_test
     json_test.cpp)
 
 target_link_libraries(peglib_json_test PRIVATE peglib peglib_test_main peglib_test_warnings)
-target_include_directories(peglib_json_test PRIVATE ${doctest_include_dir})
+target_include_directories(peglib_json_test SYSTEM PRIVATE ${doctest_include_dir})
 target_compile_definitions(peglib_json_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -95,7 +100,7 @@ add_executable(peglib_json_skipper_test
     json_skipper_test.cpp)
 
 target_link_libraries(peglib_json_skipper_test PRIVATE peglib peglib_test_main peglib_test_warnings)
-target_include_directories(peglib_json_skipper_test PRIVATE ${doctest_include_dir})
+target_include_directories(peglib_json_skipper_test SYSTEM PRIVATE ${doctest_include_dir})
 target_compile_definitions(peglib_json_skipper_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
