@@ -59,14 +59,25 @@ endif()
 if(PEGLIB_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
-        # The extra-arg -Wno-* flags suppress diagnostics that originate in
-        # system libstdc++ headers on newer toolchains (GCC 16's <ciso646>
-        # emits a #warning; clang 19+ flags __COUNTER__ as a C2y extension).
-        # These are not issues in our code and don't appear on CI's Ubuntu
-        # 24.04 + clang-22 toolchain, but would otherwise abort local tidy
-        # runs on bleeding-edge distros.
-        set(CMAKE_CXX_CLANG_TIDY
-            "${CLANG_TIDY_EXE};--quiet;--extra-arg=-Wno-c2y-extensions;--extra-arg=-Wno-#warnings")
+        # Build a list of -Wno-* flags that suppress diagnostics originating
+        # in system libstdc++ headers on bleeding-edge toolchains. These are
+        # not issues in our code and don't appear on CI's Ubuntu 24.04 +
+        # clang-22 setup, but would otherwise abort local tidy runs.
+        #
+        # -Wno-#warnings: GCC 16's <ciso646> emits a #warning about the
+        #   header being removed in C++20. Recognized by all clang versions.
+        #
+        # -Wno-c2y-extensions: clang 22.1+ flags __COUNTER__ (used by doctest)
+        #   as a C2y extension. This flag only exists on very recent clang
+        #   builds, so we check for support before adding it — otherwise the
+        #   unknown-option error itself aborts the tidy run.
+        include(CheckCXXCompilerFlag)
+        set(tidy_extra_args "--extra-arg=-Wno-#warnings")
+        check_cxx_compiler_flag("-Wno-c2y-extensions" peglib_supports_wno_c2y_extensions)
+        if(peglib_supports_wno_c2y_extensions)
+            string(APPEND tidy_extra_args ";--extra-arg=-Wno-c2y-extensions")
+        endif()
+        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--quiet;${tidy_extra_args}")
     else()
         message(WARNING "clang-tidy not found")
     endif()
