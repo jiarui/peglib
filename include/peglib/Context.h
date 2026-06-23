@@ -392,10 +392,7 @@ struct Context
     }
 
     // Move all accumulated diagnostics out and clear the vector.
-    [[nodiscard]] std::vector<Diagnostic> take_diagnostics()
-    {
-        return std::move(m_diagnostics);
-    }
+    [[nodiscard]] std::vector<Diagnostic> take_diagnostics() { return std::move(m_diagnostics); }
 
 protected:
     std::unique_ptr<InputSourceBase<CharT>> m_input;

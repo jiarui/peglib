@@ -332,7 +332,10 @@ private:
     }
 
     // Extract the shared_ptr<ParsingExprInterface> from a DynExpr.
-    static InterfacePtr extract_impl(parsers::DynExpr<DefaultCtx> expr) { return expr.impl(); }
+    static InterfacePtr extract_impl(const parsers::DynExpr<DefaultCtx>& expr)
+    {
+        return expr.impl();
+    }
 
     // Decode one character from src at position i, advancing i.
     // Handles escape sequences: \n \r \t \' \" \\ \[ \]

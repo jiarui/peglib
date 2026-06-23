@@ -40,8 +40,8 @@ TEST_CASE("[pegrule-ext] cut-commits-alternative")
     // (the 'c' fallback is skipped because of cut). Without cut, 'c' would
     // be tried and the parse would succeed on 'c'-prefixed input.
     auto g = GrammarCompiler::from_string("S <- ('a' ~ 'b') / 'c'");
-    CHECK(g.parse_string("ab"));  // 'a' ~ 'b' succeeds
-    CHECK(g.parse_string("c"));   // first alt fails on 'a' (no cut), 'c' ok
+    CHECK(g.parse_string("ab"));       // 'a' ~ 'b' succeeds
+    CHECK(g.parse_string("c"));        // first alt fails on 'a' (no cut), 'c' ok
     CHECK_FALSE(g.parse_string("ax")); // 'a' ~ then 'b' fails → committed failure
     CHECK_FALSE(g.parse_string("ac")); // 'a' ~ commits, 'b' fails on 'c' → no fallback
 }
@@ -60,8 +60,8 @@ TEST_CASE("[pegrule-ext] cut-as-primary-compiles")
     // Verifies the meta-grammar accepts `~` as a primary and the compiler
     // emits a DynCutExpr without error. Behaviour: matches empty prefix.
     auto g = GrammarCompiler::from_string("S <- ~");
-    CHECK(g.parse_string(""));   // empty input, empty match
-    CHECK(g.parse_string("x"));  // matches empty prefix; "x" left unconsumed
+    CHECK(g.parse_string(""));  // empty input, empty match
+    CHECK(g.parse_string("x")); // matches empty prefix; "x" left unconsumed
 }
 
 // ---------------------------------------------------------------------------

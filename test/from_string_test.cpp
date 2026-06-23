@@ -289,7 +289,7 @@ TEST_CASE("[from_string] semantic-action-binding")
     // Bind an action to count characters matched.
     int count = 0;
     using Ctx = Grammar<>::Context;
-    g["N"].set_action([&count](Ctx& /*ctx*/, Ctx::ParseTreeNodePtr node) -> std::monostate {
+    g["N"].set_action([&count](Ctx& /*ctx*/, const Ctx::ParseTreeNodePtr& node) -> std::monostate {
         count += static_cast<int>(node->end_offset - node->start_offset);
         return {};
     });

@@ -56,7 +56,7 @@ std::string to_display(CharT c)
         return std::string{static_cast<char>(c)};
     } else {
         // Encode a single codepoint (char32_t / wchar_t / etc.) as UTF-8.
-        std::uint32_t cp = static_cast<std::uint32_t>(c);
+        auto cp = static_cast<std::uint32_t>(c);
         std::string out;
         if (cp <= 0x7F) {
             out += static_cast<char>(cp);

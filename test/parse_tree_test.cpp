@@ -50,7 +50,7 @@ TEST_CASE("value-stack-custom-node-type")
     using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
     Grammar<char, IntNode> g;
     g["num"] = DigitTerm({'0', '9'});
-    g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
+    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
@@ -71,7 +71,7 @@ TEST_CASE("value-stack-clear")
 
     Grammar<char, IntNode> g;
     g["num"] = DigitTerm({'0', '9'});
-    g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
+    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
@@ -105,7 +105,7 @@ TEST_CASE("value-stack-action-result-pushed")
     using DigitTerminal = TerminalExpr<MyContext, std::set<char>>;
     Grammar<char, IntNode> g;
     g["num"] = DigitTerminal(digits);
-    g["num"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
+    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
     });
@@ -130,7 +130,7 @@ TEST_CASE("value-stack-monostate-action-returns-default")
 
     Grammar<char> g;
     g["rule"] = terminal('a');
-    g["rule"].set_action([](DefaultCtxt& /*ctx*/, DefaultCtxt::ParseTreeNodePtr /*node*/) {
+    g["rule"].set_action([](DefaultCtxt& /*ctx*/, const DefaultCtxt::ParseTreeNodePtr& /*node*/) {
         return std::monostate{};
     });
 
@@ -213,11 +213,11 @@ TEST_CASE("value-stack-rollback-on-sequence-failure")
     using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
     Grammar<char, IntNode> g;
     g["digit"] = DigitTerm({'0', '9'});
-    g["digit"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
+    g["digit"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         return IntNode{ctx.at(node->start_offset) - '0'};
     });
     g["nonzero"] = DigitTerm({'1', '9'});
-    g["nonzero"].set_action([](MyContext& ctx, MyContext::ParseTreeNodePtr node) {
+    g["nonzero"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         return IntNode{ctx.at(node->start_offset) - '0'};
     });
     // "fail_seq" succeeds only on "<digit><nonzero>"; on "11" the second
@@ -250,9 +250,11 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action(
+        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
     g["b_node"] = ATerm('b');
-    g["b_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{2}; });
+    g["b_node"].set_action(
+        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{2}; });
     // Both alternatives produce a node. The point of this test: when the
     // first alternative fails (after partial match), its node is not
     // contributed to the parent tree before the second alternative is tried.
@@ -292,7 +294,8 @@ TEST_CASE("value-stack-rollback-on-not-predicate")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action(
+        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
     // !a_node succeeds (because lookahead doesn't match), and must leave
     // zero children — the child's would-be node is discarded by NotExpr.
     g["not_a"] = !g["a_node"];
@@ -310,7 +313,8 @@ TEST_CASE("value-stack-rollback-on-and-predicate")
     using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
     g["a_node"] = ATerm('a');
-    g["a_node"].set_action([](MyContext&, MyContext::ParseTreeNodePtr) { return IntNode{1}; });
+    g["a_node"].set_action(
+        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
     // &a_node succeeds (lookahead matches 'a'), and must leave zero children
     // — the child's node is discarded by AndExpr.
     g["and_a"] = &g["a_node"];

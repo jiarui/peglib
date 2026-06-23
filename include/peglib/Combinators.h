@@ -224,8 +224,8 @@ struct Repetition : ParsingExpr<Context, Repetition<Context, Child>>
 {
     using ParseResult = typename ParsingExpr<Context, Repetition<Context, Child>>::ParseResult;
 
-    Repetition(const Child& child, std::size_t min_r, std::int64_t max_r = -1)
-        : m_child(child), min_rep(min_r), max_rep(max_r)
+    Repetition(Child child, std::size_t min_r, std::int64_t max_r = -1)
+        : m_child(std::move(child)), min_rep(min_r), max_rep(max_r)
     {
         if (!((max_rep < 0) ||
               ((max_rep >= 0) && (min_rep <= static_cast<std::size_t>(max_rep))))) {
@@ -397,12 +397,11 @@ choice_parse_impl(Context& context, ChildOp parse_at, std::size_t count)
 template<typename Context, typename Child>
 struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>
 {
-    NotExpr(const Child& child) : m_child(child) {}
+    NotExpr(Child child) : m_child(std::move(child)) {}
     const Child& child() { return m_child; }
     typename Context::ParseResult parse(Context& context) const override
     {
-        return predicate_parse_impl(
-            context, [this](Context& c) { return m_child.parse(c); }, true);
+        return predicate_parse_impl(context, [this](Context& c) { return m_child.parse(c); }, true);
     }
 
     void collect_rule_refs(std::set<std::string>& refs) const override
@@ -420,7 +419,7 @@ protected:
 template<typename Context, typename Child>
 struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>
 {
-    AndExpr(const Child& child) : m_child(child) {}
+    AndExpr(Child child) : m_child(std::move(child)) {}
     const Child& child() { return m_child; }
     typename Context::ParseResult parse(Context& context) const override
     {

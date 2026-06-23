@@ -191,8 +191,7 @@ TEST_CASE("recover-predicate-custom-condition")
 {
     Grammar<> g;
     g["digit"] = terminal('0', '9');
-    g["digit"].set_recovery(
-        recover_predicate<char>([](char c) { return c == ';' || c == '\n'; }));
+    g["digit"].set_recovery(recover_predicate<char>([](char c) { return c == ';' || c == '\n'; }));
 
     // Recovery should stop at the first ';' or '\n', whichever comes first.
     std::string input = "abc\ndef";

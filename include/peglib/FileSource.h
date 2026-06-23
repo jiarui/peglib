@@ -122,9 +122,9 @@ struct FileSource
     // so this is the primary entry point; the iterator overload delegates here.
     void release_before(std::size_t pos)
     {
-        for (int idx = 0; idx < 2; ++idx) {
-            if (m_bufs[idx].m_buf_to <= pos) {
-                m_bufs[idx].clear();
+        for (auto& buf : m_bufs) {
+            if (buf.m_buf_to <= pos) {
+                buf.clear();
             }
         }
     }

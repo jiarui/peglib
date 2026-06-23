@@ -97,7 +97,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
     using CTermRange = TerminalExpr<Ctx, std::array<char, 2>>;
     using CTermPred = TerminalExpr<Ctx, bool (*)(char)>;
 
-    static Grammar<char, PegAstNodePtr> g = []() {
+    static Grammar<char, PegAstNodePtr> grammar = []() {
         Grammar<char, PegAstNodePtr> g;
 
         // Helper: pass-through action. NonTerminal may reuse the body's tree
@@ -105,7 +105,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // branch). In that case node->value is already set by the body.
         // Otherwise we search the body's children for the first sub-rule
         // that produced a value.
-        auto pass_through = [](Ctx&, TreePtr node) -> NodePtr {
+        auto pass_through = [](Ctx&, const TreePtr& node) -> NodePtr {
             if (node->value)
                 return node->value;
             for (auto& child : node->children) {
@@ -122,41 +122,41 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Whitespace and comments (transparent — return nullptr)
         // ==================================================================
         g["Comment"] = CTerm('#') >> *non_nl >> -CTerm('\n');
-        g["Comment"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["Comment"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["WSChar"] = CTerm(' ') | CTerm('\t') | CTerm('\r') | CTerm('\n');
-        g["WSChar"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["WSChar"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["Spacing"] = *(g["WSChar"] | g["Comment"]);
-        g["Spacing"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["Spacing"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["EndOfFile"] = !any_char;
-        g["EndOfFile"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["EndOfFile"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
         // Char — transparent (decoded by Literal/Class actions via offsets)
         // ==================================================================
         g["Escape"] = CTerm('\\') >> (CTerm('n') | CTerm('r') | CTerm('t') | CTerm('\'') |
                                       CTerm('"') | CTerm('\\') | CTerm('[') | CTerm(']'));
-        g["Escape"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["Escape"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["RawChar"] = CTermPred([](char c) { return c != '\\' && c != '\n' && c != '\0'; });
-        g["RawChar"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["RawChar"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["Char"] = g["Escape"] | g["RawChar"];
-        g["Char"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["Char"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
         // Identifier
         // ==================================================================
         g["IdentStart"] = CTermRange({'a', 'z'}) | CTermRange({'A', 'Z'}) | CTerm('_');
-        g["IdentStart"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["IdentStart"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["IdentCont"] = g["IdentStart"] | CTermRange({'0', '9'});
-        g["IdentCont"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["IdentCont"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["IdentifierRaw"] = g["IdentStart"] >> *g["IdentCont"];
-        g["IdentifierRaw"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["IdentifierRaw"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
             std::string name =
                 ctx.substr(node->start_offset, node->end_offset - node->start_offset);
             return PegAstNode::make(
@@ -200,7 +200,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         };
 
         g["SingleQuotedCore"] = CTerm('\'') >> *(!CTerm('\'') >> g["Char"]) >> CTerm('\'');
-        g["SingleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["SingleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx,
+                                                              const TreePtr& node) -> NodePtr {
             // node spans the full 'xyz' (with quotes). Body is [1, -1).
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
@@ -210,7 +211,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         });
 
         g["DoubleQuotedCore"] = CTerm('"') >> *(!CTerm('"') >> g["Char"]) >> CTerm('"');
-        g["DoubleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["DoubleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx,
+                                                              const TreePtr& node) -> NodePtr {
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string body = ctx.substr(s, e - s);
@@ -234,10 +236,10 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Action captures the raw bracketed source for the compiler to decode.
         // ==================================================================
         g["Range"] = g["Char"] >> -(CTerm('-') >> g["Char"]);
-        g["Range"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["Range"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         g["ClassCore"] = CTerm('[') >> -CTerm('^') >> *(!CTerm(']') >> g["Range"]) >> CTerm(']');
-        g["ClassCore"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["ClassCore"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
             std::string raw = ctx.substr(node->start_offset, node->end_offset - node->start_offset);
             return PegAstNode::make(
                 NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
@@ -250,9 +252,9 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // ==================================================================
         // Punctuation tokens — match + trailing Spacing, never push.
         // ==================================================================
-        auto make_punct = [&](const char* name, auto expr) {
+        auto make_punct = [&](const char* name, const auto& expr) {
             g[name] = expr;
-            g[name].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+            g[name].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
         };
 
         make_punct("LEFTARROW", CTerm('<') >> CTerm('-') >> g["Spacing"]);
@@ -281,16 +283,16 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // contiguous keyword so `%recoverX` doesn't partially match; the
         // trailing Spacing is the natural token boundary.
         make_punct("PERCENT_RECOVER",
-                   CTerm('%') >> CTerm('r') >> CTerm('e') >> CTerm('c') >> CTerm('o') >> CTerm('v') >>
-                       CTerm('e') >> CTerm('r') >> g["Spacing"]);
+                   CTerm('%') >> CTerm('r') >> CTerm('e') >> CTerm('c') >> CTerm('o') >>
+                       CTerm('v') >> CTerm('e') >> CTerm('r') >> g["Spacing"]);
 
         g["DOT"] = CTerm('.') >> g["Spacing"];
-        g["DOT"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["DOT"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             return PegAstNode::make(NodeKind::Dot, {}, node->start_offset, node->end_offset);
         });
 
         // CUT action: emit a Cut AST node (leaf, no payload, no children).
-        g["CUT"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["CUT"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             return PegAstNode::make(NodeKind::Cut, {}, node->start_offset, node->end_offset);
         });
 
@@ -312,7 +314,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Primary: pass through the meaningful child's value, except for
         // Lexeme (which needs to wrap its inner Expression) — detect that
         // by finding LESSTHAN among the children.
-        g["Primary"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Primary"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             // Lexeme form: wrap the inner Expression's value in a Lexeme node.
             for (auto& child : node->children) {
                 if (child && has_named(child, "LESSTHAN")) {
@@ -342,7 +344,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Suffixed — Primary with optional postfix (? * +).
         // ==================================================================
         g["Suffixed"] = g["Primary"] >> -(g["QUESTION"] | g["STAR"] | g["PLUS"]);
-        g["Suffixed"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Suffixed"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             auto primary = find_named(node, "Primary");
             NodePtr child_val = primary ? primary->value : node->value;
             if (!child_val)
@@ -385,7 +387,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Prefixed — optional prefix (& !) then Suffixed.
         // ==================================================================
         g["Prefixed"] = -(g["AND"] | g["NOT"]) >> g["Suffixed"];
-        g["Prefixed"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Prefixed"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             auto suffixed = find_named(node, "Suffixed");
             NodePtr child_val = suffixed ? suffixed->value : node->value;
             if (!child_val)
@@ -422,7 +424,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Sequence — one or more Prefixed.
         // ==================================================================
         g["Sequence"] = +g["Prefixed"];
-        g["Sequence"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Sequence"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             std::vector<NodePtr> items;
             for (auto& child : node->children) {
                 if (child && child->value)
@@ -441,7 +443,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Expression — Sequence (SLASH Sequence)*
         // ==================================================================
         g["Expression"] = g["Sequence"] >> *(g["SLASH"] >> g["Sequence"]);
-        g["Expression"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Expression"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             auto alts = collect_named(node, "Sequence");
             if (alts.empty())
                 return nullptr;
@@ -475,16 +477,18 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // eof / eol keywords inside RecoverSpec. Matched as contiguous
         // identifiers followed by a word boundary (next char is not an
         // ident-continuation) so `eofx` is not partially matched.
-        g["RECOVER_EOF"] = CTerm('e') >> CTerm('o') >> CTerm('f') >> !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOF"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
-        g["RECOVER_EOL"] = CTerm('e') >> CTerm('o') >> CTerm('l') >> !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOL"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["RECOVER_EOF"] =
+            CTerm('e') >> CTerm('o') >> CTerm('f') >> !g["IdentCont"] >> g["Spacing"];
+        g["RECOVER_EOF"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["RECOVER_EOL"] =
+            CTerm('e') >> CTerm('o') >> CTerm('l') >> !g["IdentCont"] >> g["Spacing"];
+        g["RECOVER_EOL"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
 
         // A single sync character: a single-quoted Char. Reuse the existing
         // Char rule so escapes (\n, \t, ...) work. The action extracts the
         // decoded character from the source span (quotes stripped).
         g["SyncChar"] = CTerm('\'') >> g["Char"] >> CTerm('\'') >> g["Spacing"];
-        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, const TreePtr& node) -> NodePtr {
             // node spans 'x' (with quotes). Body is [1, -1).
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
@@ -503,7 +507,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
             g["RECOVER_EOF"] | g["RECOVER_EOL"] |
             (g["OPENBRACE"] >> -g["SyncChar"] >>
              *(g["COMMA"] >> g["SyncChar"] | !g["CLOSEBRACE"] >> g["SyncChar"]) >> g["CLOSEBRACE"]);
-        g["RecoverSpec"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
+        g["RecoverSpec"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
             // Distinguish eof/eol/set by reading the matched source text
             // directly. Relying on has_named("RECOVER_EOF"/"RECOVER_EOL")
             // is unreliable because a failed first-alternative attempt can
@@ -539,7 +543,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // present, it goes into def->children[1].
         // ==================================================================
         g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"];
-        g["Definition"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+        g["Definition"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
             auto id = find_named(node, "Identifier");
             auto expr = find_named(node, "Expression");
             auto recovery = find_named(node, "Recovery");
@@ -561,7 +565,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // ==================================================================
         g["Grammar"] = g["Spacing"] >> +g["Definition"] >> g["EndOfFile"];
         // Grammar: pass through all Definition children's values.
-        g["Grammar"].set_action([](Ctx&, TreePtr /*node*/) -> NodePtr {
+        g["Grammar"].set_action([](Ctx&, const TreePtr& /*node*/) -> NodePtr {
             // Return the first definition; caller can inspect the full tree
             // for multiple definitions. This is a convention: the tree's
             // children carry all Definition nodes.
@@ -571,7 +575,7 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         g.set_start("Grammar");
         return g;
     }();
-    return g;
+    return grammar;
 }
 
 } // namespace peg

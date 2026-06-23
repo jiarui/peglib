@@ -27,6 +27,12 @@ top of peglib.
   Cut-committed failures are not recovered. Text-grammar surface: `%recover`.
 - **PEG-text extensions** (Phase 4): cut (`~`), lexeme (`< e >`), and
   recovery (`%recover(spec)`) now have textual syntax matching the C++ API.
+- **Parse-impl dedup**: the static DSL (`NotExpr`/`AndExpr`/`SequenceExpr`/
+  `AlternationExpr`/`RepeatExpr`) and the dynamic path (`DynNotExpr`/
+  `DynAndExpr`/`DynSequenceExpr`/`DynAlternationExpr`/`DynRepeatExpr`) now
+  share a single `*_parse_impl` body each (`predicate_parse_impl`,
+  `sequence_parse_impl`, `choice_parse_impl`, `repeat_parse_impl`). One
+  algorithm per combinator, not two.
 - **Grammar visualization** (Phase 5 slice): `Grammar::to_dot()` Graphviz
   DOT export of rule dependencies.
 
@@ -333,6 +339,21 @@ file, not just the first one.
       consult a labeled recovery grammar. Deferred; the current `%recover`
       directive uses the rule's own name as the diagnostic label, which covers
       the common case.
+
+### Verification
+
+- `recover_test.cpp` (7 cases) — C++ API: basic resync, multi-diagnostic
+  accumulation, cut-committed non-recovery, recover_eof, transparency,
+  API-form equivalence (`Rule::set_recovery` vs `peg::recover`), predicate
+  sync.
+- `peg_text_extensions_test.cpp` (13 cases) — text-grammar surface: cut
+  commits alternative/repetition, cut-as-primary, lexeme no-op/nested/
+  leftarrow-disambiguation, recover set/eof/eol/multi-char/multi-rule,
+  cut-committed non-recovery, formatting flexibility.
+- `error_test.cpp` — multi-diagnostic channel append/clear/independence.
+- `self_parse_test.cpp` — C++ meta-grammar parses the updated `meta/peg.peg`
+  (which now documents `~`, `< e >`, `%recover`).
+- Full suite: **196 test cases / 35226 assertions pass**, 0 failures.
 
 ## Phase 5 — Visualization
 

@@ -79,10 +79,10 @@ struct ParsingExpr : ParsingExprInterface<Context>
     using NodeType = typename Context::node_type;
     using ParseResult = typename Context::ParseResult;
     using ParseTreeNodePtr = typename Context::ParseTreeNodePtr;
-    using SemanticAction = std::function<NodeType(Context&, ParseTreeNodePtr)>;
-    void set_action(SemanticAction action) { m_action = action; }
+    using SemanticAction = std::function<NodeType(Context&, const ParseTreeNodePtr&)>;
+    void set_action(SemanticAction action) { m_action = std::move(action); }
     ParsingExpr() = default;
-    ParsingExpr(SemanticAction action) : m_action(action) {}
+    ParsingExpr(SemanticAction action) : m_action(std::move(action)) {}
     ParsingExpr(const ParsingExpr&) = default;
     ParsingExpr(ParsingExpr&&) = default;
     ParsingExpr& operator=(const ParsingExpr&) = default;

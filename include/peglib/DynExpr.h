@@ -217,7 +217,9 @@ struct DynLexemeExpr : ParsingExpr<Context, DynLexemeExpr<Context>>
     {
         bool prev = context.skip_enabled();
         context.skip_enabled(false);
-        ScopeGuard restore{[&context, prev]() { context.skip_enabled(prev); }};
+        ScopeGuard restore{[&context, prev]() {
+            context.skip_enabled(prev);
+        }};
         return m_child->parse(context);
     }
     void collect_rule_refs(std::set<std::string>& refs) const override

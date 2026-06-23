@@ -18,9 +18,9 @@ struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueTy
 {
     using SemanticAction =
         typename ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>::SemanticAction;
-    TerminalExpr(const TerminalValueType& value, SemanticAction action = nullptr)
-        : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(action),
-          m_terminalValue{value}
+    TerminalExpr(TerminalValueType value, SemanticAction action = nullptr)
+        : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(std::move(action)),
+          m_terminalValue{std::move(value)}
     {}
     typename Context::ParseResult parse(Context& context) const override
     {
@@ -91,7 +91,7 @@ template<typename Context, typename SeqType>
     requires std::ranges::random_access_range<SeqType>
 struct TerminalSeqExpr : ParsingExpr<Context, TerminalSeqExpr<Context, SeqType>>
 {
-    TerminalSeqExpr(const SeqType& value) : m_terminalValues{value} {}
+    TerminalSeqExpr(SeqType value) : m_terminalValues{std::move(value)} {}
     typename Context::ParseResult parse(Context& context) const override
     {
         auto initState = context.state();
@@ -134,7 +134,7 @@ private:
 template<typename Context>
 struct EmptyExpr : ParsingExpr<Context, EmptyExpr<Context>>
 {
-    EmptyExpr() {}
+    EmptyExpr() = default;
     typename Context::ParseResult parse(Context& /*context*/) const override
     {
         return {true, nullptr};

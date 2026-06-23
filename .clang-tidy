@@ -4,6 +4,13 @@
 # naming conventions (the codebase mixes snake_case and camelCase; a
 # naming pass is deferred to a dedicated cleanup commit).
 #
+# The disabled checks at the bottom (modernize-use-integer-sign-comparison,
+# modernize-use-designated-initializers, performance-enum-size, ...) were
+# all introduced in clang-tidy 18/19/20. CI pins clang-tidy-17, so those
+# checks never run there; we explicitly disable them so local runs on
+# newer toolchains (18+) don't surface version-specific noise that would
+# be invisible to CI. If CI is ever bumped past 17, revisit this list.
+#
 # Run with: cmake -DPEGLIB_ENABLE_CLANG_TIDY=ON ...
 
 Checks: >
@@ -13,11 +20,18 @@ Checks: >
   performance-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-throwing-static-initialization,
+  -bugprone-crtp-constructor-accessibility,
   -modernize-avoid-c-arrays,
+  -modernize-raw-string-literal,
   -modernize-use-default-member-init,
+  -modernize-use-designated-initializers,
+  -modernize-use-integer-sign-comparison,
+  -modernize-use-ranges,
+  -modernize-use-starts-ends-with,
   -modernize-use-trailing-return-type,
   -modernize-use-nodiscard,
   -modernize-concat-nested-namespaces,
+  -performance-enum-size,
   -readability-*,
   +readability-container-data-pointer,
   +readability-delete-null-pointer,

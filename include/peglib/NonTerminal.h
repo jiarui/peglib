@@ -120,10 +120,10 @@ public:
                 std::size_t resume_at =
                     (scan < context.input_size()) ? scan + 1 : context.input_size();
                 context.reset(resume_at);
-                context.record_diagnostic(Diagnostic{
-                    start_pos,
-                    {ExpectedItem{ExpectedKind::RuleLabel,
-                                  m_recover.label.empty() ? m_name : m_recover.label}}});
+                context.record_diagnostic(
+                    Diagnostic{start_pos,
+                               {ExpectedItem{ExpectedKind::RuleLabel,
+                                             m_recover.label.empty() ? m_name : m_recover.label}}});
                 ParseResult recovered{true, nullptr};
                 rule_state.m_cached_result = recovered;
                 rule_state.m_last_pos = resume_at;
@@ -281,16 +281,26 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // the update (because parsing delegates to rhs's NonTerminal, not a
     // snapshot of its body).
     // Example: g["A"] = g["B"];  // A delegates to B
+    // NOTE: std::addressof is required because peglib overloads unary
+    // operator& as the and-predicate combinator (Rule.h), so &rhs would
+    // build an AndExpr rather than yielding a Rule*.
     Rule& operator=(const Rule& rhs)
     {
-        *m_impl = rhs; // NonTerminal template operator= stores a Rule body
+        if (this == std::addressof(rhs))
+            return *this; // self-alias would create a cycle (Rule → its own NonTerminal)
+        *m_impl = rhs;    // NonTerminal template operator= stores a Rule body
         m_impl->set_name(m_name);
         return *this;
     }
     // Not noexcept: NonTerminal::template operator= does make_shared (can
-    // throw bad_alloc), and set_name does a std::string assign.
+    // throw bad_alloc), and set_name does a std::string assign. Refactoring
+    // the storage to make this noexcept is out of scope; the throwing nature
+    // is documented and accepted.
+    // NOLINTNEXTLINE(performance-noexcept-move-constructor)
     Rule& operator=(Rule&& rhs)
     {
+        if (this == std::addressof(rhs))
+            return *this;
         *m_impl = rhs;
         m_impl->set_name(m_name);
         return *this;

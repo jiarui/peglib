@@ -72,7 +72,7 @@ public:
     // check pollutes undefined_rules() — `if (g["typo"].is_defined())` creates
     // the rule "typo". For read-only existence queries that must NOT insert,
     // use find() or has_rule() instead.
-    Rule operator[](std::string name)
+    Rule operator[](const std::string& name)
     {
         auto [it, inserted] = m_rules.try_emplace(name);
         if (inserted) {

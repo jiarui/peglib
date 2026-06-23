@@ -170,7 +170,7 @@ TEST_CASE("[json] string-rule-rejects-unterminated")
 TEST_CASE("[json] whitespace-tolerance")
 {
     using namespace json_grammar;
-    for (const std::string input : {
+    for (const std::string& input : std::initializer_list<std::string>{
              "  null  ",
              "\n\ttrue\r\n",
              "   42   ",
