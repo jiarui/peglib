@@ -23,8 +23,24 @@ target_include_directories(peglib_test_main SYSTEM PRIVATE ${doctest_include_dir
 add_library(peglib_test_warnings INTERFACE)
 target_compile_options(peglib_test_warnings INTERFACE
     $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:
-        -Wall -Wextra -Wpedantic -Werror>
+        -Wall -Wextra -Wpedantic -Werror "-Wno-#warnings">
     $<$<CXX_COMPILER_ID:MSVC>:/W4 /WX>)
+# -Wno-#warnings: libstdc++ 16's <ciso646> (removed in C++20) emits a #warning
+# that -Werror escalates; doctest.h pulls it in transitively. Only libstdc++
+# 16 fires it, but the flag is harmless elsewhere — GCC silently ignores
+# unknown -Wno-* options, and clang has long recognized -W#warnings — so it's
+# applied unconditionally rather than probed.
+#
+# -Wno-c2y-extensions: clang 22+ (under -Wpedantic) flags __COUNTER__ — used by
+# doctest's DOCTEST_ANONYMOUS macro at every TEST_CASE / SUBCASE site — as a C2y
+# extension, landing in test code despite doctest.h being a SYSTEM header. The
+# flag exists only in clang 22+; CI's clang-14/17 reject it (and -Werror
+# escalates the rejection), so it's version-gated rather than probed. Library
+# headers never use __COUNTER__, so this only affects doctest macro expansions.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "22")
+    target_compile_options(peglib_test_warnings INTERFACE -Wno-c2y-extensions)
+endif()
 
 # ---------------------------------------------------------------------------
 # Core library tests

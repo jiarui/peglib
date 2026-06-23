@@ -48,10 +48,11 @@ jobs:
           # bugprone-unchecked-optional-access: clang-tidy's flow analysis
           # cannot prove optionals are engaged after a doctest REQUIRE macro,
           # producing false positives that varied between v17 and v22. CI and
-          # local are now both v22 so results match exactly; the check is
-          # disabled for test TUs via test/.clang-tidy (where the doctest
-          # macro limitation makes it unreliable) but stays enabled for
-          # library headers. The canonical version for this repo is 22.x.
+          # local are now both v22 so results match exactly. clang-tidy is
+          # scoped to a dedicated TU (test/tidy_check.cpp) that only includes
+          # the library umbrella header, so the doctest macro limitation never
+          # comes into play and the check stays fully enabled there. The
+          # canonical version for this repo is 22.x.
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
             sudo gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
           echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \

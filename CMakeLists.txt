@@ -59,33 +59,27 @@ endif()
 if(PEGLIB_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
-        # -Wno-#warnings suppresses a #warning emitted by GCC 16's <ciso646>
-        # header (removed in C++20) that would otherwise abort the tidy run on
-        # bleeding-edge libstdc++. This diagnostic does not appear on CI's
-        # Ubuntu 24.04 + clang-22 toolchain, but the flag is harmless there.
-        set(tidy_extra_args "--extra-arg=-Wno-#warnings")
+        # clang-tidy is scoped to a single TU that includes the umbrella
+        # header (peglib.h), which pulls in every library header. This avoids
+        # running tidy on test code, where doctest's macros produce
+        # false-positives (bugprone-unchecked-optional-access can't model
+        # REQUIRE) and version-specific noise (__COUNTER__ flagged as a C2y
+        # extension on clang 22+). The library headers are the public API —
+        # that's where tidy catches real bugs.
+        #
+        # -Wno-#warnings suppresses a #warning from GCC 16's <ciso646> header
+        # (removed in C++20) that would abort tidy on bleeding-edge libstdc++.
+        # It's harmless on CI's clang-22. No -Wno-c2y-extensions is needed
+        # because the tidy TU doesn't include doctest.
+        set(peglib_clang_tidy
+            "${CLANG_TIDY_EXE};--quiet;--extra-arg=-Wno-#warnings")
 
-        # clang 22+ flags __COUNTER__ (used by doctest's DOCTEST_ANONYMOUS
-        # macro) as a C2y extension. doctest is a SYSTEM header so its own
-        # internal uses are suppressed, but the diagnostic attaches to the
-        # macro *expansion point* in test code and clang-tidy escalates it via
-        # WarningsAsErrors. -Wno-c2y-extensions fixes this, but only very
-        # recent clang-tidy builds recognize the flag — older ones reject it
-        # as an unknown option (which itself aborts the run). Probe clang-tidy
-        # directly by running it on a trivial TU with the flag and checking
-        # whether it reports "unknown warning option".
-        set(_probe_src "${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/tidy_c2y_probe.cpp")
-        file(WRITE ${_probe_src} "int main(){return 0;}\n")
-        execute_process(
-            COMMAND ${CLANG_TIDY_EXE} --quiet --extra-arg=-Wno-c2y-extensions ${_probe_src} --
-            OUTPUT_VARIABLE _probe_out
-            ERROR_VARIABLE _probe_err
-            RESULT_VARIABLE _probe_result)
-        if(NOT (_probe_err MATCHES "unknown warning option" OR _probe_out MATCHES "unknown warning option"))
-            string(APPEND tidy_extra_args ";--extra-arg=-Wno-c2y-extensions")
-        endif()
-
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--quiet;${tidy_extra_args}")
+        add_executable(peglib_tidy_check "${CMAKE_CURRENT_SOURCE_DIR}/test/tidy_check.cpp")
+        target_link_libraries(peglib_tidy_check PRIVATE peglib)
+        set_target_properties(peglib_tidy_check PROPERTIES
+            CXX_CLANG_TIDY "${peglib_clang_tidy}")
+        # Not a test — it has no test assertions, it exists solely so tidy
+        # has a TU to analyze. Don't register it with ctest.
     else()
         message(WARNING "clang-tidy not found")
     endif()
