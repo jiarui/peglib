@@ -5,6 +5,7 @@
 #include "peglib/NonTerminal.h"
 #include "peglib/ParseError.h"
 #include "peglib/PegAst.h"
+#include "peglib/Recover.h"
 #include "peglib/Rule.h"
 #include "peglib/Terminals.h"
 
@@ -92,6 +93,12 @@ public:
             for (const auto& def : defs) {
                 auto body = compile(def->children[0], out);
                 out[def->text] = body;
+                // Optional Recovery suffix (def->children[1] when present):
+                // decode the encoded spec and attach to the rule.
+                if (def->children.size() > 1 && def->children[1] &&
+                    def->children[1]->kind == NodeKind::Recovery) {
+                    out[def->text].set_recovery(decode_recovery(def->children[1], def->text));
+                }
                 if (first) {
                     out.set_start(def->text);
                     first = false;
@@ -180,6 +187,10 @@ private:
             return compile_andpred(node, g);
         case NodeKind::NotPred:
             return compile_notpred(node, g);
+        case NodeKind::Cut:
+            return compile_cut();
+        case NodeKind::Lexeme:
+            return compile_lexeme(node, g);
         default:
             throw std::runtime_error{"GrammarCompiler: unhandled NodeKind " +
                                      std::to_string(static_cast<int>(node->kind))};
@@ -305,6 +316,21 @@ private:
         return parsers::DynExpr<DefaultCtx>{impl};
     }
 
+    // Cut: DynCutExpr (leaf, no child).
+    static parsers::DynExpr<DefaultCtx> compile_cut()
+    {
+        auto impl = std::make_shared<parsers::DynCutExpr<DefaultCtx>>();
+        return parsers::DynExpr<DefaultCtx>{impl};
+    }
+
+    // Lexeme: DynLexemeExpr (single child wrapper).
+    static parsers::DynExpr<DefaultCtx> compile_lexeme(const NodePtr& node, DefaultGrammar& g)
+    {
+        auto child = extract_impl(compile(node->children[0], g));
+        auto impl = std::make_shared<parsers::DynLexemeExpr<DefaultCtx>>(std::move(child));
+        return parsers::DynExpr<DefaultCtx>{impl};
+    }
+
     // Extract the shared_ptr<ParsingExprInterface> from a DynExpr.
     static InterfacePtr extract_impl(parsers::DynExpr<DefaultCtx> expr) { return expr.impl(); }
 
@@ -328,6 +354,32 @@ private:
             }
         }
         return src[i++];
+    }
+
+    // Decode a Recovery AST node into a RecoverSpec. The encoding scheme
+    // (see PegAst.h NodeKind::Recovery):
+    //   "set:XY" — recover_set on chars X, Y, ...
+    //   "eof"    — recover_eof
+    //   "eol"    — recover_eol
+    // The rule's name is used as the diagnostic label.
+    static RecoverSpec<char> decode_recovery(const NodePtr& node, const std::string& rule_name)
+    {
+        const std::string& spec = node->text;
+        if (spec == "eof")
+            return recover_eof<char>(rule_name);
+        if (spec == "eol")
+            return recover_eol<char>(rule_name);
+        // "set:..." — chars after the prefix.
+        if (spec.rfind("set:", 0) == 0) {
+            std::set<char> chars;
+            for (std::size_t i = 4; i < spec.size(); ++i) {
+                chars.insert(spec[i]);
+            }
+            return recover_set<char>(std::move(chars), rule_name);
+        }
+        // Unknown encoding — fall back to eof (permissive; should not
+        // happen with the meta-grammar producing the canonical forms).
+        return recover_eof<char>(rule_name);
     }
 };
 

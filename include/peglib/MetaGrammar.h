@@ -265,23 +265,78 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         make_punct("OPEN", CTerm('(') >> g["Spacing"]);
         make_punct("CLOSE", CTerm(')') >> g["Spacing"]);
 
+        // CUT — tilde. A standalone primary (leaf), not a prefix operator
+        // (unlike & and !). Emits a Cut AST node directly. Action is set
+        // below (it produces a value, so it can't use the transparent
+        // make_punct helper).
+        make_punct("CUT", CTerm('~') >> g["Spacing"]);
+
+        // LESSTHAN / GREATERTHAN — lexeme delimiters `< e >`. LESSTHAN must
+        // disambiguate from LEFTARROW (`<-`): the `!CTerm('-')` lookahead
+        // rejects the arrow form so `<-` is not misparsed as a lexeme open.
+        make_punct("LESSTHAN", CTerm('<') >> !CTerm('-') >> g["Spacing"]);
+        make_punct("GREATERTHAN", CTerm('>') >> g["Spacing"]);
+
+        // PERCENT_RECOVER — the directive prefix `%recover`. Matched as a
+        // contiguous keyword so `%recoverX` doesn't partially match; the
+        // trailing Spacing is the natural token boundary.
+        make_punct("PERCENT_RECOVER",
+                   CTerm('%') >> CTerm('r') >> CTerm('e') >> CTerm('c') >> CTerm('o') >> CTerm('v') >>
+                       CTerm('e') >> CTerm('r') >> g["Spacing"]);
+
         g["DOT"] = CTerm('.') >> g["Spacing"];
         g["DOT"].set_action([](Ctx&, TreePtr node) -> NodePtr {
             return PegAstNode::make(NodeKind::Dot, {}, node->start_offset, node->end_offset);
+        });
+
+        // CUT action: emit a Cut AST node (leaf, no payload, no children).
+        g["CUT"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+            return PegAstNode::make(NodeKind::Cut, {}, node->start_offset, node->end_offset);
         });
 
         // ==================================================================
         // Primary
         //   Primary <- Identifier !LEFTARROW
         //             / OPEN Expression CLOSE
-        //             / Literal / Class / DOT
+        //             / LESSTHAN Expression GREATERTHAN   (lexeme)
+        //             / Literal / Class / DOT / CUT
+        //
+        // CUT is a leaf primary (no child). Lexeme wraps its inner
+        // Expression in a Lexeme AST node.
         // ==================================================================
         g["Primary"] = (g["Identifier"] >> !g["LEFTARROW"]) |
-                       (g["OPEN"] >> g["Expression"] >> g["CLOSE"]) | g["Literal"] | g["Class"] |
-                       g["DOT"];
+                       (g["OPEN"] >> g["Expression"] >> g["CLOSE"]) |
+                       (g["LESSTHAN"] >> g["Expression"] >> g["GREATERTHAN"]) | g["Literal"] |
+                       g["Class"] | g["DOT"] | g["CUT"];
 
-        // Primary: pass through the meaningful child's value.
-        g["Primary"].set_action(pass_through);
+        // Primary: pass through the meaningful child's value, except for
+        // Lexeme (which needs to wrap its inner Expression) — detect that
+        // by finding LESSTHAN among the children.
+        g["Primary"].set_action([](Ctx&, TreePtr node) -> NodePtr {
+            // Lexeme form: wrap the inner Expression's value in a Lexeme node.
+            for (auto& child : node->children) {
+                if (child && has_named(child, "LESSTHAN")) {
+                    auto inner = find_named(node, "Expression");
+                    if (!inner || !inner->value)
+                        return nullptr;
+                    auto n = PegAstNode::make(
+                        NodeKind::Lexeme, {}, node->start_offset, node->end_offset);
+                    n->children.push_back(inner->value);
+                    return n;
+                }
+            }
+            // All other forms: pass through the meaningful child's value
+            // (Identifier/Literal/Class/DOT/CUT/OPEN-Expression-CLOSE all
+            // either set node->value directly via their own action or have
+            // a single meaningful child whose value we forward).
+            if (node->value)
+                return node->value;
+            for (auto& child : node->children) {
+                if (child && child->value)
+                    return child->value;
+            }
+            return nullptr;
+        });
 
         // ==================================================================
         // Suffixed — Primary with optional postfix (? * +).
@@ -398,15 +453,96 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         });
 
         // ==================================================================
-        // Definition — Identifier LEFTARROW Expression
+        // Recovery suffix (peglib extension).
         //
-        // All three children are present in node->children; find_named
-        // locates Identifier and Expression by rule name.
+        //   Definition <- Identifier LEFTARROW Expression Recovery?
+        //   Recovery   <- PERCENT_RECOVER OPEN RecoverSpec CLOSE
+        //   RecoverSpec <- eof
+        //                 / eol
+        //                 / OPENBRACE (SyncChar (COMMA? SyncChar)*)? CLOSEBRACE
+        //
+        // The sync spec is encoded into the Recovery node's text:
+        //   "set:XY" — recover_set on chars X, Y, ...
+        //   "eof"    — recover_eof
+        //   "eol"    — recover_eol
+        // (No predicate form in text — recover_predicate stays C++-API-only.)
+        //
+        // SyncChar reuses the existing Char rule (so escape sequences work),
+        // but restricts to single characters — the action reads the matched
+        // span directly from the source.
         // ==================================================================
-        g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"];
+
+        // eof / eol keywords inside RecoverSpec. Matched as contiguous
+        // identifiers followed by a word boundary (next char is not an
+        // ident-continuation) so `eofx` is not partially matched.
+        g["RECOVER_EOF"] = CTerm('e') >> CTerm('o') >> CTerm('f') >> !g["IdentCont"] >> g["Spacing"];
+        g["RECOVER_EOF"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+        g["RECOVER_EOL"] = CTerm('e') >> CTerm('o') >> CTerm('l') >> !g["IdentCont"] >> g["Spacing"];
+        g["RECOVER_EOL"].set_action([](Ctx&, TreePtr) -> NodePtr { return nullptr; });
+
+        // A single sync character: a single-quoted Char. Reuse the existing
+        // Char rule so escapes (\n, \t, ...) work. The action extracts the
+        // decoded character from the source span (quotes stripped).
+        g["SyncChar"] = CTerm('\'') >> g["Char"] >> CTerm('\'') >> g["Spacing"];
+        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, TreePtr node) -> NodePtr {
+            // node spans 'x' (with quotes). Body is [1, -1).
+            std::size_t s = node->start_offset + 1;
+            std::size_t e = node->end_offset - 1;
+            std::string body = ctx.substr(s, e - s);
+            return PegAstNode::make(
+                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
+        });
+
+        // RecoverSpec: eof / eol / { SyncChar (COMMA? SyncChar)* }
+        // The optional COMMA between sync chars is purely cosmetic.
+        make_punct("OPENBRACE", CTerm('{') >> g["Spacing"]);
+        make_punct("CLOSEBRACE", CTerm('}') >> g["Spacing"]);
+        make_punct("COMMA", CTerm(',') >> g["Spacing"]);
+
+        g["RecoverSpec"] =
+            g["RECOVER_EOF"] | g["RECOVER_EOL"] |
+            (g["OPENBRACE"] >> -g["SyncChar"] >>
+             *(g["COMMA"] >> g["SyncChar"] | !g["CLOSEBRACE"] >> g["SyncChar"]) >> g["CLOSEBRACE"]);
+        g["RecoverSpec"].set_action([](Ctx& ctx, TreePtr node) -> NodePtr {
+            // Distinguish eof/eol/set by reading the matched source text
+            // directly. Relying on has_named("RECOVER_EOF"/"RECOVER_EOL")
+            // is unreliable because a failed first-alternative attempt can
+            // leave a named node in the parse subtree.
+            auto span = ctx.substr(node->start_offset, node->end_offset - node->start_offset);
+            if (span == "eof")
+                return PegAstNode::make(
+                    NodeKind::Recovery, "eof", node->start_offset, node->end_offset);
+            if (span == "eol")
+                return PegAstNode::make(
+                    NodeKind::Recovery, "eol", node->start_offset, node->end_offset);
+            // Set form: concatenate all SyncChar values into "set:XYZ".
+            auto chars = collect_named(node, "SyncChar");
+            std::string spec = "set:";
+            for (auto& c : chars) {
+                if (c && !c->text.empty())
+                    spec += c->text;
+            }
+            return PegAstNode::make(
+                NodeKind::Recovery, std::move(spec), node->start_offset, node->end_offset);
+        });
+
+        // Recovery wrapper: %recover ( RecoverSpec ).
+        g["Recovery"] = g["PERCENT_RECOVER"] >> g["OPEN"] >> g["RecoverSpec"] >> g["CLOSE"];
+        g["Recovery"].set_action(pass_through);
+
+        // ==================================================================
+        // Definition — Identifier LEFTARROW Expression Recovery?
+        //
+        // Children in node->children: Identifier, LEFTARROW, Expression,
+        // optional Recovery. find_named locates them by rule name. The
+        // body Expression goes into def->children[0]; if Recovery is
+        // present, it goes into def->children[1].
+        // ==================================================================
+        g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"];
         g["Definition"].set_action([](Ctx&, TreePtr node) -> NodePtr {
             auto id = find_named(node, "Identifier");
             auto expr = find_named(node, "Expression");
+            auto recovery = find_named(node, "Recovery");
             if (!id || !id->value)
                 return nullptr;
             // Span the whole Definition (name <- body); position diagnostics
@@ -415,6 +551,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
                 NodeKind::Definition, id->value->text, node->start_offset, node->end_offset);
             if (expr && expr->value)
                 def->children.push_back(expr->value);
+            if (recovery && recovery->value)
+                def->children.push_back(recovery->value);
             return def;
         });
 

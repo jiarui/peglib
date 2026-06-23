@@ -43,7 +43,8 @@ add_executable(peglib_test
     char32_smoke_test.cpp
     skipper_test.cpp
     to_dot_test.cpp
-    recover_test.cpp)
+    recover_test.cpp
+    peg_text_extensions_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_test PRIVATE ${doctest_include_dir})

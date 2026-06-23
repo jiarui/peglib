@@ -8,11 +8,14 @@
 #Extensions over Ford 2004:
 #- '#' comments to end of line
 #-[^...] negated character classes
+#- '~' cut operator(committed choice - no PEG standard; peglib extension)
+#- '< e >' lexeme(disable auto - skip for e - no - op until %whitespace exists)
+#- '%recover(spec)' recovery suffix on a Definition
 
 # ─── Hierarchical syntax ──────────────────────────────────────────────
 Grammar      <- Spacing Definition+ EndOfFile
 
-Definition   <- Identifier LEFTARROW Expression
+Definition   <- Identifier LEFTARROW Expression Recovery?
 Expression   <- Sequence (SLASH Sequence)*
 Sequence     <- Prefixed*
 Prefixed     <- (AND / NOT)? Suffixed
@@ -21,13 +24,22 @@ Suffixed     <- Primary (QUESTION / STAR / PLUS)?
 Primary
     <- Identifier !LEFTARROW
      / OPEN Expression CLOSE
+     / LESSTHAN Expression GREATERTHAN
      / Literal
      / Class
      / DOT
+     / CUT
+
+Recovery     <- PERCENT_RECOVER OPEN RecoverSpec CLOSE
+RecoverSpec  <- RECOVER_EOF / RECOVER_EOL
+              / OPENBRACE SyncChar ((COMMA / !CLOSEBRACE) SyncChar)* CLOSEBRACE
+SyncChar     <- ['] Char ['] Spacing
 
 # ─── Lexical syntax(each token consumes its own trailing Spacing) ───
 Identifier   <- IdentStart IdentCont* Spacing
 LEFTARROW    <- '<-' Spacing
+LESSTHAN     <- '<' !'-' Spacing
+GREATERTHAN  <- '>' Spacing
 SLASH        <- '/' Spacing
 AND          <- '&' Spacing
 NOT          <- '!' Spacing
@@ -36,7 +48,14 @@ STAR         <- '*' Spacing
 PLUS         <- '+' Spacing
 OPEN         <- '(' Spacing
 CLOSE        <- ')' Spacing
+CUT          <- '~' Spacing
 DOT          <- '.' Spacing
+PERCENT_RECOVER <- '%recover' Spacing
+RECOVER_EOF  <- 'eof' !IdentCont Spacing
+RECOVER_EOL  <- 'eol' !IdentCont Spacing
+OPENBRACE    <- '{' Spacing
+CLOSEBRACE   <- '}' Spacing
+COMMA        <- ',' Spacing
 Literal      <- ['] (!['] Char)* ['] Spacing
               / ["] (!["] Char)* ["] Spacing
 Class        <- '[' '^'? (!']' Range)* ']' Spacing

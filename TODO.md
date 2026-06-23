@@ -21,6 +21,12 @@ top of peglib.
   transparent rule fires between adjacent sequence children and between
   repetition iterations; pest-style leading whitespace at the grammar
   boundary. `lexeme()` locally disables skip for token bodies.
+- **Error recovery** (Phase 4): `Rule::set_recovery(spec)` / `peg::recover`
+  sugar + `RecoverSpec` helpers (`recover_set` / `recover_eol` / `recover_eof`
+  / `recover_predicate`). Multi-diagnostic channel (`Context::diagnostics()`).
+  Cut-committed failures are not recovered. Text-grammar surface: `%recover`.
+- **PEG-text extensions** (Phase 4): cut (`~`), lexeme (`< e >`), and
+  recovery (`%recover(spec)`) now have textual syntax matching the C++ API.
 - **Grammar visualization** (Phase 5 slice): `Grammar::to_dot()` Graphviz
   DOT export of rule dependencies.
 
@@ -272,43 +278,61 @@ a normal parse failure into a thrown `ParseError`, which the user did not
 opt into at the failure site. No real consumer demand. The library does
 not provide a separate `atomic()` form.
 
-### Known asymmetry — DynExpr lacks Lexeme / Cut
+### PEG-text extensions — cut / lexeme / recovery
 
-`LexemeExpr` and `CutExpr` exist only in the static DSL. There is no
-`DynLexemeExpr`, no `DynCutExpr`, and no PEG-text syntax for either. This
-is intentional:
+The textual PEG grammar (`GrammarCompiler::from_string`) supports three
+peglib-specific constructs that mirror the C++ combinator API. All three
+were added in the same design pass (Phase 4) so they share a coherent
+syntax family.
 
-- **Lexeme**: the `GrammarCompiler` path does not set a skipper (Phase 3
-  design contract — see Whitespace model row in this table). With no
-  skipper in effect, `lexeme(...)` would be a no-op, so a DynLexemeExpr
-  would be dead code. If `GrammarCompiler` ever grows a `%whitespace`
-  directive that auto-installs a default skipper, a DynLexemeExpr + text
-  syntax becomes necessary and should be added then.
-- **Cut**: `DynAlternationExpr` already honors `Context::cut()` state
-  correctly, but there is no standard PEG syntax for cut (Ford 2004 and
-  yhirose's peglib both lack one). Designing an unambiguous text syntax
-  is the real blocker — not the trivial DynCutExpr implementation. Defer
-  until Phase 4/6 extend the PEG syntax anyway; cut's text syntax can be
-  settled in the same pass.
+- **Cut `~`** — a standalone primary (leaf). Inside an Alternation or
+  Repetition, it commits the current scope: subsequent failure throws
+  `ParseError`. Mirrors `cut()` / `CutExpr`. Outside any scope (top-level
+  standalone `~`), the cut flag is dropped — `Context::cut(bool)` is a
+  no-op on an empty cut stack. No PEG standard exists for cut; `~` follows
+  Prolog / pest / Roslyn precedent.
+- **Lexeme `< e >`** — disables auto-skip for the inner expression's
+  subtree. Mirrors `lexeme()` / `LexemeExpr`. NOTE: with no skipper
+  configured (the `GrammarCompiler` default — see Whitespace model row
+  above), `< e >` is a **no-op**: it compiles to a `DynLexemeExpr` that
+  toggles `Context::skip_enabled`, but that flag is already `false`. The
+  plumbing exists so a future `%whitespace` directive can auto-install a
+  skipper without changes here. `<` must be disambiguated from `<-`
+  (LEFTARROW) via a `!'-'` lookahead in the lexer.
+- **Recovery `%recover(spec)`** — definition-level suffix matching
+  `Rule::set_recovery`. Three forms: `%recover({';', '}'})` (sync set),
+  `%recover(eof)`, `%recover(eol)`. See Phase 4 above.
 
-When Phase 4 (recover) and Phase 6 (capture) extend the PEG text grammar,
-the cut-syntax question should be revisited in the same design pass so
-the new constructs and cut share a coherent syntax.
+The C++ API retains strictly more power: `recover_predicate` (arbitrary
+sync predicate) has no textual form, since user-defined predicates aren't
+expressible in PEG text.
 
-## Phase 4 — Error Recovery
+## Phase 4 — Error Recovery (DONE)
 
 Production parsers (IDEs, linters, formatters) need to report *many* errors per
 file, not just the first one.
 
-- [ ] **Recovery combinator**: `recover(rule, sync_set)` — on `rule` failure,
-      skip input until a token in `sync_set` is reached, then continue parsing
-- [ ] **Multi-diagnostic reporting**: `Context::diagnostics()` returns a vector
-      of `Diagnostic` accumulated across recovery points (currently only the
-      furthest-failure is queryable)
+- [x] **Recovery combinator** (C++ API): `Rule::set_recovery(spec)` and the
+      `peg::recover(rule, spec)` sugar attach a `RecoverSpec` to a `NonTerminal`.
+      On body failure, the rule scans forward to the next sync token, records a
+      diagnostic at the original failure position, consumes the sync token, and
+      reports recovered success with a transparent null tree. Cut-committed
+      failures are NOT recovered — cut is an explicit commitment.
+- [x] **`RecoverSpec` helpers**: `recover_set({';', '}'}, label)`,
+      `recover_eol(label)`, `recover_eof(label)`, and `recover_predicate(fn, label)`
+      cover the common sync patterns. User-defined predicates stay C++-API-only
+      (not expressible in PEG text).
+- [x] **Multi-diagnostic reporting**: `Context::record_diagnostic` /
+      `diagnostics()` / `take_diagnostics()` — a parallel, append-only channel
+      alongside the furthest-failure path. Recovery points emit one diagnostic
+      per resync so a parser can report many errors per file.
+- [x] **Text-grammar surface** (`%recover`): `S <- 'x' %recover({';'})`,
+      `%recover(eof)`, `%recover(eol)` — definition-level suffix matching
+      `Rule::set_recovery`. The sync spec is encoded into a `Recovery` AST node.
 - [ ] **Labeled recovery expressions**: `rule^label` — when `rule` fails,
-      consult a labeled recovery grammar (matches yhirose's `%recovery` syntax)
-- [ ] **Sync token selection helpers**: common patterns (`;`, `}`, EOL, statement
-      boundaries)
+      consult a labeled recovery grammar. Deferred; the current `%recover`
+      directive uses the rule's own name as the diagnostic label, which covers
+      the common case.
 
 ## Phase 5 — Visualization
 

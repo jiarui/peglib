@@ -175,6 +175,63 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// DynCutExpr — dynamic counterpart of CutExpr.
+//
+// Commits the current alternative/repetition scope. Leaf: no child, no
+// payload. On subsequent failure in the same scope, choice_parse_impl /
+// repeat_parse_impl throw peg::ParseError. Mirrors CutExpr semantics
+// (Combinators.h) so the textual-grammar path (`~`) gets identical
+// committed-choice behaviour to the static DSL (`cut()`).
+// ---------------------------------------------------------------------------
+template<typename Context>
+struct DynCutExpr : ParsingExpr<Context, DynCutExpr<Context>>
+{
+    typename Context::ParseResult parse(Context& context) const override
+    {
+        context.cut(true);
+        return {true, nullptr};
+    }
+    // No collect_rule_refs override: cut has no children, and the CRTP base
+    // provides an empty default.
+};
+
+// ---------------------------------------------------------------------------
+// DynLexemeExpr — dynamic counterpart of LexemeExpr.
+//
+// Disables auto-skip for the wrapped subtree. Implemented as an
+// exception-safe save/restore of Context::skip_enabled via ScopeGuard
+// (restores on normal return AND on peg::ParseError unwinding). Mirrors
+// LexemeExpr (Combinators.h).
+//
+// NOTE: when GrammarCompiler compiles a grammar, no skipper is installed
+// (Phase 3 design contract), so skip_enabled() is already false and this
+// is a no-op. The plumbing exists so a future %whitespace directive can
+// auto-install a skipper without changes here.
+// ---------------------------------------------------------------------------
+template<typename Context>
+struct DynLexemeExpr : ParsingExpr<Context, DynLexemeExpr<Context>>
+{
+    using InterfacePtr = std::shared_ptr<ParsingExprInterface<Context>>;
+    explicit DynLexemeExpr(InterfacePtr child) : m_child(std::move(child)) {}
+    typename Context::ParseResult parse(Context& context) const override
+    {
+        bool prev = context.skip_enabled();
+        context.skip_enabled(false);
+        ScopeGuard restore{[&context, prev]() { context.skip_enabled(prev); }};
+        return m_child->parse(context);
+    }
+    void collect_rule_refs(std::set<std::string>& refs) const override
+    {
+        if (m_child)
+            m_child->collect_rule_refs(refs);
+    }
+    [[nodiscard]] const InterfacePtr& child() const noexcept { return m_child; }
+
+protected:
+    InterfacePtr m_child;
+};
+
+// ---------------------------------------------------------------------------
 // DynExpr: user-visible handle wrapping any ParsingExprInterface.
 // ---------------------------------------------------------------------------
 template<typename Context>

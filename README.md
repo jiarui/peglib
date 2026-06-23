@@ -26,9 +26,11 @@ real-world case study.
 - **Two ways to define grammars**:
   - **C++ combinators**: `>>` (sequence), `|` (choice), `*` / `+` / `-` /
     `n*` (repetition / optional), `!` / `&` (negation / lookahead),
-    `cut()` (committed choice).
+    `cut()` (committed choice), `lexeme()` (no-skip wrapper).
   - **Textual PEG format**: `GrammarCompiler::from_string("Expr <- Term ('+' Term)*")`
-    compiles PEG text at runtime into a `Grammar<>`.
+    compiles PEG text at runtime into a `Grammar<>`. Supports the Ford 2004
+    baseline plus peglib extensions: `~` (cut), `< e >` (lexeme),
+    `%recover({';'})` / `%recover(eof)` / `%recover(eol)` (error recovery).
 - **Packrat memoization** for linear-time parsing.
 - **Left-recursion** support via seed-grow.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
@@ -39,7 +41,14 @@ real-world case study.
   sub-rule results. No value stack — the tree flows through return values.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
-  `file:line:col: error: expected A or B` messages.
+  `file:line:col: error: expected A or B` messages. A separate multi-diagnostic
+  channel (`Context::diagnostics()`) accumulates one diagnostic per recovery
+  point so a parser can report many errors per file.
+- **Error recovery**: `Rule::set_recovery(spec)` (or `peg::recover(rule, spec)`
+  sugar) attaches a sync spec to a rule — on body failure, the rule scans
+  forward to the next sync token, records a diagnostic, and resumes. Cut-
+  committed failures are not recovered. Helpers: `recover_set`, `recover_eol`,
+  `recover_eof`, `recover_predicate`.
 - **`SourceMap`**: byte offset ↔ (line, col) mapping, supports both contiguous
   in-memory sources and streaming `FileSource`.
 - **Grammar validation**: `undefined_rules()` and `unreachable_rules()` helpers.
@@ -154,6 +163,63 @@ g.parse_string("  1+2*3  ");                  // true (pest-style leading ws)
 token's characters stay contiguous (`"12 34"` is two numbers, not `"1234"`).
 To disable auto-skip globally, call `clear_skipper()` (or never call
 `set_skipper` — that is the default).
+
+### Text-grammar extensions: cut, lexeme, recovery
+
+The textual PEG format supports three peglib-specific constructs beyond the
+Ford 2004 baseline. They mirror the C++ combinator API (`cut()`, `lexeme()`,
+`Rule::set_recovery`) so the two surfaces have identical power for these
+features.
+
+**Cut `~`** — commits the current alternative/repetition scope. After a cut,
+failure in the same scope throws `peg::ParseError` (hard failure). Used inside
+an ordered choice to express "once we've matched this prefix, we're committed":
+
+```peg
+# Once 'if' matches, this must be an if-statement — don't backtrack into Stmt
+Stmt <- ('if' ~ Cond 'then' Stmt) / Expr / ...
+```
+
+A standalone `~` outside any Alternation/Repetition scope is a no-op (the cut
+flag is dropped on an empty scope stack).
+
+**Lexeme `< e >`** — disables auto-skip for the inner expression. With no
+skipper configured (the `GrammarCompiler` default), this is a no-op; the
+plumbing exists so a future `%whitespace` directive can install a skipper
+without changing existing grammars. `<` is disambiguated from `<-`
+(LEFTARROW) by a `!'-'` lookahead.
+
+```peg
+Number <- < [0-9]+ >     # contiguous digits (no-op until %whitespace exists)
+```
+
+**Recovery `%recover(spec)`** — a definition-level suffix that attaches a
+sync spec to the rule. On body failure, the rule scans forward to the next
+sync token, records a diagnostic at the original failure position, consumes
+the sync token, and reports recovered success. Three spec forms:
+
+```peg
+Stmt   <- Expr ';'  %recover({';', '}'})    # sync on ';' or '}'
+Block  <- '{' Stmt* '}' %recover(eof)        # last-ditch: consume to EOF
+Line   <- Expr '\n' %recover(eol)            # sync on newline
+```
+
+Cut-committed failures are **not** recovered — cut is an explicit programmer
+commitment that overrides recovery. Diagnostics accumulate across recovery
+points via `Context::diagnostics()`, so a single parse can report many errors:
+
+```cpp
+Context<> ctx{input};
+if (g.parse(ctx)) {
+    for (const auto& d : ctx.diagnostics()) {
+        std::cerr << d.format(map, "input") << "\n";   // one per resync
+    }
+}
+```
+
+The C++ API retains strictly more power for recovery: `recover_predicate(fn,
+label)` (arbitrary sync predicate) has no textual form, since user-defined
+predicates aren't expressible in PEG text.
 
 ### Grammar visualization
 
@@ -296,7 +362,8 @@ per-header:
 
 The library targets generic PEG-authoring features: a textual grammar format
 (Phase 2, done), automatic whitespace handling (Phase 3, done), error
-recovery (Phase 4), tracing/profiling (Phase 5, to_dot() slice done), and
+recovery (Phase 4, done — including the cut/lexeme/recovery text-grammar
+extensions), tracing/profiling (Phase 5, to_dot() slice done), and
 parameterized rules (Phase 6). See [TODO.md](TODO.md) for the full roadmap.
 
 For a real-world grammar built on peglib, see

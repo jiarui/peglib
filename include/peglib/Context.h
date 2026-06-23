@@ -242,8 +242,14 @@ struct Context
         CutRecord(std::size_t i, bool c) : pos{i}, cut{c} {}
     };
 
+    // Set the current scope's cut flag. No-op when the cut stack is empty
+    // (a cut appearing outside any Alternation/Repetition scope has no
+    // scope to commit — the cut flag is simply dropped). This keeps
+    // standalone `~` / cut() safe at the grammar top level.
     void cut(bool c)
     {
+        if (m_cut.empty())
+            return;
         m_cut.top().cut = c;
         m_cut.top().pos = mark();
     }
