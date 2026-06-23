@@ -1,6 +1,7 @@
 #pragma once
 #include "peglib/SourceMap.h"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace peg
 {
@@ -43,12 +45,50 @@ struct ExpectedItem
     }
 };
 
-// Render a single value_type for display in expected-set messages, as a
-// UTF-8 std::string (without surrounding quotes). This is the generic
-// rendering hook: char passes through directly; wider character types
-// (char32_t codepoints, etc.) are UTF-8 encoded.
+// ===========================================================================
+// to_display: customization point for rendering a single Context::value_type
+// for display in expected-set messages, as a UTF-8 std::string (without
+// surrounding quotes).
+//
+// Two regimes:
+//
+// 1. Integral CharT (char, char32_t, wchar_t, ...): the behaviour is frozen.
+//    char passes through byte-for-byte; wider integral types are UTF-8
+//    encoded as single codepoints. peglib's own error_test.cpp / char32
+//    smoke tests pin this exact output (C-style escapes / hex \xNN / wide
+//    \UNNNNNNNN), so it must never regress.
+//
+// 2. Non-integral CharT (e.g. a downstream token type such as ys::lua::Token):
+//    the CPO looks up a user-provided overload via ADL,
+//
+//        std::string to_display(const CharT&);
+//
+//    defined in the namespace of CharT (or any associated namespace). If
+//    found, its result is used verbatim. If not found, the placeholder
+//    "<token>" is emitted. This lets each token type render meaningful
+//    diagnostics (e.g. "TK_NAME 'foo'", "')'", "'+'") without peglib knowing
+//    anything about the concrete token shape.
+//
+// Why a CPO rather than a free peg::to_display template: the ADL probe for a
+// user hook must NOT consider peglib's own renderer, otherwise the probe is
+// always-true and a hookless type recurses into the integral renderer and
+// fails to compile. Encapsulating dispatch behind a distinct name
+// (to_display_cpo) keeps the user-hook name clean (`to_display`) while making
+// the existence check sound.
+//
+// Downstream contracts (NOT enforced here; see Concepts.h for the element
+// concepts applied at the terminal factories):
+//   - terminal(elem)        requires elem::operator== on const&
+//   - terminal(set)         requires operator<  (std::set ordering)
+//   - terminal(lo, hi)      requires operator<= and operator>=
+// ===========================================================================
+namespace detail
+{
+// Integral renderer for to_display: char passthrough, wider integrals
+// UTF-8 encoded as a single codepoint.
 template<typename CharT>
-std::string to_display(CharT c)
+    requires std::is_integral_v<CharT>
+std::string integral_to_display(CharT c)
 {
     // Common case: byte-oriented char. Pass through; escaping is applied by
     // the caller (escape_char_for_expected).
@@ -77,54 +117,102 @@ std::string to_display(CharT c)
     }
 }
 
+// Existence probe for a user-supplied ADL `to_display(const CharT&)`.
+// Lives in detail:: so unqualified `to_display(c)` here does NOT see
+// peg::to_display_cpo (different name) and only resolves via ADL into the
+// user's namespace. The integral peglib path is never a candidate, so this
+// probe is sound for both integral and non-integral types.
+template<typename CharT>
+concept has_adl_to_display = requires(const CharT& c) { to_display(c); };
+
+// Render a non-integral value: prefer a user ADL to_display, else emit a
+// placeholder so diagnostics still produce something non-empty.
+template<typename CharT>
+    requires(!std::is_integral_v<CharT>)
+std::string custom_or_placeholder(const CharT& c)
+{
+    if constexpr (has_adl_to_display<CharT>) {
+        return to_display(c); // ADL into the user's namespace
+    } else {
+        return "<token>";
+    }
+}
+} // namespace detail
+
+// Customization-point object: single dispatch entry for both integral and
+// non-integral CharT. All error-rendering call sites should go through this
+// rather than the detail:: helpers directly.
+struct to_display_fn
+{
+    template<typename CharT>
+    std::string operator()(const CharT& c) const
+    {
+        if constexpr (std::is_integral_v<CharT>) {
+            return detail::integral_to_display(c);
+        } else {
+            return detail::custom_or_placeholder(c);
+        }
+    }
+};
+inline constexpr to_display_fn to_display_cpo{};
+
 // Escape a single character for display in expected-set messages.
 //   - Printable ASCII (0x20..0x7E): the character itself, wrapped in single quotes.
 //   - Tab/newline/etc: C-style escapes, wrapped in single quotes.
 //   - Other (char): hex form '\xNN', wrapped in single quotes.
-//   - Other (wider CharT, e.g. char32_t): UTF-8 encoded via to_display, then
-//     hex-escaped if non-printable, wrapped in single quotes.
+//   - Other (wider integral CharT, e.g. char32_t): hex \UNNNNNNNN (full
+//     codepoint width), wrapped in single quotes.
+//   - Non-integral CharT: rendered via the to_display CPO (user hook or
+//     "<token>" placeholder), wrapped in angle brackets to signal a
+//     non-character token.
 template<typename CharT>
 std::string escape_char_for_expected(CharT c)
 {
-    std::string s;
-    s += '\'';
-    // Handle C-style escapes for the common control characters regardless of
-    // CharT width (a char32_t '\n' is still U+000A).
-    const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(c));
-    switch (v) {
-    case '\t':
-        s += "\\t";
-        break;
-    case '\n':
-        s += "\\n";
-        break;
-    case '\r':
-        s += "\\r";
-        break;
-    case '\\':
-        s += "\\\\";
-        break;
-    case '\'':
-        s += "\\'";
-        break;
-    default:
-        if (v >= 0x20 && v <= 0x7E) {
-            s += static_cast<char>(v);
-        } else if constexpr (sizeof(CharT) == 1) {
-            // Single-byte non-printable: hex \xNN.
-            char buf[8];
-            std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
-            s += buf;
-        } else {
-            // Wider non-printable: hex \UNNNNNNNN (full codepoint width).
-            char buf[16];
-            std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
-            s += buf;
+    if constexpr (std::is_integral_v<CharT>) {
+        std::string s;
+        s += '\'';
+        // Handle C-style escapes for the common control characters regardless of
+        // CharT width (a char32_t '\n' is still U+000A).
+        const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(c));
+        switch (v) {
+        case '\t':
+            s += "\\t";
+            break;
+        case '\n':
+            s += "\\n";
+            break;
+        case '\r':
+            s += "\\r";
+            break;
+        case '\\':
+            s += "\\\\";
+            break;
+        case '\'':
+            s += "\\'";
+            break;
+        default:
+            if (v >= 0x20 && v <= 0x7E) {
+                s += static_cast<char>(v);
+            } else if constexpr (sizeof(CharT) == 1) {
+                // Single-byte non-printable: hex \xNN.
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<unsigned char>(c));
+                s += buf;
+            } else {
+                // Wider non-printable: hex \UNNNNNNNN (full codepoint width).
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
+                s += buf;
+            }
+            break;
         }
-        break;
+        s += '\'';
+        return s;
+    } else {
+        // Non-integral token: angle-bracket the CPO output to make clear it
+        // is not a character literal.
+        return '<' + to_display_cpo(c) + '>';
     }
-    s += '\'';
-    return s;
 }
 
 // Escape a string (e.g. multi-char terminal sequence) for display.
@@ -168,42 +256,53 @@ inline std::string escape_string_for_expected(std::string_view s)
 }
 
 // Overload for wide-character basic_strings (std::u32string, std::wstring, ...).
-// Encodes each codepoint to UTF-8 / \UNNNNNNNN as appropriate. Sized ranges
-// only — string literals would include their NUL byte; pass a basic_string or
-// basic_string_view instead.
+// Sized ranges only — string literals would include their NUL byte; pass a
+// basic_string or basic_string_view instead.
+//
+// Integral CharT: each codepoint is rendered with the C-style escape /
+// printable-ASCII / \UNNNNNNNN rules, joined inside double quotes.
+//
+// Non-integral CharT: each element goes through the to_display CPO (user
+// hook or "<token>" placeholder), joined inside double quotes.
 template<typename CharT>
     requires(!std::is_same_v<CharT, char>)
 std::string escape_string_for_expected(const std::basic_string<CharT>& s)
 {
     std::string out;
     out += '"';
-    for (auto e : s) {
-        const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(e));
-        switch (v) {
-        case '\t':
-            out += "\\t";
-            break;
-        case '\n':
-            out += "\\n";
-            break;
-        case '\r':
-            out += "\\r";
-            break;
-        case '\\':
-            out += "\\\\";
-            break;
-        case '"':
-            out += "\\\"";
-            break;
-        default:
-            if (v >= 0x20 && v <= 0x7E) {
-                out += static_cast<char>(v);
-            } else {
-                char buf[16];
-                std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
-                out += buf;
+    for (const auto& e : s) {
+        if constexpr (std::is_integral_v<CharT>) {
+            const auto v = static_cast<unsigned long>(static_cast<std::uint32_t>(e));
+            switch (v) {
+            case '\t':
+                out += "\\t";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            default:
+                if (v >= 0x20 && v <= 0x7E) {
+                    out += static_cast<char>(v);
+                } else {
+                    char buf[16];
+                    std::snprintf(buf, sizeof(buf), "\\U%08X", static_cast<unsigned>(v));
+                    out += buf;
+                }
+                break;
             }
-            break;
+        } else {
+            // Non-integral element: CPO output is already display-safe UTF-8;
+            // join without per-element quoting.
+            out += to_display_cpo(e);
         }
     }
     out += '"';

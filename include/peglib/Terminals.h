@@ -115,12 +115,13 @@ private:
     void record_expected(Context& context) const
     {
         std::size_t pos = context.mark();
-        // Build a printable form of the sequence. to_display() renders each
-        // element to UTF-8 so non-char sequences (e.g. u32string) display
-        // correctly instead of being truncated by static_cast<char>.
+        // Build a printable form of the sequence. The to_display CPO renders
+        // each element to UTF-8 (char passthrough / char32_t UTF-8 encoding /
+        // user-supplied hook for non-integral element types) so sequences
+        // display correctly instead of being truncated by static_cast<char>.
         std::string text;
         for (const auto& v : m_terminalValues) {
-            text += to_display(v);
+            text += to_display_cpo(v);
         }
         context.record_failure(
             pos,

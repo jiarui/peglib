@@ -1,6 +1,7 @@
 #pragma once
 #include <concepts>
 
+#include "Concepts.h"
 #include "Parser.h"
 namespace peg
 {
@@ -26,24 +27,28 @@ auto terminal(const std::predicate<elem> auto& f)
 }
 
 template<typename elem>
+    requires PegValue<elem>
 auto terminal(elem value)
 {
     return TerminalExpr<Context<elem>, elem>(value);
 }
 
 template<typename elem>
+    requires PegValueSet<elem>
 auto terminal(const std::set<elem>& values)
 {
     return TerminalExpr<Context<elem>, std::set<elem>>(values);
 }
 
 template<typename elem>
+    requires PegValueRange<elem>
 auto terminal(const std::array<elem, 2>& values)
 {
     return TerminalExpr<Context<elem>, std::array<elem, 2>>(values);
 }
 
 template<typename elem>
+    requires PegValueRange<elem>
 auto terminal(const elem& value_min, const elem& value_max)
 {
     std::array<elem, 2> values = {value_min, value_max};
@@ -51,6 +56,7 @@ auto terminal(const elem& value_min, const elem& value_max)
 }
 
 template<typename SeqType>
+    requires PegValueSeq<SeqType>
 auto terminalSeq(const SeqType& valueSeq)
 {
     return TerminalSeqExpr<Context<typename SeqType::value_type>, SeqType>(valueSeq);

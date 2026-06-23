@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <tuple>
@@ -88,6 +89,54 @@ concept PegContext =
 // Static helper: true iff Context<CharT, NodeType> satisfies PegContext.
 template<typename CharT, typename NodeType>
 inline constexpr bool is_peg_context_v = PegContext<Context<CharT, NodeType>>;
+
+// ---------------------------------------------------------------------------
+// Element-type contracts for terminal matching.
+//
+// Each terminal factory in Rule.h builds a TerminalExpr / TerminalSeqExpr
+// whose `parse()` matches via the symbolConsumable overloads in ParserFwd.h.
+// Those overloads use specific operators on the element type; the matching
+// concepts below name exactly the operators each shape needs, and are applied
+// as `requires` clauses at the factories so a wrong element type fails at the
+// factory boundary with one clear diagnostic instead of deep inside a
+// combinator's instantiation.
+//
+// Note on rendering: a separate concern, handled by the to_display CPO in
+// ParseError.h. A type can satisfy PegValue yet still render only as
+// "<token>" if it provides no ADL `to_display(const T&)` hook — that is a
+// diagnostic-quality issue, not a compile-correctness one.
+// ---------------------------------------------------------------------------
+
+// terminal(elem): symbolConsumable(v, value) does `v == value`. Requires
+// equality on const refs (operator== as a const member or free function).
+template<typename T>
+concept PegValue = std::movable<T> && std::equality_comparable<T>;
+
+// terminal(set): the value is stored in std::set<elem>, which needs operator<
+// (std::less<elem>) in addition to equality.
+template<typename T>
+concept PegValueSet = PegValue<T> && std::totally_ordered<T>;
+
+// terminal(lo, hi) / terminal(std::array<elem, 2>): symbolConsumable asserts
+// `values[0] <= values[1]` and evaluates `v >= values[0] && v <= values[1]`,
+// so the element needs <= and >= (subsumed by totally_ordered).
+template<typename T>
+concept PegValueRange = PegValue<T> && std::totally_ordered<T>;
+
+// terminalSeq(range): a random-access range whose element type satisfies
+// PegValue (sequence matching is element-wise equality).
+template<typename Seq>
+concept PegValueSeq = std::ranges::random_access_range<Seq> && PegValue<typename Seq::value_type>;
+
+// Self-checks: the Tier-1 element types must satisfy every relevant concept.
+static_assert(PegValue<char>, "char must satisfy PegValue");
+static_assert(PegValue<char32_t>, "char32_t must satisfy PegValue");
+static_assert(PegValueSet<char>, "char must satisfy PegValueSet");
+static_assert(PegValueSet<char32_t>, "char32_t must satisfy PegValueSet");
+static_assert(PegValueRange<char>, "char must satisfy PegValueRange");
+static_assert(PegValueRange<char32_t>, "char32_t must satisfy PegValueRange");
+static_assert(PegValueSeq<std::string>, "std::string must satisfy PegValueSeq");
+static_assert(PegValueSeq<std::u32string>, "std::u32string must satisfy PegValueSeq");
 
 // Self-checks: the Context specializations peglib ships with must all satisfy
 // PegContext. If one of these fails, the concept has drifted from the real

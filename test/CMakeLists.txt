@@ -62,6 +62,7 @@ add_executable(peglib_test
     recursive_leak_test.cpp
     negative_path_test.cpp
     char32_smoke_test.cpp
+    token_char_test.cpp
     skipper_test.cpp
     to_dot_test.cpp
     recover_test.cpp
