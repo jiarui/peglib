@@ -115,9 +115,10 @@ TEST_CASE("error-context-take-error")
     context.record_failure(1, ExpectedItem{ExpectedKind::RuleName, "MyRule"});
     auto err = context.take_error();
     REQUIRE(err.has_value());
-    CHECK(err->position() == 1);
-    CHECK(err->expected().size() == 1);
-    CHECK(err->expected().begin()->kind == ExpectedKind::RuleName);
+    const auto& err_ref = *err;
+    CHECK(err_ref.position() == 1);
+    CHECK(err_ref.expected().size() == 1);
+    CHECK(err_ref.expected().begin()->kind == ExpectedKind::RuleName);
 
     // After take_error, the context should be clean
     CHECK_FALSE(context.has_error());
@@ -381,7 +382,8 @@ TEST_CASE("multi-diagnostic-independent-of-furthest-failure")
 
     auto err = context.take_error();
     REQUIRE(err.has_value());
-    CHECK(err->position() == 5);
+    const auto& err_ref = *err;
+    CHECK(err_ref.position() == 5);
 
     auto diags = context.take_diagnostics();
     REQUIRE(diags.size() == 1);

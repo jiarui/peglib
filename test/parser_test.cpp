@@ -57,10 +57,11 @@ TEST_CASE("cut-committed-failure-surfaces-via-take-error")
     CHECK_FALSE(g.parse("g2", context2));
     auto err = context2.take_error();
     REQUIRE(err);
+    const auto& err_ref = *err;
     // Position should be 1 (where 'x' was expected, after matching 'a').
-    CHECK(err->position() == 1);
+    CHECK(err_ref.position() == 1);
     // The expected set reflects what the cut-committed branch wanted ('x').
-    CHECK_FALSE(err->expected().empty());
+    CHECK_FALSE(err_ref.expected().empty());
 }
 
 TEST_CASE("repetition-stops-on-no-progress")

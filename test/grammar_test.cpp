@@ -130,8 +130,9 @@ TEST_CASE("[grammar] auto-naming")
     // On failure, error messages should mention "my_rule"
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
+    const auto& diag_ref = *diag;
     bool found = false;
-    for (const auto& item : diag->expected()) {
+    for (const auto& item : diag_ref.expected()) {
         if (item.text == "my_rule") {
             found = true;
         }
@@ -290,6 +291,7 @@ TEST_CASE("[grammar] find-does-not-create-rule")
     // find() on an existing rule returns the handle, with the right name.
     auto h = g.find("real");
     REQUIRE(h.has_value());
-    CHECK(h->name() == "real");
-    CHECK(h->is_defined());
+    const auto& h_ref = *h;
+    CHECK(h_ref.name() == "real");
+    CHECK(h_ref.is_defined());
 }

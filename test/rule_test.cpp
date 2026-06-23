@@ -443,7 +443,8 @@ TEST_CASE("semantic-action-fires-on-match")
     const std::string input = "a";
     Context context(input);
     g["grammar"].set_action(
-        [&matches](decltype(context)&, decltype(context)::ParseTreeNodePtr) -> std::monostate {
+        [&matches](decltype(context)&,
+                   const decltype(context)::ParseTreeNodePtr&) -> std::monostate {
             matches++;
             return {};
         });

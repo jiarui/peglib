@@ -61,13 +61,14 @@ TEST_CASE("char32-failure-diagnostic-renders-codepoint-not-garbled")
 
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
-    REQUIRE_FALSE(diag->expected().empty());
+    const auto& diag_ref = *diag;
+    REQUIRE_FALSE(diag_ref.expected().empty());
     // The expected set contains both the rule name ("cjk") and the literal
     // terminal. Find the Literal item — its text must carry the full-width
     // codepoint escape, proving the value was not narrowed to char (which
     // would yield \x2D, the low byte of 0x4E2D).
     std::string literal_text;
-    for (const auto& item : diag->expected()) {
+    for (const auto& item : diag_ref.expected()) {
         if (item.kind == ExpectedKind::Literal) {
             literal_text = item.text;
             break;
@@ -92,10 +93,11 @@ TEST_CASE("char32-ascii-codepoint-renders-as-itself")
 
     auto diag = ctx.take_error();
     REQUIRE(diag.has_value());
-    REQUIRE_FALSE(diag->expected().empty());
+    const auto& diag_ref = *diag;
+    REQUIRE_FALSE(diag_ref.expected().empty());
     // Find the Literal item (the set also contains the rule name "a").
     std::string literal_text;
-    for (const auto& item : diag->expected()) {
+    for (const auto& item : diag_ref.expected()) {
         if (item.kind == ExpectedKind::Literal) {
             literal_text = item.text;
             break;

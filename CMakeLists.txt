@@ -22,6 +22,15 @@ target_include_directories(peglib INTERFACE
 
 target_compile_features(peglib INTERFACE cxx_std_20)
 
+# MSVC treats the standard C runtime functions (fopen, etc.) as deprecated
+# and escalates the C4996 warning to an error under /WX. _CRT_SECURE_NO_WARNINGS
+# silences these for consumers of the header-only library (FileSource uses
+# std::fopen, which is portable and correct). The define is a no-op on
+# GCC/Clang, so this only affects MSVC builds.
+if(MSVC)
+    target_compile_definitions(peglib INTERFACE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------

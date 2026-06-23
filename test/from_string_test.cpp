@@ -256,7 +256,7 @@ TEST_CASE("[from_string] try_from_string")
         // B2: the undefined-rule diagnostic must name B (and the message is
         // non-empty so callers can show something useful).
         REQUIRE_FALSE(err.expected().empty());
-        CHECK(err.expected().begin()->text.find("B") != std::string::npos);
+        CHECK(err.expected().begin()->text.find('B') != std::string::npos);
     }
     SUBCASE("undefined-rule-reports-all")
     {
@@ -265,9 +265,9 @@ TEST_CASE("[from_string] try_from_string")
         CHECK_FALSE(GrammarCompiler::try_from_string("A <- B / C / D", g, err));
         REQUIRE_FALSE(err.expected().empty());
         const auto& msg = err.expected().begin()->text;
-        CHECK(msg.find("B") != std::string::npos);
-        CHECK(msg.find("C") != std::string::npos);
-        CHECK(msg.find("D") != std::string::npos);
+        CHECK(msg.find('B') != std::string::npos);
+        CHECK(msg.find('C') != std::string::npos);
+        CHECK(msg.find('D') != std::string::npos);
     }
     SUBCASE("non-throwing-on-internal-error")
     {
