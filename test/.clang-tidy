@@ -1,23 +1,20 @@
-# peglib clang-tidy config.
+# Test-only clang-tidy override.
 #
-# Scope: catch real bugs and suggest modern idioms, without enforcing
-# naming conventions (the codebase mixes snake_case and camelCase; a
-# naming pass is deferred to a dedicated cleanup commit).
+# This file shadows the root .clang-tidy for translation units compiled under
+# test/. It inherits the same check set (via CheckOptions) and disables:
 #
-# CI and local dev both pin clang-tidy 22.x (see .github/workflows/quality.yml).
-# The disabled checks below are deliberate project policy, not version skews:
-#   - bugprone-crtp-constructor-accessibility: the CRTP base (ParsingExpr) is
-#     a library internal; the public surface doesn't expose standalone
-#     construction. Restricting constructors would add friend-declaration
-#     churn for no safety gain.
-#   - modernize-raw-string-literal: PEG grammar fixtures and test inputs are
-#     clearer with escaped quotes (e.g. "\"a\"") than raw strings.
-#   - modernize-use-designated-initializers / -use-ranges / -use-starts-ends-with
-#     / -use-integer-sign-comparison / performance-enum-size: style/perf
-#     micro-optimizations whose fix would churn working code for negligible
-#     benefit. Re-enable individually if desired.
+#   bugprone-unchecked-optional-access
+#     clang-tidy's flow analysis cannot prove optionals are engaged after a
+#     doctest REQUIRE(...) macro, so it false-positives on the common test
+#     idiom:
+#         REQUIRE(opt.has_value());  // or REQUIRE(opt)
+#         ... opt.value() ...        // flagged despite the guard above
+#     This is a documented limitation (llvm/llvm-project#181737). Every deref
+#     site in the tests IS guarded by a preceding REQUIRE; the check simply
+#     can't see through the macro. The check stays enabled for library headers
+#     (root .clang-tidy) where it works reliably.
 #
-# Run with: cmake -DPEGLIB_ENABLE_CLANG_TIDY=ON ...
+# See root .clang-tidy for the full rationale on the other disabled checks.
 
 Checks: >
   -*,
@@ -27,6 +24,7 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-throwing-static-initialization,
   -bugprone-crtp-constructor-accessibility,
+  -bugprone-unchecked-optional-access,
   -modernize-avoid-c-arrays,
   -modernize-raw-string-literal,
   -modernize-use-default-member-init,

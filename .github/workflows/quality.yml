@@ -36,15 +36,28 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-24.04
     env:
-      CC: clang-17
-      CXX: clang++-17
+      CC: clang-22
+      CXX: clang++-22
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang-17 + clang-tidy
+      - name: Install clang-22 + clang-tidy
         run: |
+          # Pin to clang-22 so CI matches the local dev toolchain (LLVM 22.x).
+          # The previous pin to clang-17 caused a behavioral mismatch with
+          # bugprone-unchecked-optional-access: clang-tidy's flow analysis
+          # cannot prove optionals are engaged after a doctest REQUIRE macro,
+          # producing false positives that varied between v17 and v22. CI and
+          # local are now both v22 so results match exactly; the check is
+          # disabled for test TUs via test/.clang-tidy (where the doctest
+          # macro limitation makes it unreliable) but stays enabled for
+          # library headers. The canonical version for this repo is 22.x.
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
+            sudo gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-17 clang-tidy-17
+          sudo apt-get install -y clang-22 clang-tidy-22
 
       - name: Configure with clang-tidy
         run: |

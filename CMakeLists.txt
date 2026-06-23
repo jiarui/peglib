@@ -59,7 +59,14 @@ endif()
 if(PEGLIB_ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
     if(CLANG_TIDY_EXE)
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE};--quiet")
+        # The extra-arg -Wno-* flags suppress diagnostics that originate in
+        # system libstdc++ headers on newer toolchains (GCC 16's <ciso646>
+        # emits a #warning; clang 19+ flags __COUNTER__ as a C2y extension).
+        # These are not issues in our code and don't appear on CI's Ubuntu
+        # 24.04 + clang-22 toolchain, but would otherwise abort local tidy
+        # runs on bleeding-edge distros.
+        set(CMAKE_CXX_CLANG_TIDY
+            "${CLANG_TIDY_EXE};--quiet;--extra-arg=-Wno-c2y-extensions;--extra-arg=-Wno-#warnings")
     else()
         message(WARNING "clang-tidy not found")
     endif()
