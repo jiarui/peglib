@@ -130,6 +130,90 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// TokenExpr: like TerminalExpr, but **keeps** the matched element as a typed
+// result (Model A's value-bearing terminal).
+//
+// Match behaviour is identical to TerminalExpr (same symbolConsumable logic,
+// same failure-recording), with one difference: on success TokenExpr builds a
+// ParseTreeNode carrying the matched element in `node->token_value` (a
+// parallel field of type `value_type`, distinct from `node->value` which is
+// NodeType). The extractor reads `token_value` for TokenExpr slots, so the
+// operator/element identity is visible to left-fold actions.
+//
+// Contrast with TerminalExpr (Model A's "void" terminal): TerminalExpr
+// produces no node and is filtered out of sequence results, so structural
+// tokens (parentheses, keywords, separators) never appear as action
+// parameters. TokenExpr is for tokens whose identity the action needs.
+// ---------------------------------------------------------------------------
+template<typename Context, typename TerminalValueType>
+struct TokenExpr : ParsingExpr<Context, TokenExpr<Context, TerminalValueType>>
+{
+    TokenExpr(TerminalValueType value) : m_terminalValue{std::move(value)} {}
+
+    typename Context::ParseResult parse(Context& context) const override
+    {
+        if (!context.ended() && symbolConsumable(context.current(), m_terminalValue)) {
+            auto matched = context.current();
+            context.next();
+            // Build a node carrying the matched element in token_value. We do
+            // NOT touch node->value (that field is NodeType, owned by semantic
+            // actions on NonTerminals). Keeping the two channels separate
+            // preserves the value/transparent conventions unchanged.
+            auto node = std::make_shared<typename Context::ParseTreeNode>();
+            node->start_offset = context.mark() - 1;
+            node->end_offset = context.mark();
+            node->token_value = std::move(matched);
+            return {true, node};
+        }
+        record_expected(context);
+        return {false, nullptr};
+    }
+
+protected:
+    TerminalValueType m_terminalValue;
+
+private:
+    // Record the expected item at the current position for error reporting.
+    // Mirrors TerminalExpr::record_expected so error diagnostics are
+    // indistinguishable between the two terminal forms.
+    void record_expected(Context& context) const
+    {
+        std::size_t pos = context.mark();
+        if constexpr (std::is_same_v<TerminalValueType, typename Context::value_type>) {
+            context.record_failure(pos,
+                                   ExpectedItem{.kind = ExpectedKind::Literal,
+                                                .text = escape_char_for_expected(m_terminalValue)});
+        } else if constexpr (requires {
+                                 std::get<0>(m_terminalValue);
+                                 std::get<1>(m_terminalValue);
+                             }) {
+            auto lo = std::get<0>(m_terminalValue);
+            auto hi = std::get<1>(m_terminalValue);
+            std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
+            context.record_failure(
+                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+        } else if constexpr (requires {
+                                 m_terminalValue.begin();
+                                 m_terminalValue.end();
+                             }) {
+            std::string text;
+            bool first = true;
+            for (const auto& v : m_terminalValue) {
+                if (!first)
+                    text += ", ";
+                first = false;
+                text += escape_char_for_expected(v);
+            }
+            context.record_failure(
+                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+        } else {
+            context.record_failure(
+                pos, ExpectedItem{.kind = ExpectedKind::Literal, .text = "<token>"});
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
 // EmptyExpr: always succeeds, consumes nothing.
 // ---------------------------------------------------------------------------
 template<typename Context>

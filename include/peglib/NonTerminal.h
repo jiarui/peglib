@@ -1,6 +1,7 @@
 #pragma once
 #include "peglib/ParserFwd.h"
 #include "peglib/Recover.h"
+#include "peglib/ResultType.h"
 
 #include <cassert>
 #include <memory>
@@ -215,6 +216,10 @@ protected:
     RecoverSpec<typename Context::value_type> m_recover;
 };
 
+// Forward declaration: Rule::operator= returns RuleHandle (defined after Rule).
+template<typename Context, typename ExprType>
+struct RuleHandle;
+
 // ---------------------------------------------------------------------------
 // Rule: non-owning handle to a NonTerminal, returned by Grammar::operator[].
 //
@@ -265,15 +270,12 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // copy-assign, so this is safe.
 
     // Assign a body expression to the underlying NonTerminal. Auto-names
-    // the rule from m_name.
+    // the rule from m_name. Returns a RuleHandle carrying the body's static
+    // type — its set_action<F> does compile-time type checking against the
+    // body's result type and bridges into the type-erased storage.
     template<typename ExprType>
         requires(!std::same_as<std::remove_cvref_t<ExprType>, Rule<Context>>)
-    Rule& operator=(const ParsingExpr<Context, ExprType>& rhs)
-    {
-        *m_impl = rhs;
-        m_impl->set_name(m_name);
-        return *this;
-    }
+    auto operator=(const ParsingExpr<Context, ExprType>& rhs) -> RuleHandle<Context, ExprType>;
 
     // Alias assignment: make this rule's body delegate to rhs's NonTerminal.
     // The body becomes a Rule copy pointing at rhs's NonTerminal. This is
@@ -284,28 +286,15 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // NOTE: std::addressof is required because peglib overloads unary
     // operator& as the and-predicate combinator (Rule.h), so &rhs would
     // build an AndExpr rather than yielding a Rule*.
-    Rule& operator=(const Rule& rhs)
-    {
-        if (this == std::addressof(rhs))
-            return *this; // self-alias would create a cycle (Rule → its own NonTerminal)
-        *m_impl = rhs;    // NonTerminal template operator= stores a Rule body
-        m_impl->set_name(m_name);
-        return *this;
-    }
-    // Not noexcept: NonTerminal::template operator= does make_shared (can
-    // throw bad_alloc), and set_name does a std::string assign. Refactoring
-    // the storage to make this noexcept is out of scope; the throwing nature
-    // is documented and accepted.
-    // NOLINTNEXTLINE(performance-noexcept-move-constructor)
-    Rule& operator=(Rule&& rhs)
-    {
-        if (this == std::addressof(rhs))
-            return *this;
-        *m_impl = rhs;
-        m_impl->set_name(m_name);
-        return *this;
-    }
+    auto operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Context>>;
+    auto operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>;
 
+    // Untyped semantic-action hook (dynamic-path escape hatch). The typed
+    // action API lives on RuleHandle (the return value of operator=); to
+    // attach a compile-time-checked action, capture the assignment result:
+    //   auto h = (g["r"] = body);  h.set_action([](Context&, Span, ...){...});
+    // This overload here is kept for the dynamic (GrammarCompiler) path and
+    // for ad-hoc untyped binding.
     Rule& set_action(SemanticAction action)
     {
         m_impl->set_action(std::move(action));
@@ -344,6 +333,135 @@ protected:
     Impl* m_impl;
     std::string m_name;
 };
+
+// ---------------------------------------------------------------------------
+// RuleHandle<Context, ExprType>: the typed handle returned by `g["r"] = body`.
+//
+// Carries the body's static ExprType at the type level (no runtime storage),
+// so its set_action<F> can compile-time-check the action's parameter list
+// against the body's derived result type and generate an extractor-backed
+// bridge into the type-erased std::function<NodeType(Context&, ParseTreeNodePtr)>
+// that NonTerminal::m_action stores.
+//
+// Usage (the ONLY way to attach a typed action):
+//   auto h = (g["add"] = mul >> g.token('+') >> mul);
+//   h.set_action([](Context& c, Span sp, AstNode l, AstNode r) { ... });
+//
+// Contrast with Rule (returned by g["r"]): Rule's set_action is untyped
+// (the dynamic-path escape hatch). The two do not conflict — they are
+// different types.
+//
+// RuleHandle is a view: it does not own the NonTerminal (Grammar does). It
+// implicitly converts to Rule so all Rule's introspection/recovery methods
+// remain available on a handle.
+// ---------------------------------------------------------------------------
+template<typename Context, typename ExprType>
+struct RuleHandle
+{
+    using Impl = NonTerminal<Context>;
+    using NodeType = typename Context::node_type;
+    using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
+
+    RuleHandle(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
+
+    // Implicit conversion to the untyped Rule view (for introspection, aliasing,
+    // recovery, re-reference in another rule's body, etc.).
+    operator Rule<Context>() const { return Rule<Context>{m_impl, m_name}; }
+
+    // Typed semantic-action attachment.
+    //
+    // Compile-time checks that F is invocable as (Context&, Span, Args...) where
+    // Args is the body's filtered result type, positionally unpacked:
+    //   - void body        : F(Context&, Span)
+    //   - single-result    : F(Context&, Span, T)
+    //   - multi-result     : F(Context&, Span, T0, T1, ...)
+    // On mismatch the static_assert below fires with a readable message.
+    // Internally type-erases into a std::function<NodeType(Context&, ParseTreeNodePtr)>
+    // via the extractor bridge — so NonTerminal's existing action-invocation
+    // path (NonTerminal.h:153) and packrat memoisation are unchanged.
+    template<typename F>
+    RuleHandle& set_action(F f)
+    {
+        using R = parsers::result_of_t<ExprType>;
+        // flat_args_t<R> (a free alias in ResultType.h) expands the collapsed
+        // result back into the flat per-argument typelist the action must
+        // accept: void→<>, scalar T→<T>, tuple<T...>→<T...>.
+        static_assert(parsers::action_matches<F, Context, parsers::flat_args_t<R>>,
+                      "peglib: typed action signature does not match the rule body's "
+                      "result type (positional, no projection). The action must be "
+                      "invocable as F(Context&, Span, <body-result-args>...).");
+
+        // Type-erase: bridge closure that extract<ExprType> + invokes f.
+        // NonTerminal's action-invocation path (NonTerminal.h:153) and packrat
+        // memoisation are unchanged — the stored std::function has the same
+        // signature as an untyped action.
+        SemanticAction erased = [f = std::move(f)](Context& ctx,
+                                                   const typename Context::ParseTreeNodePtr& n) -> NodeType {
+            return parsers::invoke_action<F, ExprType, Context, typename Context::ParseTreeNodePtr>(
+                f, ctx, n);
+        };
+        m_impl->set_action(std::move(erased));
+        return *this;
+    }
+
+    RuleHandle& set_label(std::string label)
+    {
+        m_impl->set_label(std::move(label));
+        return *this;
+    }
+
+    RuleHandle& set_recovery(RecoverSpec<typename Context::value_type> spec)
+    {
+        m_impl->set_recovery(std::move(spec));
+        return *this;
+    }
+
+    [[nodiscard]] bool has_recovery() const noexcept { return m_impl->has_recovery(); }
+    [[nodiscard]] const std::string& name() const noexcept { return m_name; }
+    [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
+    [[nodiscard]] Impl* impl() const noexcept { return m_impl; }
+
+protected:
+    Impl* m_impl;
+    std::string m_name;
+};
+
+// ---------------------------------------------------------------------------
+// Rule::operator= definitions (declared inside Rule; return RuleHandle).
+// ---------------------------------------------------------------------------
+template<typename Context>
+template<typename ExprType>
+    requires(!std::same_as<std::remove_cvref_t<ExprType>, Rule<Context>>)
+auto Rule<Context>::operator=(const ParsingExpr<Context, ExprType>& rhs)
+    -> RuleHandle<Context, ExprType>
+{
+    *m_impl = rhs;
+    m_impl->set_name(m_name);
+    return RuleHandle<Context, ExprType>{m_impl, m_name};
+}
+
+template<typename Context>
+auto Rule<Context>::operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Context>>
+{
+    if (this == std::addressof(rhs)) {
+        // self-alias would create a cycle; just return a handle to self.
+        return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
+    }
+    *m_impl = rhs; // NonTerminal template operator= stores a Rule body
+    m_impl->set_name(m_name);
+    return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
+}
+
+template<typename Context>
+auto Rule<Context>::operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>
+{
+    if (this == std::addressof(rhs)) {
+        return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
+    }
+    *m_impl = rhs;
+    m_impl->set_name(m_name);
+    return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
+}
 
 } // namespace parsers
 } // namespace peg

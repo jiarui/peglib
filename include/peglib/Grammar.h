@@ -101,6 +101,53 @@ public:
         return terminal(values);
     }
 
+    // -----------------------------------------------------------------------
+    // Token factories (Model A: value-bearing terminals).
+    //
+    // token(...) is the value-keeping counterpart of terminal(...): identical
+    // match behaviour, but the matched element is carried in
+    // ParseTreeNode::token_value and surfaced to the typed action as a
+    // `value_type` argument (terminal(...) is void/filtered). Use token(...) for
+    // tokens whose identity the action needs (operators, significant
+    // elements); use terminal(...) for structural tokens that should never
+    // appear as action parameters (parentheses, keywords, separators).
+    // -----------------------------------------------------------------------
+
+    // token(predicate): match one element for which f(elem) is true; keep it.
+    template<typename Pred>
+        requires std::predicate<Pred, CharT>
+    auto token(const Pred& f) const
+    {
+        return parsers::TokenExpr<Context, Pred>(f);
+    }
+
+    // token(value): match one element equal to `value`; keep it.
+    template<typename V>
+        requires PegValue<V> && std::convertible_to<V, CharT>
+    auto token(V value) const
+    {
+        return parsers::TokenExpr<Context, CharT>(static_cast<CharT>(value));
+    }
+
+    // token(set): match one element found in `values`; keep it.
+    auto token(const std::set<CharT>& values) const
+    {
+        return parsers::TokenExpr<Context, std::set<CharT>>(values);
+    }
+
+    // token(array): match one element within the [lo, hi] range; keep it.
+    auto token(const std::array<CharT, 2>& values) const
+    {
+        return parsers::TokenExpr<Context, std::array<CharT, 2>>(values);
+    }
+
+    // token(lo, hi): match one element within the [lo, hi] range; keep it.
+    auto token(const CharT& value_min, const CharT& value_max) const
+    {
+        std::array<CharT, 2> values = {value_min, value_max};
+        return token(values);
+    }
+
     // terminalSeq(range): match a contiguous run of elements equal to the
     // elements of `valueSeq`.
     template<typename SeqType>

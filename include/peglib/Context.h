@@ -108,6 +108,12 @@ struct Context
         std::size_t end_offset = 0;   // byte offset past match end
         std::vector<std::shared_ptr<ParseTreeNode>> children;
         NodeType value{}; // filled by semantic action
+        // Parallel channel for TokenExpr (typed-action Model A): the matched
+        // element/value itself, distinct from `value` (which is NodeType).
+        // Filled only by TokenExpr::parse; read only by the typed extractor
+        // for TokenExpr slots. Left nullopt for every other node, so existing
+        // value/transparent/memo conventions are unchanged.
+        std::optional<value_type> token_value;
     };
     using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
 

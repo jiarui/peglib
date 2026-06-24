@@ -209,16 +209,27 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
 
 // ---------------------------------------------------------------------------
 // Repetition: matches a child expression between min_rep and max_rep times.
-// Directly polymorphic (derives from ParsingExpr), delegating its parse loop
-// to repeat_parse_impl. ZeroOrMoreExpr / OneOrMoreExpr / NTimesExpr /
-// OptionalExpr are thin subclasses that only fix min/max — they inherit
-// parse() and collect_rule_refs(), so there is no duplicated logic and no
-// multiple-inheritance bridging.
+//
+// Delegates its parse loop to repeat_parse_impl (the single source of truth
+// for repetition semantics, shared with DynRepeatExpr), so there is exactly
+// one repetition algorithm in the library.
+//
+// CRTP self-hook: `Self` is the concrete subclass type (passed by the four
+// subclasses below). This gives each subclass a DISTINCT CRTP identity while
+// inheriting parse(), collect_rule_refs(), and the child/min/max members from
+// this single base — no duplicated logic, no duplicated member declarations.
+// The distinct identity is required by the typed-action model: result_of<E>
+// and the extractor dispatch on E's static type, so `*e`, `+e`, `n*e`, `-e`
+// must be distinguishable (Repetition stores min/max as runtime members, which
+// the type system cannot otherwise inspect).
+//
+// `Self` has no default: Repetition is never instantiated bare. The four
+// subclasses always pass their own type.
 // ---------------------------------------------------------------------------
-template<typename Context, typename Child>
-struct Repetition : ParsingExpr<Context, Repetition<Context, Child>>
+template<typename Context, typename Child, typename Self>
+struct Repetition : ParsingExpr<Context, Self>
 {
-    using ParseResult = typename ParsingExpr<Context, Repetition<Context, Child>>::ParseResult;
+    using ParseResult = typename ParsingExpr<Context, Self>::ParseResult;
 
     Repetition(Child child, std::size_t min_r, std::int64_t max_r = -1)
         : m_child(std::move(child)), min_rep(min_r), max_rep(max_r)
@@ -252,34 +263,39 @@ protected:
     std::int64_t max_rep;
 };
 
-// ZeroOrMoreExpr: `*e` — Repetition with min=0, max=unbounded.
+// ---------------------------------------------------------------------------
+// Repetition subclasses: each fixes min/max and carries its own CRTP identity
+// via the Self hook above. One line of construction each; everything else is
+// inherited from Repetition. Distinct static types → distinct result_of/extract.
+// ---------------------------------------------------------------------------
+
+// ZeroOrMoreExpr: `*e` — min=0, max=unbounded.
 template<typename Context, typename Child>
-struct ZeroOrMoreExpr : Repetition<Context, Child>
+struct ZeroOrMoreExpr : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>
 {
-    ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 0, -1) {}
+    explicit ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>(child, 0, -1) {}
 };
 
-// OneOrMoreExpr: `+e` — Repetition with min=1, max=unbounded.
+// OneOrMoreExpr: `+e` — min=1, max=unbounded.
 template<typename Context, typename Child>
-struct OneOrMoreExpr : Repetition<Context, Child>
+struct OneOrMoreExpr : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>
 {
-    OneOrMoreExpr(const Child& child) : Repetition<Context, Child>(child, 1, -1) {}
+    explicit OneOrMoreExpr(const Child& child) : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>(child, 1, -1) {}
 };
 
-// NTimesExpr: `n*e` — Repetition with min=max=n (exactly n matches).
+// NTimesExpr: `n*e` — min=max=n (exactly n matches).
 template<typename Context, typename Child>
-struct NTimesExpr : Repetition<Context, Child>
+struct NTimesExpr : Repetition<Context, Child, NTimesExpr<Context, Child>>
 {
     NTimesExpr(const Child& child, std::size_t n_reps)
-        : Repetition<Context, Child>(child, n_reps, n_reps)
-    {}
+        : Repetition<Context, Child, NTimesExpr<Context, Child>>(child, n_reps, static_cast<std::int64_t>(n_reps)) {}
 };
 
-// OptionalExpr: `-e` / `e?` — Repetition with min=0, max=1.
+// OptionalExpr: `-e` / `e?` — min=0, max=1.
 template<typename Context, typename Child>
-struct OptionalExpr : Repetition<Context, Child>
+struct OptionalExpr : Repetition<Context, Child, OptionalExpr<Context, Child>>
 {
-    OptionalExpr(const Child& child) : Repetition<Context, Child>(child, 0, 1) {}
+    explicit OptionalExpr(const Child& child) : Repetition<Context, Child, OptionalExpr<Context, Child>>(child, 0, 1) {}
 };
 
 // ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ using parsers::ParsingExpr;
 using parsers::SequenceExpr;
 using parsers::TerminalExpr;
 using parsers::TerminalSeqExpr;
+using parsers::TokenExpr;
 using parsers::ZeroOrMoreExpr;
 
 // ---------------------------------------------------------------------------
