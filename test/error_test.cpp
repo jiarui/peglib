@@ -132,7 +132,7 @@ TEST_CASE("error-terminal-records-expected-on-failure")
     Context context(input);
 
     Grammar<> g;
-    g["anon"] = peg::terminal('x');
+    g["anon"] = g.terminal('x');
     CHECK_FALSE(g.parse("anon", context));
     CHECK(context.has_error());
     CHECK(context.furthest_failure_pos() == 0);
@@ -159,7 +159,7 @@ TEST_CASE("error-named-rule-records-rulename-on-failure")
     Context context(input);
 
     Grammar<> g;
-    g["MyRule"] = peg::terminal('x');
+    g["MyRule"] = g.terminal('x');
     CHECK_FALSE(g.parse("MyRule", context));
     CHECK(context.has_error());
     // The NonTerminal adds RuleName (label takes priority, but we only set name)
@@ -178,7 +178,7 @@ TEST_CASE("error-labeled-rule-records-rulelabel-on-failure")
     Context context(input);
 
     Grammar<> g;
-    g["MyRule"] = peg::terminal('x');
+    g["MyRule"] = g.terminal('x');
     g["MyRule"].set_label("a specific thing");
     CHECK_FALSE(g.parse("MyRule", context));
     CHECK(context.has_error());
@@ -199,7 +199,7 @@ TEST_CASE("error-alternatives-accumulate-expected")
     Context context(input);
 
     Grammar<> g;
-    g["alt"] = peg::terminal('a') | peg::terminal('b');
+    g["alt"] = g.terminal('a') | g.terminal('b');
     CHECK_FALSE(g.parse("alt", context));
     CHECK(context.has_error());
     // Both 'a' and 'b' should be in the expected set at position 0
@@ -299,7 +299,7 @@ TEST_CASE("grammar-auto-names-rules")
 
     // Grammar::operator[] auto-names the rule from the map key.
     Grammar<char> g;
-    g["my_digit"] = peg::terminal('0') | peg::terminal('1');
+    g["my_digit"] = g.terminal('0') | g.terminal('1');
     (void)context;
 
     CHECK(g["my_digit"].name() == "my_digit");
@@ -312,7 +312,7 @@ TEST_CASE("grammar-set-label-works")
     Context context(input);
 
     Grammar<char> g;
-    g["my_thing"] = peg::terminal('z');
+    g["my_thing"] = g.terminal('z');
     g["my_thing"].set_label("a specific thing");
     (void)context;
 

@@ -9,15 +9,12 @@
 // type is now first-class for matching AND error reporting without wrapping
 // it in a predicate terminal.
 //
-// NOTE: the stub element types below are deliberately trivially-copyable.
-// peglib's Context::substr() returns std::basic_string<value_type>, whose
-// libstdc++ implementation requires char_traits<value_type> and therefore a
-// trivially-copyable value_type. Supporting a non-trivially-copyable token
-// struct (e.g. one carrying a std::string lexeme) requires further work in
-// the Context source layer, which is outside the scope of the rendering fix
-// exercised here. These stubs still validate the complete non-integral
-// rendering path: integral casts are bypassed, the to_display CPO is reached,
-// the ADL hook fires, and the placeholder fallback is exercised.
+// The stub element types below (StubTok / HooklessTok) are trivially-copyable
+// for historical simplicity, but non-trivially-copyable token types are now
+// fully supported too: see the "non-trivially-copyable token" test cases at
+// the end of this file, which use a Token carrying a std::variant (hence not
+// trivially-copyable) together with a custom NodeType and the Grammar member
+// factories (g.terminal / g.terminalSeq / operators / semantic actions).
 
 #include "peglib.h"
 
@@ -26,6 +23,7 @@
 #include <array>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace peg;
@@ -98,12 +96,12 @@ std::string literal_text(const std::optional<Diagnostic>& diag, ExpectedKind kin
 
 TEST_CASE("token-char-single-terminal-matches-and-renders")
 {
-    // terminal(StubTok{...}) is constructible and drives a real parse against
+    // g.terminal(StubTok{...}) is constructible and drives a real parse against
     // a std::vector<StubTok> input (CTAD deduces Context<StubTok>).
     using Ctx = Context<StubTok>;
     Grammar<StubTok> g;
     StubTok want{1};
-    g["t"] = terminal(want);
+    g["t"] = g.terminal(want);
     g.set_start("t");
 
     SUBCASE("match succeeds and consumes one token")
@@ -129,12 +127,12 @@ TEST_CASE("token-char-single-terminal-matches-and-renders")
 
 TEST_CASE("token-char-range-terminal-renders")
 {
-    // terminal(lo, hi) requires operator<= / >= on the element; on failure it
+    // g.terminal(lo, hi) requires operator<= / >= on the element; on failure it
     // emits a Range ExpectedItem joining both endpoints' hook output with "..".
     using Ctx = Context<StubTok>;
     Grammar<StubTok> g;
     StubTok lo{1}, hi{3};
-    g["r"] = terminal(lo, hi);
+    g["r"] = g.terminal(lo, hi);
     g.set_start("r");
 
     SUBCASE("inside range matches")
@@ -159,12 +157,12 @@ TEST_CASE("token-char-range-terminal-renders")
 
 TEST_CASE("token-char-set-terminal-renders")
 {
-    // terminal(std::set<StubTok>{...}) requires operator<; on failure it emits
+    // g.terminal(std::set<StubTok>{...}) requires operator<; on failure it emits
     // a Range ExpectedItem listing each element's hook output, comma-joined.
     using Ctx = Context<StubTok>;
     Grammar<StubTok> g;
     std::set<StubTok> values{StubTok{1}, StubTok{2}};
-    g["s"] = terminal(values);
+    g["s"] = g.terminal(values);
     g.set_start("s");
 
     std::vector<StubTok> input{StubTok{9}};
@@ -180,13 +178,13 @@ TEST_CASE("token-char-set-terminal-renders")
 
 TEST_CASE("token-char-seq-terminal-renders")
 {
-    // terminalSeq(std::vector<StubTok>{...}) failing parse yields a Literal
+    // g.terminalSeq(std::vector<StubTok>{...}) failing parse yields a Literal
     // ExpectedItem with the concatenated hook output inside double quotes —
     // this is the path routed through to_display_cpo at Terminals.h.
     using Ctx = Context<StubTok>;
     Grammar<StubTok> g;
     std::vector<StubTok> seq{StubTok{1}, StubTok{2}};
-    g["seq"] = terminalSeq(seq);
+    g["seq"] = g.terminalSeq(seq);
     g.set_start("seq");
 
     SUBCASE("full sequence matches")
@@ -217,7 +215,7 @@ TEST_CASE("token-char-no-hook-falls-back-to-placeholder")
     // compile and produce a non-empty diagnostic using the "<token>" fallback.
     using Ctx = Context<HooklessTok>;
     Grammar<HooklessTok> g;
-    g["t"] = terminal(HooklessTok{1});
+    g["t"] = g.terminal(HooklessTok{1});
     g.set_start("t");
 
     std::vector<HooklessTok> input{HooklessTok{9}};
@@ -227,4 +225,143 @@ TEST_CASE("token-char-no-hook-falls-back-to-placeholder")
     auto text = literal_text(ctx.take_error(), ExpectedKind::Literal);
     CHECK_FALSE(text.empty());
     CHECK(text == "<<token>>"); // angle-bracketed placeholder
+}
+
+// ===========================================================================
+// Non-trivially-copyable token + custom NodeType end-to-end.
+//
+// These cases are the direct validation of the two fixes that made token-level
+// parsing with a custom AST node type possible:
+//   1. Context::substr was removed (it forced std::basic_string<value_type>,
+//      which is ill-formed for a non-trivially-copyable value_type). The
+//      PegContext concept no longer names basic_string, so Context<RealTok,N>
+//      satisfies it.
+//   2. The free peg::terminal factories hardcoded Context<elem> (monostate);
+//      they are now Grammar member factories (g.terminal) that close over the
+//      Grammar's own Context, so expressions compose and assign into a
+//      Rule<Context<CharT, NodeType>> with the correct NodeType.
+//
+// RealTok carries a std::variant and is therefore NOT trivially copyable —
+// exactly the shape that used to trigger libstdc++'s static_assert inside
+// std::basic_string<RealTok>.
+// ===========================================================================
+namespace
+{
+// A realistic downstream lexer token: an id plus a payload variant. Carrying
+// std::variant (and indirectly std::string) makes it non-trivially-copyable,
+// which std::basic_string<RealTok> cannot tolerate.
+struct RealTok
+{
+    int id;
+    std::variant<long long, double, std::string> payload;
+
+    // Equality/ordering by id only: a token's identity is its kind, not its
+    // payload (two NAME tokens are "the same terminal" regardless of lexeme).
+    bool operator==(const RealTok& o) const { return id == o.id; }
+    auto operator<=>(const RealTok& o) const { return id <=> o.id; }
+};
+static_assert(!std::is_trivially_copyable_v<RealTok>,
+              "RealTok must NOT be trivially copyable — this is the point of the test");
+
+// A user-defined semantic-action product type (non-monostate NodeType).
+struct RealNode
+{
+    int matched_id = 0;
+    std::string lexeme;
+};
+
+// ADL hook so diagnostics render something meaningful instead of "<token>".
+std::string to_display(const RealTok& t)
+{
+    return "TK" + std::to_string(t.id);
+}
+} // namespace
+
+TEST_CASE("non-trivial-token-satisfies-pegcontext-with-custom-node-type")
+{
+    // Problem 1 fix: PegContext must hold for Context<RealTok, RealNode>.
+    // Before the fix, the concept named std::basic_string<RealTok> via the
+    // substr requirement and failed libstdc++'s trivially-copyable assert.
+    static_assert(PegContext<Context<RealTok, RealNode>>,
+                  "Context<RealTok, RealNode> must satisfy PegContext");
+    static_assert(PegContext<Context<RealTok>>,
+                  "Context<RealTok> (monostate) must satisfy PegContext");
+}
+
+TEST_CASE("non-trivial-token-grammar-member-factories-compile")
+{
+    // Problem 2 fix: Grammar member factories build expressions whose Context
+    // carries the Grammar's NodeType, so they assign into the Grammar's rules
+    // and compose via the free operators (which deduce Context from operands).
+    Grammar<RealTok, RealNode> g;
+
+    g["single"] = g.terminal(RealTok{1, {}});
+    g["range"] = g.terminal(RealTok{1, {}}, RealTok{9, {}});
+    g["pred"] = g.terminal([](const RealTok& t) { return t.id > 0; });
+    g["set"] = g.terminal(std::set<RealTok>{RealTok{1, {}}, RealTok{2, {}}});
+    g["seq"] = g.terminalSeq(std::vector<RealTok>{RealTok{1, {}}, RealTok{2, {}}});
+
+    // Combining operators deduce Context<RealTok, RealNode> from operands.
+    g["combo"] = g["single"] >> g["range"] | g["pred"];
+    g["star"] = *g["single"];
+    g["opt"] = -g["single"];
+    g["not"] = !g["single"];
+    g["and"] = &g["single"];
+    g["lex"] = g.lexeme(+g["single"]);
+
+    // Mixed-literal operator expr >> value_type binds to expr's Context.
+    g["mix"] = g["single"] >> RealTok{2, {}};
+
+    // Sanity: the grammar is well-formed (no undefined rules).
+    CHECK(g.undefined_rules().empty());
+}
+
+TEST_CASE("non-trivial-token-end-to-end-parse-with-semantic-action")
+{
+    // Full pipeline: token stream in, custom NodeType out via a semantic
+    // action that reads the matched token via ctx.at(start_offset).
+    Grammar<RealTok, RealNode> g;
+
+    // Match three specific tokens in sequence: open(1), mid(5), close(2).
+    g["open"] = g.terminal(RealTok{1, {}});
+    g["mid"] = g.terminal(RealTok{5, {}});
+    g["close"] = g.terminal(RealTok{2, {}});
+    g["group"] = g["open"] >> g["mid"] >> g["close"];
+    g["group"].set_action([](Context<RealTok, RealNode>& ctx,
+                             const Context<RealTok, RealNode>::ParseTreeNodePtr& node) {
+        // Tokens carry their own identity — read the opener by offset, no
+        // string slicing needed.
+        RealNode n;
+        n.matched_id = ctx.at(node->start_offset).id;
+        n.lexeme = "group";
+        return n;
+    });
+    g.set_start("group");
+
+    std::vector<RealTok> input{RealTok{1, std::string{"x"}}, RealTok{5, 42}, RealTok{2, 3.14}};
+    Context<RealTok, RealNode> ctx{input};
+
+    auto tree = g.parse_tree("group", ctx);
+    REQUIRE(tree);
+    CHECK(tree->value.matched_id == 1);
+    CHECK(tree->value.lexeme == "group");
+    CHECK(ctx.ended()); // whole stream consumed
+}
+
+TEST_CASE("non-trivial-token-failure-renders-via-adl-hook")
+{
+    // A non-trivially-copyable token's diagnostic still routes through the
+    // to_display ADL hook (defined above for RealTok), producing "<TK1>".
+    using Ctx = Context<RealTok, RealNode>;
+    Grammar<RealTok, RealNode> g;
+    g["t"] = g.terminal(RealTok{1, {}});
+    g.set_start("t");
+
+    std::vector<RealTok> input{RealTok{9, {}}};
+    Ctx ctx{input};
+    CHECK_FALSE(g.parse(ctx));
+
+    auto text = literal_text(ctx.take_error(), ExpectedKind::Literal);
+    CHECK_FALSE(text.empty());
+    CHECK(text == "<TK1>");
 }

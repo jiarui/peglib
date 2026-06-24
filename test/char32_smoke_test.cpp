@@ -21,7 +21,7 @@ TEST_CASE("char32-context-matches-u32string-literal")
     // Build a char32_t terminal sequence and parse it against a u32string.
     using C32 = Context<char32_t>;
     Grammar<char32_t> g;
-    g["hello"] = terminalSeq(std::u32string{U"hello"});
+    g["hello"] = g.terminalSeq(std::u32string{U"hello"});
     g.set_start("hello");
 
     std::u32string input = U"hello";
@@ -35,7 +35,7 @@ TEST_CASE("char32-context-matches-single-codepoint-terminal")
     using C32 = Context<char32_t>;
     Grammar<char32_t> g;
     // U+4E2D ('middle' / '中') as a single-codepoint terminal.
-    g["cjk"] = terminal(U'\u4E2D');
+    g["cjk"] = g.terminal(U'\u4E2D');
     g.set_start("cjk");
 
     std::u32string input = U"\u4E2D";
@@ -52,7 +52,7 @@ TEST_CASE("char32-failure-diagnostic-renders-codepoint-not-garbled")
     // truncated \xNN or a garbled byte.
     using C32 = Context<char32_t>;
     Grammar<char32_t> g;
-    g["cjk"] = terminal(U'\u4E2D');
+    g["cjk"] = g.terminal(U'\u4E2D');
     g.set_start("cjk");
 
     std::u32string input = U"x"; // does not match U+4E2D
@@ -84,7 +84,7 @@ TEST_CASE("char32-ascii-codepoint-renders-as-itself")
     // as the char path — no regression for the common ASCII subset.
     using C32 = Context<char32_t>;
     Grammar<char32_t> g;
-    g["a"] = terminal(U'a');
+    g["a"] = g.terminal(U'a');
     g.set_start("a");
 
     std::u32string input = U"x";

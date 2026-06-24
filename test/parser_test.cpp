@@ -15,8 +15,9 @@ TEST_CASE("empty-expression-always-succeeds")
 {
     std::string input = "abc";
     Context context(input);
-    auto grammar = empty();
-    CHECK(grammar.parse(context));
+    Grammar<> g;
+    g["e"] = g.empty();
+    CHECK(g.parse("e", context));
     CHECK(context.current() == 'a'); // empty does not consume
 }
 
@@ -24,14 +25,17 @@ TEST_CASE("terminalseq-rollback-on-partial-match")
 {
     std::string input = "intxyz";
     Context context(input);
-    auto grammar = terminalSeq("int");
-    CHECK(grammar.parse(context));
+    Grammar<> g;
+    g["t"] = g.terminalSeq("int");
+    CHECK(g.parse("t", context));
     CHECK(context.current() == 'x');
 
     // A non-matching sequence must restore position.
     std::string input2 = "inx";
     Context context2(input2);
-    CHECK_FALSE(terminalSeq("int").parse(context2));
+    Grammar<> g2;
+    g2["t"] = g2.terminalSeq("int");
+    CHECK_FALSE(g2.parse("t", context2));
     CHECK(context2.mark() == 0);
 }
 
@@ -43,7 +47,7 @@ TEST_CASE("cut-committed-failure-surfaces-via-take-error")
     // first alt fails to match 'a', so cut is never set; second alt matches.
     std::string input1 = "b";
     Context context1(input1);
-    g["g1"] = (terminal('a') >> cut()) | terminal('b');
+    g["g1"] = (g.terminal('a') >> g.cut()) | g.terminal('b');
     CHECK(g.parse("g1", context1));
 
     // `('a' >> cut >> 'x') | 'a'` on input "ab":
@@ -53,7 +57,7 @@ TEST_CASE("cut-committed-failure-surfaces-via-take-error")
     // the caller. The diagnostic is queryable via ctx.take_error().
     std::string input2 = "ab";
     Context context2(input2);
-    g["g2"] = (terminal('a') >> cut() >> terminal('x')) | terminal('a');
+    g["g2"] = (g.terminal('a') >> g.cut() >> g.terminal('x')) | g.terminal('a');
     CHECK_FALSE(g.parse("g2", context2));
     auto err = context2.take_error();
     REQUIRE(err);
@@ -70,7 +74,7 @@ TEST_CASE("repetition-stops-on-no-progress")
     std::string input = "abc";
     Context context(input);
     Grammar<> g;
-    g["g"] = *empty();
+    g["g"] = *g.empty();
     CHECK(g.parse("g", context));
     CHECK(context.current() == 'a');
 }
@@ -90,7 +94,7 @@ TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
     std::string input = "abc";
     Context context(input);
     Grammar<> g;
-    g["g"] = *((&terminal('a')) >> cut());
+    g["g"] = *((&g.terminal('a')) >> g.cut());
     CHECK(g.parse("g", context));
     CHECK(context.current() == 'a');
 }
@@ -98,9 +102,12 @@ TEST_CASE("repetition-cut-on-no-progress-does-not-throw")
 TEST_CASE("terminalseq-records-expected-on-failure")
 {
     // terminalSeq("foo") on input "xyz" should record "foo" as expected.
+    // Parse the terminal expression directly (not via a named rule) so the
+    // terminal's own record_expected — not a RuleName — populates the set.
     std::string input = "xyz";
     Context context(input);
-    CHECK_FALSE(terminalSeq("foo").parse(context));
+    Grammar<> g;
+    CHECK_FALSE(g.terminalSeq("foo").parse(context));
     CHECK(context.has_error());
     CHECK(context.expected().size() == 1);
     CHECK(context.expected().begin()->kind == ExpectedKind::Literal);
@@ -110,9 +117,12 @@ TEST_CASE("terminalseq-records-expected-on-failure")
 TEST_CASE("terminal-range-records-range-expected")
 {
     // terminal('a', 'z') on input '0' should record "'a'..'z'" as expected.
+    // Parse the terminal expression directly (not via a named rule) so the
+    // terminal's own record_expected — not a RuleName — populates the set.
     std::string input = "0";
     Context context(input);
-    CHECK_FALSE(terminal('a', 'z').parse(context));
+    Grammar<> g;
+    CHECK_FALSE(g.terminal('a', 'z').parse(context));
     CHECK(context.has_error());
     CHECK(context.expected().size() == 1);
     CHECK(context.expected().begin()->kind == ExpectedKind::Range);
@@ -135,7 +145,7 @@ TEST_CASE("bounded-repetition-cut-failure-does-not-throw")
     std::string input = "ax";
     Context context(input);
     Grammar<> g;
-    g["g"] = 2 * (terminal('a') >> cut() >> terminal('b'));
+    g["g"] = 2 * (g.terminal('a') >> g.cut() >> g.terminal('b'));
     g.set_start("g");
     // The whole grammar still fails to match (it wanted 2 'a..b' pairs and
     // got none committed), but it fails NORMALLY — no exception escapes.

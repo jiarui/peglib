@@ -44,7 +44,7 @@ TEST_CASE("[negative] cut-evicts-memo-during-real-parse")
     Grammar<> g;
     // 'a' then cut then 'b', OR just 'a'. On input "a" the first alt matches
     // 'a' and commits via cut, then succeeds overall.
-    g["g"] = (terminal('a') >> cut() >> -terminal('b')) | terminal('a');
+    g["g"] = (g.terminal('a') >> g.cut() >> -g.terminal('b')) | g.terminal('a');
     g.set_start("g");
 
     std::string input = "a";

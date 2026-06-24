@@ -15,7 +15,7 @@ using namespace peg;
 TEST_CASE("and-expression (lookahead)")
 {
     Grammar<> g;
-    g["grammar"] = &terminal('a');
+    g["grammar"] = &g.terminal('a');
 
     SUBCASE("matches 'a' without consuming")
     {
@@ -38,7 +38,7 @@ TEST_CASE("and-expression (lookahead)")
 TEST_CASE("alternation-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminal('a') | 'b' | 'c';
+    g["grammar"] = g.terminal('a') | 'b' | 'c';
 
     SUBCASE("a")
     {
@@ -77,7 +77,7 @@ TEST_CASE("alternation-expression")
 TEST_CASE("zero-or-more-expression")
 {
     Grammar<> g;
-    g["grammar"] = *terminal('a');
+    g["grammar"] = *g.terminal('a');
 
     SUBCASE("a")
     {
@@ -124,7 +124,7 @@ TEST_CASE("zero-or-more-expression")
 TEST_CASE("one-or-more-expression")
 {
     Grammar<> g;
-    g["grammar"] = +terminal('a');
+    g["grammar"] = +g.terminal('a');
 
     SUBCASE("a")
     {
@@ -165,7 +165,7 @@ TEST_CASE("n-times-expression")
     SUBCASE("1 * 'a' on 'a' consumes one")
     {
         Grammar<> g;
-        g["grammar"] = 1 * terminal('a');
+        g["grammar"] = 1 * g.terminal('a');
         const std::string input = "a";
         Context context(input);
         bool ok = g.parse("grammar", context);
@@ -175,7 +175,7 @@ TEST_CASE("n-times-expression")
     SUBCASE("1 * 'a' on 'aa' stops after one")
     {
         Grammar<> g;
-        g["grammar"] = 1 * terminal('a');
+        g["grammar"] = 1 * g.terminal('a');
         const std::string input = "aa";
         Context context(input);
         bool ok = g.parse("grammar", context);
@@ -185,7 +185,7 @@ TEST_CASE("n-times-expression")
     SUBCASE("2 * 'a' on 'a' fails")
     {
         Grammar<> g;
-        g["grammar"] = 2 * terminal('a');
+        g["grammar"] = 2 * g.terminal('a');
         const std::string input = "a";
         Context context(input);
         bool ok = g.parse("grammar", context);
@@ -195,7 +195,7 @@ TEST_CASE("n-times-expression")
     SUBCASE("2 * 'a' on 'aa' succeeds")
     {
         Grammar<> g;
-        g["grammar"] = 2 * terminal('a');
+        g["grammar"] = 2 * g.terminal('a');
         const std::string input = "aa";
         Context context(input);
         bool ok = g.parse("grammar", context);
@@ -207,7 +207,7 @@ TEST_CASE("n-times-expression")
 TEST_CASE("not-expression")
 {
     Grammar<> g;
-    g["grammar"] = !terminal('a');
+    g["grammar"] = !g.terminal('a');
 
     SUBCASE("matches 'b' without consuming")
     {
@@ -230,7 +230,7 @@ TEST_CASE("not-expression")
 TEST_CASE("optional-expression")
 {
     Grammar<> g;
-    g["grammar"] = -terminal('a');
+    g["grammar"] = -g.terminal('a');
 
     SUBCASE("matches 'a'")
     {
@@ -266,7 +266,7 @@ TEST_CASE("repetition-restores-position-on-child-partial-failure")
     // position 2: matches 'a', fails on EOF (wanted 'b'). The SequenceExpr
     // self-restores to position 2. The trailing 'a' then matches at position 2.
     Grammar<> g;
-    g["grammar"] = *(terminal('a') >> terminal('b')) >> terminal('a');
+    g["grammar"] = *(g.terminal('a') >> g.terminal('b')) >> g.terminal('a');
 
     std::string input = "aba";
     Context context(input);
@@ -312,7 +312,7 @@ TEST_CASE("non-terminal-recursion")
 TEST_CASE("sequence-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminal('a') >> 'b' >> 'c';
+    g["grammar"] = g.terminal('a') >> 'b' >> 'c';
 
     SUBCASE("abc")
     {
@@ -340,7 +340,7 @@ TEST_CASE("sequence-expression")
 TEST_CASE("terminal-range-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminal('0', '9');
+    g["grammar"] = g.terminal('0', '9');
 
     SUBCASE("matches '0'")
     {
@@ -361,7 +361,7 @@ TEST_CASE("terminal-range-expression")
 TEST_CASE("terminal-set-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
+    g["grammar"] = g.terminal(std::set<char>{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'});
 
     SUBCASE("matches '0'")
     {
@@ -396,7 +396,7 @@ TEST_CASE("terminal-set-expression")
 TEST_CASE("terminal-seq-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminalSeq("int");
+    g["grammar"] = g.terminalSeq("int");
 
     SUBCASE("matches 'int'")
     {
@@ -417,7 +417,7 @@ TEST_CASE("terminal-seq-expression")
 TEST_CASE("terminal-predicate-expression")
 {
     Grammar<> g;
-    g["grammar"] = terminal<char>([](char c) { return c == 'a'; });
+    g["grammar"] = g.terminal([](char c) { return c == 'a'; });
 
     SUBCASE("matches 'a'")
     {
@@ -438,7 +438,7 @@ TEST_CASE("terminal-predicate-expression")
 TEST_CASE("semantic-action-fires-on-match")
 {
     Grammar<> g;
-    g["grammar"] = terminal('a');
+    g["grammar"] = g.terminal('a');
     int matches = 0;
     const std::string input = "a";
     Context context(input);
@@ -488,7 +488,7 @@ TEST_CASE("right-recursion")
 TEST_CASE("left-recursion-simple")
 {
     Grammar<> g;
-    g["r"] = (g["r"] >> 'b') | (g["r"] >> 'c') | terminal('a') | terminal('d');
+    g["r"] = (g["r"] >> 'b') | (g["r"] >> 'c') | g.terminal('a') | g.terminal('d');
 
     auto checkOk = [&](const std::string& input, bool ended) {
         Context context(input);
@@ -533,7 +533,7 @@ namespace
 Grammar<> arithmetic_g;
 
 [[maybe_unused]] const bool arithmetic_grammar_init = [] {
-    auto digit = terminal('0', '9');
+    auto digit = arithmetic_g.terminal('0', '9');
     auto integer = +digit;
     arithmetic_g["num"] = integer | '(' >> arithmetic_g["add"] >> ')';
     arithmetic_g["mul"] = (arithmetic_g["mul"] >> '*' >> arithmetic_g["num"]) |
@@ -577,10 +577,10 @@ TEST_CASE("local-rule-in-lambda-does-not-dangle")
     // everything alive.
     auto build_grammar = []() -> Grammar<> {
         Grammar<> g;
-        g["digit"] = terminal('0', '9');
+        g["digit"] = g.terminal('0', '9');
         g["number"] = +g["digit"];
-        g["ws"] = *terminal<char>([](char c) { return c == ' '; });
-        g["expr"] = g["number"] >> *(g["ws"] >> terminal('+') >> g["ws"] >> g["number"]);
+        g["ws"] = *g.terminal([](char c) { return c == ' '; });
+        g["expr"] = g["number"] >> *(g["ws"] >> g.terminal('+') >> g["ws"] >> g["number"]);
         g.set_start("expr");
         return g;
     };

@@ -1,8 +1,10 @@
 #pragma once
+#include "peglib/Combinators.h"
 #include "peglib/Concepts.h"
 #include "peglib/NonTerminal.h"
 #include "peglib/Terminals.h"
 
+#include <array>
 #include <map>
 #include <memory>
 #include <optional>
@@ -20,7 +22,7 @@ namespace peg
 // NonTerminals (held via shared_ptr).
 //
 //   Grammar<> g;
-//   g["number"] = +terminal('0', '9');
+//   g["number"] = +g.terminal('0', '9');
 //   g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
 //   g.set_start("expr");
 //   g.parse_string("1+2+3");  // convenience: creates a Context internally
@@ -42,6 +44,98 @@ public:
     using Context = peg::Context<CharT, NodeType>;
     using Rule = parsers::Rule<Context>;
     using NonTerminalType = parsers::NonTerminal<Context>;
+
+    // -----------------------------------------------------------------------
+    // Expression factories.
+    //
+    // peglib's parsing-expression types are parameterised on a full Context
+    // (which carries NodeType), and the combining operators (>>, |, *, ...)
+    // require every operand to share one Context type. A free terminal(elem)
+    // factory can only see the element type, so it would hardcode
+    // Context<elem> (NodeType = std::monostate) and could never produce an
+    // expression assignable to a Rule<Context<CharT, MyNode>>.
+    //
+    // These member factories close over the Grammar's own Context type, so
+    // every expression they build carries the correct NodeType automatically
+    // and composes freely with g[...] rule handles. They are pure
+    // compile-time typed factories: const, no runtime state, callable on a
+    // static Grammar.
+    //
+    // The free peg::terminal / terminalSeq / empty / cut / lexeme helpers
+    // were removed in favour of these; the combining operators remain free
+    // functions and deduce Context from their operands' context_type.
+    // -----------------------------------------------------------------------
+
+    // terminal(predicate): match one element for which f(elem) is true.
+    template<typename Pred>
+        requires std::predicate<Pred, CharT>
+    auto terminal(const Pred& f) const
+    {
+        return parsers::TerminalExpr<Context, Pred>(f);
+    }
+
+    // terminal(value): match one element equal to `value`.
+    template<typename V>
+        requires PegValue<V> && std::convertible_to<V, CharT>
+    auto terminal(V value) const
+    {
+        return parsers::TerminalExpr<Context, CharT>(static_cast<CharT>(value));
+    }
+
+    // terminal(set): match one element found in `values`.
+    auto terminal(const std::set<CharT>& values) const
+    {
+        return parsers::TerminalExpr<Context, std::set<CharT>>(values);
+    }
+
+    // terminal(array): match one element within the [lo, hi] range.
+    auto terminal(const std::array<CharT, 2>& values) const
+    {
+        return parsers::TerminalExpr<Context, std::array<CharT, 2>>(values);
+    }
+
+    // terminal(lo, hi): match one element within the [lo, hi] range.
+    auto terminal(const CharT& value_min, const CharT& value_max) const
+    {
+        std::array<CharT, 2> values = {value_min, value_max};
+        return terminal(values);
+    }
+
+    // terminalSeq(range): match a contiguous run of elements equal to the
+    // elements of `valueSeq`.
+    template<typename SeqType>
+        requires PegValueSeq<SeqType> && std::same_as<typename SeqType::value_type, CharT>
+    auto terminalSeq(const SeqType& valueSeq) const
+    {
+        return parsers::TerminalSeqExpr<Context, SeqType>(valueSeq);
+    }
+
+    // terminalSeq(literal): match a contiguous run of CharT. Only well-formed
+    // when CharT is a character type with a char_traits specialisation (so a
+    // basic_string<CharT> can be built from the literal); for token-level
+    // grammars use the range overload above with a container of tokens.
+    auto terminalSeq(const CharT* str) const
+    {
+        return parsers::TerminalSeqExpr<Context, std::basic_string<CharT>>(
+            std::basic_string<CharT>{str});
+    }
+
+    // empty(): always succeed, consume nothing.
+    auto empty() const { return parsers::EmptyExpr<Context>(); }
+
+    // cut(): commit the current alternative/repetition scope.
+    auto cut() const { return parsers::CutExpr<Context>(); }
+
+    // lexeme(expr): disable auto-skip within `expr`'s subtree. The operand
+    // must already carry this Grammar's Context (so it composes with the
+    // other member-built expressions); the constraint checks context_type.
+    template<typename Expr>
+        requires requires { typename std::remove_cvref_t<Expr>::context_type; } &&
+                 std::same_as<typename std::remove_cvref_t<Expr>::context_type, Context>
+    auto lexeme(const Expr& expr) const
+    {
+        return parsers::LexemeExpr<Context, Expr>(expr);
+    }
 
     Grammar() = default;
     Grammar(const Grammar&) = delete;
@@ -122,7 +216,7 @@ public:
     // not inside Alternatives, predicates, or terminal-sequence literals).
     //
     // The rule is typically *e matching whitespace/comments:
-    //   g["ws"] = *terminal<char>([](char c){ return c==' '||c=='\t'||c=='\n'||c=='\r'; });
+    //   g["ws"] = *g.terminal([](char c){ return c==' '||c=='\t'||c=='\n'||c=='\r'; });
     //   g.set_skipper(g["ws"]);
     // After this, sequences no longer need to thread `>> g["ws"] >>`
     // manually between every pair of terminals.

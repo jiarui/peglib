@@ -25,7 +25,7 @@ using namespace peg;
 TEST_CASE("[grammar] basic-rule-definition")
 {
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["number"] = +g["digit"];
     g.set_start("number");
 
@@ -63,7 +63,7 @@ TEST_CASE("[grammar] basic-rule-definition")
 TEST_CASE("[grammar] recursive-arithmetic")
 {
     Grammar<> g;
-    g["num"] = +terminal('0', '9');
+    g["num"] = +g.terminal('0', '9');
     g["mul"] = g["mul"] >> '*' >> g["num"] | g["num"];
     g["add"] = g["add"] >> '+' >> g["mul"] | g["mul"];
     g.set_start("add");
@@ -93,7 +93,7 @@ TEST_CASE("[grammar] right-recursion")
 {
     Grammar<> g;
     // r = 'x' r 'b' | 'a'
-    g["r"] = terminal('x') >> g["r"] >> terminal('b') | terminal('a');
+    g["r"] = g.terminal('x') >> g["r"] >> g.terminal('b') | g.terminal('a');
     g.set_start("r");
 
     SUBCASE("a")
@@ -120,7 +120,7 @@ TEST_CASE("[grammar] right-recursion")
 TEST_CASE("[grammar] auto-naming")
 {
     Grammar<> g;
-    g["my_rule"] = terminal('a');
+    g["my_rule"] = g.terminal('a');
 
     // The rule's internal name should be "my_rule" (appears in error messages)
     std::string input = "x";
@@ -146,7 +146,7 @@ TEST_CASE("[grammar] auto-naming")
 TEST_CASE("[grammar] undefined-rules")
 {
     Grammar<> g;
-    g["main"] = g["undefined"] >> terminal('a');
+    g["main"] = g["undefined"] >> g.terminal('a');
 
     auto undefined = g.undefined_rules();
     REQUIRE(undefined.size() >= 1);
@@ -169,8 +169,8 @@ TEST_CASE("[grammar] forward-reference")
 {
     Grammar<> g;
     // "a" references "b" before "b" is defined
-    g["a"] = terminal('x') >> g["b"];
-    g["b"] = terminal('y');
+    g["a"] = g.terminal('x') >> g["b"];
+    g["b"] = g.terminal('y');
     g.set_start("a");
 
     CHECK(g.parse_string("xy"));
@@ -183,7 +183,7 @@ TEST_CASE("[grammar] semantic-action")
 {
     using Ctx = Context<char>;
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
 
     int value = -1;
     g["digit"].set_action([&value](Ctx& ctx, const Ctx::ParseTreeNodePtr& node) -> std::monostate {
@@ -205,7 +205,7 @@ TEST_CASE("[grammar] rule-chaining")
     using Ctx = Context<char>;
     Grammar<> g;
     int count = 0;
-    g["token"] = terminal('a');
+    g["token"] = g.terminal('a');
     g["token"].set_action([&count](Ctx&, const Ctx::ParseTreeNodePtr&) -> std::monostate {
         count++;
         return {};
@@ -223,9 +223,9 @@ TEST_CASE("[grammar] rule-chaining")
 TEST_CASE("[grammar] introspection")
 {
     Grammar<> g;
-    g["alpha"] = terminal('a');
-    g["beta"] = terminal('b');
-    g["gamma"] = terminal('c');
+    g["alpha"] = g.terminal('a');
+    g["beta"] = g.terminal('b');
+    g["gamma"] = g.terminal('c');
 
     CHECK(g.has_rule("alpha"));
     CHECK(g.has_rule("beta"));
@@ -242,7 +242,7 @@ TEST_CASE("[grammar] introspection")
 TEST_CASE("[grammar] reusable-across-parses")
 {
     Grammar<> g;
-    g["num"] = +terminal('0', '9');
+    g["num"] = +g.terminal('0', '9');
     g.set_start("num");
 
     for (const std::string input : {"1", "12", "123", "99999"}) {
@@ -257,9 +257,9 @@ TEST_CASE("[grammar] reusable-across-parses")
 TEST_CASE("[grammar] unreachable-rules-cpp-grammar")
 {
     Grammar<> g;
-    g["start"] = g["used"] >> terminal('x');
-    g["used"] = terminal('a');
-    g["dead"] = terminal('b');
+    g["start"] = g["used"] >> g.terminal('x');
+    g["used"] = g.terminal('a');
+    g["dead"] = g.terminal('b');
     g.set_start("start");
 
     auto unreachable = g.unreachable_rules();
@@ -273,7 +273,7 @@ TEST_CASE("[grammar] unreachable-rules-cpp-grammar")
 TEST_CASE("[grammar] find-does-not-create-rule")
 {
     Grammar<> g;
-    g["real"] = terminal('a');
+    g["real"] = g.terminal('a');
     g.set_start("real");
 
     // find() on a missing rule returns nullopt...

@@ -54,7 +54,7 @@ TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
         // no shared_ptr cycle forms.
         for (int i = 0; i < 100; ++i) {
             Grammar<> g;
-            g["num"] = +terminal('0', '9');
+            g["num"] = +g.terminal('0', '9');
             g["mul"] = g["mul"] >> '*' >> g["num"] | g["num"];
             g["add"] = g["add"] >> '+' >> g["mul"] | g["mul"];
             g.set_start("add");
@@ -68,8 +68,8 @@ TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
     {
         for (int i = 0; i < 100; ++i) {
             Grammar<> g;
-            g["A"] = g["B"] | terminal('x');
-            g["B"] = g["A"] | terminal('y');
+            g["A"] = g["B"] | g.terminal('x');
+            g["B"] = g["A"] | g.terminal('y');
             g.set_start("A");
             if (i == 99) {
                 CHECK(g.parse_string("x"));
@@ -93,7 +93,7 @@ TEST_CASE("[lifecycle] clear-body-for-debug-makes-rule-undefined")
 {
     Grammar<> g;
     auto handle = g["rule"];
-    handle = +terminal('a');
+    handle = +g.terminal('a');
     CHECK(handle.is_defined());
 
     // Poison the body as ~Grammar would in a debug build.

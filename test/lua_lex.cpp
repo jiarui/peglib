@@ -6,39 +6,43 @@
 #include <variant>
 using namespace peg;
 
-auto WS = +terminal(std::set({' ', '\f', '\t', '\v'}));
-auto linebreak = terminal('\n');
-auto not_linebreak = terminal<char>([](char c) { return c != '\n'; });
-auto digit = terminal('0', '9');
-auto xdigit = terminal<char>([](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
-auto fractional = -(terminal('+') | '-') >>
-                  ((*digit >> terminal('.') >> +digit) | (+digit >> terminal('.') >> *digit));
-auto decimal = -(terminal('+') | '-') >> +digit;
-auto hexdecimal = terminal('0') >> (terminal('x') | 'X') >> +xdigit >>
-                  -(terminal('.') >> +xdigit) >> -((terminal('p') | 'P') >> decimal);
-auto escape_single_quote = terminal('\\') >>
-                           (terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' |
-                            ('z' >> WS) | (3 * digit) | (2 * xdigit) |
-                            terminal('u') >> '{' >> *xdigit >> '}');
-auto string_content =
-    terminal<char>([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
-auto string_single_quote = terminal('\'') >> *(string_content | escape_single_quote) >>
-                           terminal('\'');
-auto cut_ = cut<Context<char>>();
-
 Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
-    g["names"] = terminal<char>([](char c) {
-                     return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
-                 }) >>
-                 *terminal<char>([](char c) {
-                     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
-                 });
-    g["numeral"] = hexdecimal | ((fractional | decimal) >> -((terminal('e') | 'E') >> -(decimal)));
-    g["comment"] = terminal('-') >> '-' >> *not_linebreak >> linebreak;
+    // Terminal building blocks. These are Grammar member factories now (the
+    // free peg::terminal helpers were removed), so they must be built from `g`
+    // — they are local to this initialiser where `g` is in scope.
+    auto WS = +g.terminal(std::set<char>{' ', '\f', '\t', '\v'});
+    auto linebreak = g.terminal('\n');
+    auto not_linebreak = g.terminal([](char c) { return c != '\n'; });
+    auto digit = g.terminal('0', '9');
+    auto xdigit = g.terminal([](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
+    auto fractional = -(g.terminal('+') | '-') >> ((*digit >> g.terminal('.') >> +digit) |
+                                                   (+digit >> g.terminal('.') >> *digit));
+    auto decimal = -(g.terminal('+') | '-') >> +digit;
+    auto hexdecimal = g.terminal('0') >> (g.terminal('x') | 'X') >> +xdigit >>
+                      -(g.terminal('.') >> +xdigit) >> -((g.terminal('p') | 'P') >> decimal);
+    auto escape_single_quote =
+        g.terminal('\\') >>
+        (g.terminal('a') | 'b' | 'f' | 'n' | 'r' | 't' | 'v' | '\\' | '\'' | ('z' >> WS) |
+         (3 * digit) | (2 * xdigit) | g.terminal('u') >> '{' >> *xdigit >> '}');
+    auto string_content =
+        g.terminal([](char c) { return c != '\'' && c != '\\' && c != '\r' && c != '\n'; });
+    auto string_single_quote =
+        g.terminal('\'') >> *(string_content | escape_single_quote) >> g.terminal('\'');
+    auto cut_ = g.cut();
+
+    g["names"] = g.terminal([](char c) {
+        return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
+    }) >> *g.terminal([](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    });
+    g["numeral"] =
+        hexdecimal | ((fractional | decimal) >> -((g.terminal('e') | 'E') >> -(decimal)));
+    g["comment"] = g.terminal('-') >> '-' >> *not_linebreak >> linebreak;
     g["string_literal"] = string_single_quote;
-    g["ops"] = terminal('(') | terminal(')');
+    g["ws"] = WS;
+    g["ops"] = g.terminal('(') | g.terminal(')');
     g["token"] = (g["numeral"] >> cut_) | (g["names"] >> cut_) | (g["string_literal"] >> cut_) |
                  g["ops"] | g["comment"] | WS;
     g["lexer"] = +g["token"];
@@ -107,8 +111,8 @@ struct TokenizerTest
         g["names"].set_action(
             [this](Context<char>& context,
                    const Context<char>::ParseTreeNodePtr& node) -> std::monostate {
-                std::string m =
-                    context.substr(node->start_offset, node->end_offset - node->start_offset);
+                std::string m = context.input().slice(node->start_offset,
+                                                      node->end_offset - node->start_offset);
                 if (m == "if") {
                     m_token_buf.emplace_back(TokenID::TK_IF);
                 } else if (node->end_offset > node->start_offset) {
@@ -151,17 +155,17 @@ TEST_CASE("lua-lex-names")
         g["names"].set_action(
             ([](decltype(context)& c,
                 const decltype(context)::ParseTreeNodePtr& node) -> std::monostate {
-                CHECK(c.substr(node->start_offset, node->end_offset - node->start_offset) ==
+                CHECK(c.input().slice(node->start_offset, node->end_offset - node->start_offset) ==
                       "print");
                 return {};
             }));
 
-        g["ws"] = WS;
+        g["ws"] = +g.terminal(std::set<char>{' ', '\f', '\t', '\v'});
         bool ok = g.parse("ws", context);
         CHECK(ok);
         auto start = context.mark();
         CHECK(g.parse("names", context));
-        CHECK(context.substr(start, context.mark() - start) == "print");
+        CHECK(context.input().slice(start, context.mark() - start) == "print");
     }
 }
 
@@ -185,7 +189,7 @@ TEST_CASE("lua-lex-number")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("numeral", context));
-        CHECK(context.substr(start, context.mark() - start) == input);
+        CHECK(context.input().slice(start, context.mark() - start) == input);
     }
 }
 
@@ -199,7 +203,7 @@ TEST_CASE("lua-lex-comment")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("comment", context));
-        CHECK(context.substr(start, context.mark() - start) == input);
+        CHECK(context.input().slice(start, context.mark() - start) == input);
     }
 }
 
@@ -211,7 +215,7 @@ TEST_CASE("lua-lex-string")
         Context context(input);
         auto start = context.mark();
         CHECK(g.parse("string_literal", context));
-        CHECK(context.substr(start, context.mark() - start) == input);
+        CHECK(context.input().slice(start, context.mark() - start) == input);
     }
 }
 
@@ -225,21 +229,21 @@ TEST_CASE("lua-lex-tokens")
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(context.substr(start, context.mark() - start) == "print");
+        CHECK(context.input().slice(start, context.mark() - start) == "print");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(context.substr(start, context.mark() - start) == "(");
+        CHECK(context.input().slice(start, context.mark() - start) == "(");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(context.substr(start, context.mark() - start) == "'hello world'");
+        CHECK(context.input().slice(start, context.mark() - start) == "'hello world'");
     }
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));
-        CHECK(context.substr(start, context.mark() - start) == ")");
+        CHECK(context.input().slice(start, context.mark() - start) == ")");
     }
 }

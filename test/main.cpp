@@ -25,7 +25,7 @@ TEST_CASE("[smoke] minimal-terminal-parse")
     std::string input = "a";
     Context context(input);
     Grammar<> g;
-    g["grammar"] = terminal('a');
+    g["grammar"] = g.terminal('a');
     CHECK(g.parse("grammar", context));
     CHECK(context.ended());
 }

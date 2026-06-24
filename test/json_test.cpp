@@ -36,20 +36,19 @@ namespace json_grammar
 inline Grammar<> g;
 
 [[maybe_unused]] const bool grammar_initialized = [] {
-    auto cut_ = cut<Context<char>>();
+    auto cut_ = g.cut();
 
     // Whitespace: space, tab, newline, carriage return.
-    g["ws"] =
-        *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
+    g["ws"] = *g.terminal([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 
     // ----- string -----
-    auto escape_seq = terminal('\\') >> terminal<char>([](char c) {
-                          return c == '"' || c == '\\' || c == '/' || c == 'b' || c == 'f' ||
-                                 c == 'n' || c == 'r' || c == 't' || c == 'u';
-                      });
-    auto string_char = terminal<char>(
+    auto escape_seq = g.terminal('\\') >> g.terminal([](char c) {
+        return c == '"' || c == '\\' || c == '/' || c == 'b' || c == 'f' || c == 'n' || c == 'r' ||
+               c == 't' || c == 'u';
+    });
+    auto string_char = g.terminal(
         [](char c) { return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20; });
-    g["string"] = terminal('"') >> *(escape_seq | string_char) >> terminal('"');
+    g["string"] = g.terminal('"') >> *(escape_seq | string_char) >> g.terminal('"');
 
     // ----- number -----
     // JSON number grammar:
@@ -57,28 +56,28 @@ inline Grammar<> g;
     //   frac = "." [0-9]+
     //   exp = ("e"|"E") ("+"|"-")? [0-9]+
     //   number = int frac? exp?
-    auto digit = terminal('0', '9');
-    auto nonzero_digit = terminal('1', '9');
-    auto sign = terminal('-') | terminal('+');
-    auto integer = (-terminal('-')) >> (terminal('0') | (nonzero_digit >> *digit));
-    auto frac = terminal('.') >> +digit;
-    auto exp = (terminal('e') | 'E') >> -sign >> +digit;
+    auto digit = g.terminal('0', '9');
+    auto nonzero_digit = g.terminal('1', '9');
+    auto sign = g.terminal('-') | g.terminal('+');
+    auto integer = (-g.terminal('-')) >> (g.terminal('0') | (nonzero_digit >> *digit));
+    auto frac = g.terminal('.') >> +digit;
+    auto exp = (g.terminal('e') | 'E') >> -sign >> +digit;
     g["number"] = integer >> -frac >> -exp;
 
     // ----- keyword (true/false/null) -----
-    g["keyword"] = terminalSeq("true") | terminalSeq("false") | terminalSeq("null");
+    g["keyword"] = g.terminalSeq("true") | g.terminalSeq("false") | g.terminalSeq("null");
 
     // ----- array -----
     // array = '[' ws ( value (ws ',' ws value)* )? ws ']'
-    auto comma_sep = g["ws"] >> terminal(',') >> g["ws"];
+    auto comma_sep = g["ws"] >> g.terminal(',') >> g["ws"];
     g["value_list"] = g["value"] >> *(comma_sep >> g["value"]);
-    g["array"] = terminal('[') >> g["ws"] >> -g["value_list"] >> g["ws"] >> terminal(']');
+    g["array"] = g.terminal('[') >> g["ws"] >> -g["value_list"] >> g["ws"] >> g.terminal(']');
 
     // ----- object -----
     // object = '{' ws ( string ws ':' ws value (ws ',' ws string ws ':' ws value)* )? ws '}'
-    g["key_value"] = g["string"] >> g["ws"] >> terminal(':') >> g["ws"] >> g["value"];
+    g["key_value"] = g["string"] >> g["ws"] >> g.terminal(':') >> g["ws"] >> g["value"];
     g["member_list"] = g["key_value"] >> *(comma_sep >> g["key_value"]);
-    g["object"] = terminal('{') >> g["ws"] >> -g["member_list"] >> g["ws"] >> terminal('}');
+    g["object"] = g.terminal('{') >> g["ws"] >> -g["member_list"] >> g["ws"] >> g.terminal('}');
 
     // ----- value -----
     // Each alternative commits with `cut` after a successful match: once we

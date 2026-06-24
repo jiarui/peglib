@@ -31,12 +31,30 @@ struct InputSourceBase
     virtual ~InputSourceBase() = default;
     virtual CharT at(std::size_t offset) const = 0;
     virtual std::size_t size() const = 0;
-    virtual std::basic_string<CharT> substr(std::size_t offset, std::size_t count) const = 0;
 
     // Cut-driven buffer eviction. Default is a no-op (contiguous sources have
     // nothing to evict). FileSourceSource overrides to drop pages strictly
     // before `offset`, reclaiming memory once the parser commits a cut.
     virtual void release_before(std::size_t /*offset*/) {}
+
+    // Slice [offset, offset+count) as an owned std::basic_string<CharT>.
+    // Non-virtual and constrained to integral CharT: basic_string<CharT> is
+    // ill-formed for a non-trivially-copyable CharT (libstdc++ asserts), so
+    // for token-level grammars this member simply does not exist — token
+    // actions read payloads via ctx.at(off), not via slicing.
+    std::basic_string<CharT> slice(std::size_t offset, std::size_t count) const
+        requires std::is_integral_v<CharT>
+    {
+        if (m_contiguous_data != nullptr) {
+            return std::basic_string<CharT>{m_contiguous_data + offset, count};
+        }
+        std::basic_string<CharT> out;
+        out.reserve(count);
+        for (std::size_t i = 0; i < count; ++i) {
+            out.push_back(this->at(offset + i));
+        }
+        return out;
+    }
 
     // Non-virtual fast-path accessor: returns a raw pointer to contiguous
     // storage, or nullptr if the source is not contiguous. Context caches
@@ -74,10 +92,8 @@ struct SpanSource : InputSourceBase<CharT>
 
     std::size_t size() const override { return m_size; }
 
-    std::basic_string<CharT> substr(std::size_t offset, std::size_t count) const override
-    {
-        return std::basic_string<CharT>{m_data + offset, count};
-    }
+    // No substr override: the contiguous fast path in InputSourceBase::substr
+    // uses m_contiguous_data (set in the constructor above) directly.
 
 private:
     const CharT* m_data;
@@ -101,15 +117,8 @@ struct FileSourceSource : InputSourceBase<CharT>
 
     std::size_t size() const override { return m_fs.size(); }
 
-    std::basic_string<CharT> substr(std::size_t offset, std::size_t count) const override
-    {
-        std::basic_string<CharT> out;
-        out.reserve(count);
-        for (std::size_t i = 0; i < count; ++i) {
-            out.push_back(m_fs.at(offset + i));
-        }
-        return out;
-    }
+    // No substr override: InputSourceBase::substr's paged path fetches via
+    // the virtual at(), which forwards to m_fs.at() here.
 
     void release_before(std::size_t offset) override { m_fs.release_before(offset); }
 

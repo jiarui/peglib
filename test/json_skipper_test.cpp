@@ -27,21 +27,20 @@ Grammar<char> make_json_skipper_grammar()
 {
     Grammar<char> g;
 
-    g["ws"] =
-        *terminal<char>([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
+    g["ws"] = *g.terminal([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
 
     // No `>> g["ws"] >>` anywhere — the skipper handles it.
-    g["number"] = lexeme(+terminal('0', '9'));
+    g["number"] = g.lexeme(+g.terminal('0', '9'));
     g["string"] =
-        lexeme(terminal('"') >> *(terminal<char>([](char c) { return c != '"' && c != '\\'; })) >>
-               terminal('"'));
-    g["value"] = g["number"] | g["string"] | g["object"] | g["array"] | terminalSeq("true") |
-                 terminalSeq("false") | terminalSeq("null");
-    g["member"] = g["string"] >> terminal(':') >> g["value"];
-    g["members"] = g["member"] >> *(terminal(',') >> g["member"]);
-    g["object"] = terminal('{') >> -g["members"] >> terminal('}');
-    g["elements"] = g["value"] >> *(terminal(',') >> g["value"]);
-    g["array"] = terminal('[') >> -g["elements"] >> terminal(']');
+        g.lexeme(g.terminal('"') >> *(g.terminal([](char c) { return c != '"' && c != '\\'; })) >>
+                 g.terminal('"'));
+    g["value"] = g["number"] | g["string"] | g["object"] | g["array"] | g.terminalSeq("true") |
+                 g.terminalSeq("false") | g.terminalSeq("null");
+    g["member"] = g["string"] >> g.terminal(':') >> g["value"];
+    g["members"] = g["member"] >> *(g.terminal(',') >> g["member"]);
+    g["object"] = g.terminal('{') >> -g["members"] >> g.terminal('}');
+    g["elements"] = g["value"] >> *(g.terminal(',') >> g["value"]);
+    g["array"] = g.terminal('[') >> -g["elements"] >> g.terminal(']');
     g["json"] = g["value"];
 
     g.set_start("json");

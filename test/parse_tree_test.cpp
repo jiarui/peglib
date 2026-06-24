@@ -32,7 +32,7 @@ TEST_CASE("value-stack-default-node-type-is-monostate")
     // Default Context produces a tree whose value is a default-constructed
     // std::monostate (no action set → node->value is value-initialised).
     Grammar<> g;
-    g["rule"] = terminal('a');
+    g["rule"] = g.terminal('a');
     auto tree = g.parse_tree("rule", context);
     REQUIRE(tree);
     static_assert(std::is_same_v<decltype(tree->value), std::monostate>);
@@ -47,9 +47,8 @@ TEST_CASE("value-stack-custom-node-type")
     std::string input = "4";
     MyContext context(input);
 
-    using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
     Grammar<char, IntNode> g;
-    g["num"] = DigitTerm({'0', '9'});
+    g["num"] = g.terminal('0', '9');
     g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
@@ -67,10 +66,9 @@ TEST_CASE("value-stack-clear")
     // shared mutable state to clear. Verify that successive parses do not
     // interfere with one another's trees.
     using MyContext = Context<char, IntNode>;
-    using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
 
     Grammar<char, IntNode> g;
-    g["num"] = DigitTerm({'0', '9'});
+    g["num"] = g.terminal('0', '9');
     g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
@@ -102,9 +100,8 @@ TEST_CASE("value-stack-action-result-pushed")
     // Grammar: num = single digit, action returns the digit as IntNode.
     // Construct a TerminalExpr that matches any digit using std::set<char>.
     std::set<char> digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
-    using DigitTerminal = TerminalExpr<MyContext, std::set<char>>;
     Grammar<char, IntNode> g;
-    g["num"] = DigitTerminal(digits);
+    g["num"] = g.terminal(digits);
     g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         char c = ctx.at(node->start_offset);
         return IntNode{c - '0'};
@@ -129,7 +126,7 @@ TEST_CASE("value-stack-monostate-action-returns-default")
     DefaultCtxt context(input);
 
     Grammar<char> g;
-    g["rule"] = terminal('a');
+    g["rule"] = g.terminal('a');
     g["rule"].set_action([](DefaultCtxt& /*ctx*/, const DefaultCtxt::ParseTreeNodePtr& /*node*/) {
         return std::monostate{};
     });
@@ -210,13 +207,12 @@ static_assert(!PegContext<BadContextNoCut>, "a Context missing the cut API must 
 TEST_CASE("value-stack-rollback-on-sequence-failure")
 {
     using MyContext = Context<char, IntNode>;
-    using DigitTerm = TerminalExpr<MyContext, std::array<char, 2>>;
     Grammar<char, IntNode> g;
-    g["digit"] = DigitTerm({'0', '9'});
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         return IntNode{ctx.at(node->start_offset) - '0'};
     });
-    g["nonzero"] = DigitTerm({'1', '9'});
+    g["nonzero"] = g.terminal('1', '9');
     g["nonzero"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
         return IntNode{ctx.at(node->start_offset) - '0'};
     });
@@ -247,12 +243,11 @@ TEST_CASE("value-stack-rollback-on-sequence-failure")
 TEST_CASE("value-stack-rollback-on-alternation-failure")
 {
     using MyContext = Context<char, IntNode>;
-    using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
-    g["a_node"] = ATerm('a');
+    g["a_node"] = g.terminal('a');
     g["a_node"].set_action(
         [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
-    g["b_node"] = ATerm('b');
+    g["b_node"] = g.terminal('b');
     g["b_node"].set_action(
         [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{2}; });
     // Both alternatives produce a node. The point of this test: when the
@@ -291,9 +286,8 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
 TEST_CASE("value-stack-rollback-on-not-predicate")
 {
     using MyContext = Context<char, IntNode>;
-    using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
-    g["a_node"] = ATerm('a');
+    g["a_node"] = g.terminal('a');
     g["a_node"].set_action(
         [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
     // !a_node succeeds (because lookahead doesn't match), and must leave
@@ -310,9 +304,8 @@ TEST_CASE("value-stack-rollback-on-not-predicate")
 TEST_CASE("value-stack-rollback-on-and-predicate")
 {
     using MyContext = Context<char, IntNode>;
-    using ATerm = TerminalExpr<MyContext, char>;
     Grammar<char, IntNode> g;
-    g["a_node"] = ATerm('a');
+    g["a_node"] = g.terminal('a');
     g["a_node"].set_action(
         [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
     // &a_node succeeds (lookahead matches 'a'), and must leave zero children

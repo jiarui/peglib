@@ -25,8 +25,12 @@ real-world case study.
 - **Header-only**, C++20, no external runtime dependencies.
 - **Two ways to define grammars**:
   - **C++ combinators**: `>>` (sequence), `|` (choice), `*` / `+` / `-` /
-    `n*` (repetition / optional), `!` / `&` (negation / lookahead),
-    `cut()` (committed choice), `lexeme()` (no-skip wrapper).
+    `n*` (repetition / optional), `!` / `&` (negation / lookahead), plus the
+    `Grammar` member factories `g.terminal(...)`, `g.terminalSeq(...)`,
+    `g.empty()`, `g.cut()` (committed choice), `g.lexeme(...)` (no-skip
+    wrapper). Every expression a `Grammar` builds carries that Grammar's
+    `Context` (and thus `NodeType`), so the operators compose and assign into
+    rules without any explicit Context arguments.
   - **Textual PEG format**: `GrammarCompiler::from_string("Expr <- Term ('+' Term)*")`
     compiles PEG text at runtime into a `Grammar<>`. Supports the Ford 2004
     baseline plus peglib extensions: `~` (cut), `< e >` (lexeme),
@@ -77,11 +81,16 @@ real-world case study.
   file. The contiguous (span) path fills a raw-pointer cache so the
   per-character hot path has zero virtual dispatch; `FileSource` goes through
   one virtual call per character (I/O-bound anyway).
-- **Non-char `value_type` is first-class**: `Context<char32_t>` works for
-  matching and diagnostics. `escape_char_for_expected` / `escape_string_for_expected`
-  are templated; wider codepoints render as `\UNNNNNNNN` instead of being
-  truncated to `\xNN`. (PEG-text compilation still produces char-only grammars;
-  a UTF-8 decoder and codepoint-aware `.` are Tier 2/3 future work.)
+- **Non-char `value_type` is first-class — including downstream tokens**:
+  `Context<char32_t>` works for matching and diagnostics, and so does a
+  non-trivially-copyable token type (e.g. a lexer `Token` carrying a
+  `std::variant`/`std::string` payload). `Grammar<Token, MyAst>` builds rules
+  with `g.terminal(tok)`, `g.terminal(pred)`, etc., and the semantic actions
+  return `MyAst`. `escape_char_for_expected` / the `to_display` CPO render
+  diagnostics for any element type (wider codepoints as `\UNNNNNNNN`, custom
+  tokens via an ADL `to_display(const Token&)` hook). (PEG-text compilation
+  still produces char-only grammars; a UTF-8 decoder and codepoint-aware `.`
+  are Tier 2/3 future work.)
 - **`FileSource` is embedded-friendly**: `FileSource<CharT, PageSize>` uses a
   fixed-size `std::array` per buffer page (compile-time `PageSize`, no per-page
   heap allocation) — suitable for freestanding use and with better cache
@@ -126,7 +135,7 @@ int main() {
 
 ```cpp
 Grammar<> g;
-g["number"] = +terminal('0', '9');
+g["number"] = +g.terminal('0', '9');
 g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
 g.set_start("expr");
 g.parse_string("1+2+3");  // convenience: creates a Context internally
@@ -142,15 +151,15 @@ need to thread `>> ws >>` between every pair of terminals:
 Grammar<> g;
 
 // Whitespace + line comments, both transparent.
-g["ws"] = *terminal<char>([](char c) {
+g["ws"] = *g.terminal([](char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 });
-g["number"] = lexeme(+terminal('0', '9'));   // contiguous digits, no inner ws
-g["ident"]  = lexeme(terminal('a','z') >> *terminal('a','z'));
-g["expr"]   = g["term"] >> *(terminal('+') >> g["term"]);
-g["term"]   = g["factor"] >> *(terminal('*') >> g["factor"]);
+g["number"] = g.lexeme(+g.terminal('0', '9'));   // contiguous digits, no inner ws
+g["ident"]  = g.lexeme(g.terminal('a','z') >> *g.terminal('a','z'));
+g["expr"]   = g["term"] >> *(g.terminal('+') >> g["term"]);
+g["term"]   = g["factor"] >> *(g.terminal('*') >> g["factor"]);
 g["factor"] = g["number"] | g["ident"]
-            | terminal('(') >> g["expr"] >> terminal(')');
+            | g.terminal('(') >> g["expr"] >> g.terminal(')');
 
 g.set_start("expr");
 g.set_skipper(g["ws"]);                       // one line replaces all the threading
@@ -159,7 +168,7 @@ g.parse_string("1 + 2 * ( 3 + 4 )");          // true
 g.parse_string("  1+2*3  ");                  // true (pest-style leading ws)
 ```
 
-`lexeme(...)` is the escape hatch: inside it, auto-skip is disabled so a
+`g.lexeme(...)` is the escape hatch: inside it, auto-skip is disabled so a
 token's characters stay contiguous (`"12 34"` is two numbers, not `"1234"`).
 To disable auto-skip globally, call `clear_skipper()` (or never call
 `set_skipper` — that is the default).
@@ -167,9 +176,9 @@ To disable auto-skip globally, call `clear_skipper()` (or never call
 ### Text-grammar extensions: cut, lexeme, recovery
 
 The textual PEG format supports three peglib-specific constructs beyond the
-Ford 2004 baseline. They mirror the C++ combinator API (`cut()`, `lexeme()`,
-`Rule::set_recovery`) so the two surfaces have identical power for these
-features.
+Ford 2004 baseline. They mirror the C++ combinator API (`g.cut()`,
+`g.lexeme(...)`, `Rule::set_recovery`) so the two surfaces have identical power
+for these features.
 
 **Cut `~`** — commits the current alternative/repetition scope. After a cut,
 failure in the same scope throws `peg::ParseError` (hard failure). Used inside
@@ -263,6 +272,28 @@ library does **not** force a storage policy — you pick whichever fits:
 | a value type (e.g. `struct IntNode`)| lightweight product             | inline, stack-allocated     |
 | `std::shared_ptr<T>` (e.g. `PegAstNodePtr`) | polymorphic / shared AST | heap + refcount, nullable   |
 
+`CharT` and `NodeType` are independent axes: `Grammar<char32_t>` matches UTF-32
+codepoints with `NodeType = monostate`; `Grammar<Token, MyAst>` matches a
+stream of lexer tokens and produces a custom AST. A token `CharT` may be a
+non-trivially-copyable struct (e.g. carrying a `std::string` lexeme):
+
+```cpp
+struct Token { int id; std::variant<long long, std::string> lex; /* ... */ };
+struct Ast   { int kind; std::string text; };
+
+Grammar<Token, Ast> g;
+g["open"]  = g.terminal(Token{1, {}});
+g["close"] = g.terminal(Token{2, {}});
+g["group"] = g["open"] >> *(!g["close"] >> g.terminal([](const Token&) { return true; }))
+                      >> g["close"];
+g["group"].set_action([](Context<Token, Ast>& ctx,
+                         const Context<Token, Ast>::ParseTreeNodePtr& node) {
+    Ast a;
+    a.kind = ctx.at(node->start_offset).id;   // read token payload by offset
+    return a;
+});
+```
+
 Passing `std::shared_ptr<PegAstNode>` as the template argument (rather than
 `PegAstNode` with the library wrapping it in `shared_ptr` internally) is
 deliberate: it lets `std::monostate` and value-type products stay zero-cost,
@@ -317,7 +348,7 @@ include/peglib/      header-only library
   NonTerminal.h      NonTerminal (internal entity), Rule (non-owning handle)
   Grammar.h          Grammar (rule container), the primary user-facing API
   Parser.h           umbrella for the 4 parser headers above
-  Rule.h             operator DSL (>>, |, *, +, !, &, ...) + factories
+  Rule.h             operator DSL (>>, |, *, +, !, &, ...) — factories live on Grammar
   FileSource.h       streaming file-backed input with double buffering
   SourceMap.h        byte offset <-> (line, col) mapping
   ParseError.h       Diagnostic, ParseError, ExpectedItem, escape helpers

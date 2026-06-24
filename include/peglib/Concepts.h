@@ -58,11 +58,14 @@ concept PegContext =
         { c.ended() } -> std::convertible_to<bool>;
         { c.state() } -> std::same_as<typename C::State>;
         { c.state(s) } -> std::same_as<void>;
-        // Character / slice access (replaces the old get_input() that exposed
-        // the underlying source). Actions read matched text via substr().
+        // Character / element access. Input slicing (extracting matched text
+        // by offset) is delegated to InputSource via Context::input(); it is
+        // intentionally NOT part of the PegContext contract because its return
+        // type (std::basic_string<value_type>) is ill-formed for non-character
+        // value types, and the parse core never needs it — only semantic
+        // actions do, and they go through input().slice(...).
         { c.current() } -> std::same_as<typename C::value_type>;
         { c.at(pos) } -> std::same_as<typename C::value_type>;
-        { c.substr(pos, pos) } -> std::same_as<std::basic_string<typename C::value_type>>;
 
         // Memo ----------------------------------------------------------------
         // rule_state returns {inserted?, RuleState&}; we only constrain the

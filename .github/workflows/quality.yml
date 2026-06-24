@@ -13,24 +13,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang-format-20
+      - name: Install clang-format-22
         run: |
-          # Pin to clang-format-20 so CI matches local dev toolchain.
-          # ubuntu-24.04 default is clang-format-18, which produces
-          # slightly different output (CRLF-init lambdas, BinPackArguments
-          # edge cases). The canonical version for this repo is 20.x.
+          # Match the local toolchain (and the clang-tidy job below).
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | \
             sudo gpg --dearmor -o /etc/apt/keyrings/llvm.gpg
-          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" | \
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" | \
             sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y clang-format-20
+          sudo apt-get install -y clang-format-22
 
       - name: Check formatting
         run: |
           find include test -name '*.h' -o -name '*.cpp' \
             | grep -v doctest \
-            | xargs clang-format-20 --style=file --dry-run -Werror
+            | xargs clang-format-22 --style=file --dry-run -Werror
 
   tidy:
     name: clang-tidy

@@ -46,10 +46,10 @@ enum class NodeKind
     // Cut:    `~` — commits the current alternative/repetition scope. On
     //         subsequent failure in the same scope, peg::ParseError is
     //         thrown. Leaf (no payload, no children). Same semantics as
-    //         peg::cut() / CutExpr.
+    //         peg::Grammar::cut() / CutExpr.
     // Lexeme: `< e >` — disable auto-skip for e's subtree. Wrapper,
     //         children[0] = inner expression. Same semantics as
-    //         peg::lexeme() / LexemeExpr. NOTE: with no skipper
+    //         peg::Grammar::lexeme() / LexemeExpr. NOTE: with no skipper
     //         configured, lexeme is a no-op; the text-grammar path
     //         (GrammarCompiler) does not set a skipper, so this is
     //         forward-compatible plumbing for a future %whitespace

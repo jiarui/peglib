@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Token-level grammars with custom NodeType
+
+Support for `Grammar<TokenType, CustomNodeType>` (non-trivially-copyable token
+streams feeding a user-defined AST product type), fixing two legacy
+`char`-and-`monostate` assumptions.
+
+- **`Context::substr` removed**; input slicing moved to `InputSource`. The old
+  `Context::substr` returned `std::basic_string<value_type>`, which is
+  ill-formed for a non-trivially-copyable value type (libstdc++ asserts). The
+  `PegContext` concept no longer constrains slicing. `Context::input()` exposes
+  the `InputSourceBase`, and `InputSourceBase::slice(off, count)` is a
+  non-virtual member constrained to `std::is_integral_v<CharT>` — so it does
+  not exist for token-level grammars (token actions read payloads via
+  `ctx.at(off)`, not via slicing).
+- **Free factories removed; `Grammar` member factories added.** `peg::terminal`
+  / `terminalSeq` / `empty` / `cut` / `lexeme` hardcoded `Context<elem>`
+  (NodeType = `monostate`), so their expressions could not assign into a
+  `Rule<Context<CharT, MyNode>>`. These are now `Grammar::terminal` /
+  `terminalSeq` / `empty` / `cut` / `lexeme`, which close over the Grammar's
+  own `Context` so every expression carries the correct `NodeType` and composes
+  freely with `g[...]` handles. The combining operators (`>>`, `|`, `*`, `+`,
+  `-`, `!`, `&`, `n*`) remain free functions and deduce `Context` from their
+  operands' `context_type`; the mixed-literal forms (`expr >> value`,
+  `expr | value`) now build a `TerminalExpr` matching the operand's Context
+  instead of calling the removed free `terminal`.
+- `MetaGrammar` and `parse_tree_test` no longer hand-write
+  `TerminalExpr<Ctx, ...>` aliases — they use `g.terminal(...)`.
+
+### Migration notes
+
+- `terminal(x)` → `g.terminal(x)`; `terminalSeq(...)` → `g.terminalSeq(...)`;
+  `empty()` → `g.empty()`; `cut()` → `g.cut()`; `lexeme(e)` → `g.lexeme(e)`.
+- `ctx.substr(off, len)` → `ctx.input().slice(off, len)` (character grammars
+  only; token grammars have no equivalent and do not need one).
+- `terminal<CharT>(pred)` → `g.terminal(pred)` (drop the explicit template
+  argument — the Grammar already knows `CharT`).
+
 ### Added — Phase 3 (Auto Whitespace) + Phase 5 to_dot() slice
 
 #### Auto whitespace (`set_skipper` + `lexeme`)

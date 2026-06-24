@@ -88,17 +88,19 @@ TEST_CASE("context-cut-stack-lifecycle")
     context.remove_cut();
 }
 
-TEST_CASE("context-substr-and-at-read-by-offset")
+TEST_CASE("context-input-slice-and-at-read-by-offset")
 {
     std::string input = "xyz";
     Context context(input);
 
-    // input_size / at / substr replace the old get_input() accessors.
+    // input_size / at read by offset; input() exposes the InputSource so
+    // semantic actions can slice matched text (substr lives on InputSource,
+    // not Context — see Context.h).
     CHECK(context.input_size() == 3);
     CHECK(context.at(0) == 'x');
     CHECK(context.at(2) == 'z');
-    CHECK(context.substr(0, 3) == "xyz");
-    CHECK(context.substr(1, 2) == "yz");
+    CHECK(context.input().slice(0, 3) == "xyz");
+    CHECK(context.input().slice(1, 2) == "yz");
 }
 
 // ---------------------------------------------------------------------------

@@ -92,9 +92,7 @@ struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children.
     ParseResult parse(Context& context) const override
     {
         context.init_cut();
-        ScopeGuard s{[&context]() {
-            context.remove_cut();
-        }};
+        ScopeGuard s{[&context]() { context.remove_cut(); }};
         return parseAlt<0>(context);
     }
 
@@ -148,9 +146,7 @@ typename Context::ParseResult
 repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, std::int64_t max_rep)
 {
     context.init_cut();
-    ScopeGuard _{[&context]() {
-        context.remove_cut();
-    }};
+    ScopeGuard _{[&context]() { context.remove_cut(); }};
     auto initState = context.state();
     auto node = std::make_shared<typename Context::ParseTreeNode>();
     node->start_offset = context.mark();
@@ -376,9 +372,7 @@ typename Context::ParseResult
 choice_parse_impl(Context& context, ChildOp parse_at, std::size_t count)
 {
     context.init_cut();
-    ScopeGuard _{[&context]() {
-        context.remove_cut();
-    }};
+    ScopeGuard _{[&context]() { context.remove_cut(); }};
     for (std::size_t i = 0; i < count; ++i) {
         auto result = parse_at(context, i);
         if (result.success) {
@@ -459,8 +453,8 @@ struct CutExpr : ParsingExpr<Context, CutExpr<Context>>
 // string literals), wrap the token body in lexeme(...) to suppress
 // auto-skip within it:
 //
-//   g["number"]  = lexeme(+terminal('0', '9'));   // "12 34" -> matches "12"
-//   g["ident"]   = lexeme(terminal('a','z') >> *terminal('a','z'));
+//   g["number"]  = g.lexeme(+g.terminal('0', '9'));   // "12 34" -> matches "12"
+//   g["ident"]   = g.lexeme(g.terminal('a','z') >> *g.terminal('a','z'));
 //
 // Implemented as a save/restore of Context::skip_enabled via ScopeGuard,
 // so lexeme nests safely (lexeme inside lexeme is a no-op-on-the-flag).
@@ -481,9 +475,7 @@ struct LexemeExpr : ParsingExpr<Context, LexemeExpr<Context, Child>>
     {
         bool prev = context.skip_enabled();
         context.skip_enabled(false);
-        ScopeGuard restore{[&context, prev]() {
-            context.skip_enabled(prev);
-        }};
+        ScopeGuard restore{[&context, prev]() { context.skip_enabled(prev); }};
         return m_child.parse(context);
     }
 

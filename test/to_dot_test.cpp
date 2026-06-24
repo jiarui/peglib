@@ -24,7 +24,7 @@ using namespace peg;
 TEST_CASE("to_dot: emits digraph with header and closing brace")
 {
     Grammar<char> g;
-    g["a"] = terminal('a');
+    g["a"] = g.terminal('a');
     g.set_start("a");
 
     const auto dot = g.to_dot();
@@ -35,9 +35,9 @@ TEST_CASE("to_dot: emits digraph with header and closing brace")
 TEST_CASE("to_dot: every defined rule appears as a node")
 {
     Grammar<char> g;
-    g["a"] = terminal('a');
-    g["b"] = terminal('b');
-    g["c"] = terminal('c');
+    g["a"] = g.terminal('a');
+    g["b"] = g.terminal('b');
+    g["c"] = g.terminal('c');
     g.set_start("a");
 
     const auto dot = g.to_dot();
@@ -49,8 +49,8 @@ TEST_CASE("to_dot: every defined rule appears as a node")
 TEST_CASE("to_dot: start rule marked with peripheries=2")
 {
     Grammar<char> g;
-    g["start"] = terminal('s');
-    g["other"] = terminal('o');
+    g["start"] = g.terminal('s');
+    g["other"] = g.terminal('o');
     g.set_start("start");
 
     const auto dot = g.to_dot();
@@ -64,7 +64,7 @@ TEST_CASE("to_dot: rule references become edges")
 {
     Grammar<char> g;
     // expr references term; term references factor.
-    g["factor"] = terminal('0', '9');
+    g["factor"] = g.terminal('0', '9');
     g["term"] = g["factor"];
     g["expr"] = g["term"];
     g.set_start("expr");
@@ -78,8 +78,8 @@ TEST_CASE("to_dot: recursive rule emits a self-loop edge")
 {
     Grammar<char> g;
     // Forward-declare then assign — the only safe form for self-reference.
-    g["a"] = terminal('x');
-    g["a"] = terminal('x') >> g["a"];
+    g["a"] = g.terminal('x');
+    g["a"] = g.terminal('x') >> g["a"];
     g.set_start("a");
 
     const auto dot = g.to_dot();
@@ -137,8 +137,8 @@ TEST_CASE("to_dot: special characters in rule names are escaped")
 {
     Grammar<char> g;
     // Rule names containing DOT-special characters.
-    g["quote\"name"] = terminal('a');
-    g["back\\slash"] = terminal('b');
+    g["quote\"name"] = g.terminal('a');
+    g["back\\slash"] = g.terminal('b');
     g.set_start("quote\"name");
 
     const auto dot = g.to_dot();
@@ -160,7 +160,7 @@ TEST_CASE("to_dot: empty grammar does not crash")
 TEST_CASE("to_dot: start rule unset still produces valid output")
 {
     Grammar<char> g;
-    g["a"] = terminal('a');
+    g["a"] = g.terminal('a');
     // No set_start — no rule should get peripheries=2.
     const auto dot = g.to_dot();
     CHECK(dot.find("\"a\";") != std::string::npos);
@@ -170,8 +170,8 @@ TEST_CASE("to_dot: start rule unset still produces valid output")
 TEST_CASE("to_dot: mutually recursive rules render fully")
 {
     Grammar<char> g;
-    g["even"] = terminal('0') | (terminal('1') >> g["odd"]);
-    g["odd"] = terminal('1') | (terminal('0') >> g["even"]);
+    g["even"] = g.terminal('0') | (g.terminal('1') >> g["odd"]);
+    g["odd"] = g.terminal('1') | (g.terminal('0') >> g["even"]);
     g.set_start("even");
 
     const auto dot = g.to_dot();
@@ -185,8 +185,8 @@ TEST_CASE("to_dot: unreachable defined rules still render as nodes")
     // silently dropped. to_dot visits every defined rule, not just those
     // reachable from start.
     Grammar<char> g;
-    g["used"] = terminal('a');
-    g["dead"] = terminal('b');
+    g["used"] = g.terminal('a');
+    g["dead"] = g.terminal('b');
     g.set_start("used");
 
     const auto dot = g.to_dot();

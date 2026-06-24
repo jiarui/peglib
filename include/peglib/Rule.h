@@ -20,85 +20,6 @@ using parsers::TerminalExpr;
 using parsers::TerminalSeqExpr;
 using parsers::ZeroOrMoreExpr;
 
-template<typename elem>
-auto terminal(const std::predicate<elem> auto& f)
-{
-    return TerminalExpr<Context<elem>, decltype(f)>(f);
-}
-
-template<typename elem>
-    requires PegValue<elem>
-auto terminal(elem value)
-{
-    return TerminalExpr<Context<elem>, elem>(value);
-}
-
-template<typename elem>
-    requires PegValueSet<elem>
-auto terminal(const std::set<elem>& values)
-{
-    return TerminalExpr<Context<elem>, std::set<elem>>(values);
-}
-
-template<typename elem>
-    requires PegValueRange<elem>
-auto terminal(const std::array<elem, 2>& values)
-{
-    return TerminalExpr<Context<elem>, std::array<elem, 2>>(values);
-}
-
-template<typename elem>
-    requires PegValueRange<elem>
-auto terminal(const elem& value_min, const elem& value_max)
-{
-    std::array<elem, 2> values = {value_min, value_max};
-    return terminal(values);
-}
-
-template<typename SeqType>
-    requires PegValueSeq<SeqType>
-auto terminalSeq(const SeqType& valueSeq)
-{
-    return TerminalSeqExpr<Context<typename SeqType::value_type>, SeqType>(valueSeq);
-}
-
-template<typename CharType>
-auto terminalSeq(const CharType* str)
-{
-    return TerminalSeqExpr<Context<CharType>, std::basic_string<CharType>>(
-        std::basic_string<CharType>{str});
-}
-
-template<typename C = Context<char>>
-auto empty()
-{
-    return EmptyExpr<C>();
-}
-
-template<typename C = Context<char>>
-auto cut()
-{
-    return CutExpr<C>();
-}
-
-// lexeme(expr): disable auto-skip within `expr`'s subtree.
-//
-// When a Grammar has a skipper configured (Grammar::set_skipper), the
-// skipper fires between adjacent sequence elements and between
-// repetition iterations. lexeme(...) locally suppresses that for the
-// wrapped expression, so tokens whose characters must be contiguous
-// (numbers, identifiers, string literals) are not split by inter-token
-// whitespace.
-//
-// The template parameter (the Context type) is deduced from `expr` via
-// ParsingExpr::context_type; users never write it explicitly:
-//   g["number"] = lexeme(+terminal('0','9'));
-template<typename Expr>
-auto lexeme(const Expr& expr)
-{
-    return LexemeExpr<typename Expr::context_type, Expr>(expr);
-}
-
 // ---------------------------------------------------------------------------
 // Operator overloads for building expression trees.
 //
@@ -152,14 +73,14 @@ template<typename Context, typename ParsingExprType>
 auto operator>>(const ParsingExpr<Context, ParsingExprType>& expr,
                 const typename Context::value_type& value)
 {
-    return expr >> terminal(value);
+    return expr >> TerminalExpr<Context, typename Context::value_type>(value);
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator>>(const typename Context::value_type& value,
                 const ParsingExpr<Context, ParsingExprType>& expr)
 {
-    return terminal(value) >> expr;
+    return TerminalExpr<Context, typename Context::value_type>(value) >> expr;
 }
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>
@@ -201,14 +122,14 @@ template<typename Context, typename ParsingExprType>
 auto operator|(const ParsingExpr<Context, ParsingExprType>& expr1,
                const typename Context::value_type& value)
 {
-    return expr1 | terminal(value);
+    return expr1 | TerminalExpr<Context, typename Context::value_type>(value);
 }
 
 template<typename Context, typename ParsingExprType>
 auto operator|(const typename Context::value_type& value,
                const ParsingExpr<Context, ParsingExprType>& expr2)
 {
-    return terminal(value) | expr2;
+    return TerminalExpr<Context, typename Context::value_type>(value) | expr2;
 }
 
 template<typename Context, typename ParsingExprType>

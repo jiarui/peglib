@@ -33,7 +33,7 @@ TEST_CASE("recover-basic-resync-to-semicolon")
     Grammar<> g;
     // "digit" matches a single digit. With recovery on ';', failing input
     // like "abc;" should resync to ';' and report success.
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_recovery(recover_set<char>({';'}));
 
     std::string input = "abc;";
@@ -53,7 +53,7 @@ TEST_CASE("recover-basic-resync-to-semicolon")
 TEST_CASE("recover-multi-diagnostic-two-failures")
 {
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_recovery(recover_set<char>({';'}, "digit"));
 
     // Sequence: two digits in a row, both recovering on ';'.
@@ -84,7 +84,7 @@ TEST_CASE("recover-cut-committed-failure-not-recovered")
     // 'a' commit 'b' / fallback. Once 'a' matches and cut commits, 'b' MUST
     // match — the failure escalates to a hard ParseError. Recovery must not
     // override that commitment.
-    g["ab"] = (terminal('a') >> cut() >> terminal('b')) | terminal('c');
+    g["ab"] = (g.terminal('a') >> g.cut() >> g.terminal('b')) | g.terminal('c');
     g["ab"].set_recovery(recover_set<char>({';'}));
 
     std::string input = "ax;"; // 'a' matches, cut commits, 'b' fails on 'x'
@@ -103,7 +103,7 @@ TEST_CASE("recover-cut-committed-failure-not-recovered")
 TEST_CASE("recover-eof-consumes-rest-of-input")
 {
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_recovery(recover_eof<char>());
 
     std::string input = "abc"; // no sync token anywhere
@@ -125,13 +125,13 @@ TEST_CASE("recover-eof-consumes-rest-of-input")
 TEST_CASE("recover-node-is-transparent")
 {
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_recovery(recover_set<char>({';'}));
 
     // Build a sequence whose first child will recover; the sequence's own
     // tree should not contain a child for the recovered digit (its tree
     // is null and gets skipped by SequenceExpr).
-    g["seq"] = g["digit"] >> terminal('z');
+    g["seq"] = g["digit"] >> g.terminal('z');
     g.set_start("seq");
 
     // Input "x;z" — digit fails (recovers to ';'), then 'z' fails (no 'z').
@@ -139,7 +139,7 @@ TEST_CASE("recover-node-is-transparent")
     // no child tree. Verify via a parse_tree call on a grammar where the
     // sequence can succeed:
     Grammar<> g2;
-    g2["digit"] = terminal('0', '9');
+    g2["digit"] = g2.terminal('0', '9');
     g2["digit"].set_recovery(recover_set<char>({';'}));
     // After recover consumes ';', position is at end. No further children.
     g2.set_start("digit");
@@ -161,7 +161,7 @@ TEST_CASE("recover-both-api-forms-equivalent")
 {
     auto run = [](bool use_sugar) {
         Grammar<> g;
-        g["digit"] = terminal('0', '9');
+        g["digit"] = g.terminal('0', '9');
         if (use_sugar) {
             recover(g["digit"], recover_set<char>({';'}));
         } else {
@@ -190,7 +190,7 @@ TEST_CASE("recover-both-api-forms-equivalent")
 TEST_CASE("recover-predicate-custom-condition")
 {
     Grammar<> g;
-    g["digit"] = terminal('0', '9');
+    g["digit"] = g.terminal('0', '9');
     g["digit"].set_recovery(recover_predicate<char>([](char c) { return c == ';' || c == '\n'; }));
 
     // Recovery should stop at the first ';' or '\n', whichever comes first.

@@ -183,13 +183,12 @@ struct Context
         return m_input->at(offset);
     }
 
-    // Slice [offset, offset+count) as an owned string. Semantic actions use
-    // this to extract matched text by offset (replacing the old
-    // get_input().data() + offset idiom that only worked for span sources).
-    std::basic_string<CharT> substr(std::size_t offset, std::size_t count) const
-    {
-        return m_input->substr(offset, count);
-    }
+    // Access the underlying input source. Semantic actions that need to
+    // extract matched text by offset use ctx.input().slice(off, count) —
+    // slicing is an InputSource concern, not a parse-state concern, and
+    // keeping it on InputSource avoids forcing every Context instantiation
+    // (including non-character token types) to name std::basic_string<CharT>.
+    [[nodiscard]] InputSourceBase<CharT>& input() const noexcept { return *m_input; }
 
     void next() noexcept
     {

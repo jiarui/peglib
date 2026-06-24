@@ -207,13 +207,14 @@ TEST_CASE("[dynexpr] not-predicate-zero-width")
 TEST_CASE("[dynexpr] handle-interop-with-dsl")
 {
     using Ctx = Context<char>;
+    Grammar<char> g;
     // A DynExpr wrapping a terminal can be sequenced with a static terminal
     // via the public operator>>. This is what GrammarCompiler will do.
     auto term_a = std::make_shared<TerminalExpr<Ctx, char>>('a');
     DynExpr<Ctx> dyn_a{term_a};
 
     // (dyn_a >> 'b') should parse "ab".
-    auto expr = dyn_a >> terminal('b');
+    auto expr = dyn_a >> g.terminal('b');
 
     std::string input = "ab";
     Ctx ctx(input);
@@ -252,13 +253,14 @@ TEST_CASE("[pegast] node-factory-and-fields")
 TEST_CASE("[impl] predicate-impl-static-and-dyn-agree")
 {
     using Ctx = Context<char>;
+    Grammar<char> g;
     auto dyn_a = std::make_shared<TerminalExpr<Ctx, char>>('a');
     DynNotExpr<Ctx> dyn_not{dyn_a};
     DynAndExpr<Ctx> dyn_and{dyn_a};
 
     // Compare against the static DSL on the same inputs.
-    auto st_not = !terminal('a');
-    auto st_and = &terminal('a');
+    auto st_not = !g.terminal('a');
+    auto st_and = &g.terminal('a');
 
     for (std::string input : {"a", "b", ""}) {
         Ctx c1(input);

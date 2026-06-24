@@ -73,8 +73,8 @@ template<typename Context, typename ExprType>
 struct ParsingExpr : ParsingExprInterface<Context>
 {
     using ParseExprType = ExprType;
-    // Exposed so free-function factories (e.g. peg::lexeme) can recover
-    // the Context type from any ParsingExpr-derived expression object.
+    // Exposed so combining operators and factories (e.g. Grammar::lexeme)
+    // can recover the Context type from any ParsingExpr-derived expression.
     using context_type = Context;
     using NodeType = typename Context::node_type;
     using ParseResult = typename Context::ParseResult;
