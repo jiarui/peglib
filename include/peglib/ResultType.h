@@ -267,30 +267,44 @@ public:
 // `result_of<Repetition<C,Child>>` covers the bare default-Self case (rarely
 // instantiated directly); the subclass specialisations below take precedence
 // for `*e` / `+e` / `n*e` / `?e`.
+//
+// void-collapse: a repetition/optional of a void-result child is itself void
+// (e.g. `*terminal` / `?cut()` produce no values). `vector<void>` and
+// `optional<void>` are ill-formed, so we map void→void here via rep_of/opt_of.
+namespace detail
+{
+template<typename T> struct rep_of { using type = std::vector<T>; };
+template<> struct rep_of<void> { using type = void; };
+template<typename T> struct opt_of { using type = std::optional<T>; };
+template<> struct opt_of<void> { using type = void; };
+template<typename T> using rep_of_t = typename rep_of<T>::type;
+template<typename T> using opt_of_t = typename opt_of<T>::type;
+} // namespace detail
+
 template<typename C, typename Child, typename Self>
 struct result_of<Repetition<C, Child, Self>>
 {
-    using type = std::vector<typename result_of<Child>::type>;
+    using type = detail::rep_of_t<typename result_of<Child>::type>;
 };
 template<typename C, typename Child>
 struct result_of<ZeroOrMoreExpr<C, Child>>
 {
-    using type = std::vector<typename result_of<Child>::type>;
+    using type = detail::rep_of_t<typename result_of<Child>::type>;
 };
 template<typename C, typename Child>
 struct result_of<OneOrMoreExpr<C, Child>>
 {
-    using type = std::vector<typename result_of<Child>::type>;
+    using type = detail::rep_of_t<typename result_of<Child>::type>;
 };
 template<typename C, typename Child>
 struct result_of<NTimesExpr<C, Child>>
 {
-    using type = std::vector<typename result_of<Child>::type>;
+    using type = detail::rep_of_t<typename result_of<Child>::type>;
 };
 template<typename C, typename Child>
 struct result_of<OptionalExpr<C, Child>>
 {
-    using type = std::optional<typename result_of<Child>::type>;
+    using type = detail::opt_of_t<typename result_of<Child>::type>;
 };
 
 template<typename E>
@@ -419,19 +433,27 @@ auto extract_expr_impl(const AlternationExpr<C, Children...>*, const NodePtr& no
 // --- Repetition family: node->children holds one entry per iteration -----
 // For each child node, extract<Child> on THAT child node (it is one iteration's
 // result node — e.g. an anonymous SequenceExpr node for `*(token >> mul)`, or
-// a rule's NonTerminal node for `*rule`).
+// a rule's NonTerminal node for `*rule`). For a void-result child (e.g.
+// `*terminal`), there is nothing to collect: consume the children and return
+// void (mirrors result_of's void-collapse).
 template<typename Child, typename NodePtr>
 auto extract_rep(const NodePtr& node, Cursor& cur)
 {
     using R = result_of_t<Child>;
-    std::vector<R> out;
-    while (cur.index < node->children.size()) {
-        const auto& iter_node = node->children[cur.index];
-        ++cur.index;
-        Cursor iter_cur;
-        out.push_back(extract_expr<Child>(iter_node, iter_cur));
+    if constexpr (std::is_void_v<R>) {
+        // No values to extract; just advance past every iteration's child.
+        cur.index = node->children.size();
+        return; // void
+    } else {
+        std::vector<R> out;
+        while (cur.index < node->children.size()) {
+            const auto& iter_node = node->children[cur.index];
+            ++cur.index;
+            Cursor iter_cur;
+            out.push_back(extract_expr<Child>(iter_node, iter_cur));
+        }
+        return out;
     }
-    return out;
 }
 template<typename C, typename Ch, typename NodePtr>
 auto extract_expr_impl(const ZeroOrMoreExpr<C, Ch>*, const NodePtr& node, Cursor& cur)
@@ -455,16 +477,24 @@ auto extract_expr_impl(const Repetition<C, Ch, Self>*, const NodePtr& node, Curs
 }
 
 // --- OptionalExpr: node->children has 0 (absent) or 1 (present) entry ----
+// For a void-result child (e.g. `-cut()`), the optional collapses to void:
+// just consume the single child (if present) and return void.
 template<typename C, typename Ch, typename NodePtr>
 auto extract_expr_impl(const OptionalExpr<C, Ch>*, const NodePtr& node, Cursor& cur)
 {
     using R = result_of_t<Ch>;
-    if (cur.index >= node->children.size() || !node->children[cur.index])
-        return std::optional<R>{std::nullopt};
-    const auto& child = node->children[cur.index];
-    ++cur.index;
-    Cursor iter_cur;
-    return std::optional<R>{extract_expr<Ch>(child, iter_cur)};
+    if constexpr (std::is_void_v<R>) {
+        if (cur.index < node->children.size())
+            ++cur.index;
+        return; // void
+    } else {
+        if (cur.index >= node->children.size() || !node->children[cur.index])
+            return std::optional<R>{std::nullopt};
+        const auto& child = node->children[cur.index];
+        ++cur.index;
+        Cursor iter_cur;
+        return std::optional<R>{extract_expr<Ch>(child, iter_cur)};
+    }
 }
 
 // --- SequenceExpr: walk children, skip void, collapse to void/T/tuple -----

@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cctype>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -16,155 +17,99 @@ namespace peg
 // ---------------------------------------------------------------------------
 // Meta-grammar: a PEG grammar that parses PEG text into PegAstNode trees.
 //
-// Post-parse action model makes this dramatically simpler than the old
-// value-stack version. Each action receives a ParseTreeNodePtr whose
-// children are the sub-rule results. No Marker sentinels, no pop/push.
+// Uses peglib's typed-action model (Model A). Each rule's body is assigned
+// via `auto h = (g["r"] = body);` which yields a RuleHandle carrying the
+// body's static type; h.set_action<F> is compile-time-checked against the
+// body's derived result type and bridges into the type-erased storage.
 //
-// Transparent rules: action returns nullptr → tree set to null by
-// NonTerminal::parse → parent's SequenceExpr skips it in children list.
+// Terminal model:
+//   - g.terminal(x)  → void   (filtered; punctuation tokens never appear as
+//                              action parameters — no find_named needed)
+//   - g.token(x)     → char   (kept; would be used if a token's identity
+//                              mattered to the action — the meta-grammar
+//                              happens to build AST from source spans instead)
+//
+// Transparent rules (Comment/Spacing/Char/punctuation) appear as null typed
+// arguments where they're sub-rules of a sequence: e.g. Identifier's body is
+// (IdentifierRaw >> Spacing), so its action receives
+// (Ctx&, Span, NodePtr idraw, NodePtr /*spacing*/) — Spacing's null value
+// is an honest, positionally-stable placeholder. The old find_named/pass_through
+// string-search workarounds are gone: every child result is now positional.
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Tree search helpers. Combinators (OptionalExpr, OneOrMoreExpr, etc.)
-// create anonymous wrapper nodes, so a named sub-rule's result may be
-// nested several levels deep inside the action's ParseTreeNode. These
-// helpers let actions find sub-results by rule name without hand-rolled
-// recursion in every lambda.
-// ---------------------------------------------------------------------------
-
-// Recursively find the first node named `name` that has a value.
-inline PegParseCtx::ParseTreeNodePtr find_named(const PegParseCtx::ParseTreeNodePtr& root,
-                                                std::string_view name)
-{
-    if (!root)
-        return nullptr;
-    if (root->name == name && root->value)
-        return root;
-    for (auto& c : root->children) {
-        if (auto r = find_named(c, name))
-            return r;
-    }
-    return nullptr;
-}
-
-// Check whether any node named `name` exists in the subtree (regardless
-// of whether it has a value). Used to detect operator tokens like
-// STAR, QUESTION, AND, NOT, SLASH.
-inline bool has_named(const PegParseCtx::ParseTreeNodePtr& root, std::string_view name)
-{
-    if (!root)
-        return false;
-    if (root->name == name)
-        return true;
-    for (auto& c : root->children) {
-        if (has_named(c, name))
-            return true;
-    }
-    return false;
-}
-
-// Collect values from all nodes named `name` (pre-order traversal).
-// Uses an overload pair to avoid std::function overhead.
-inline void collect_named_impl(const PegParseCtx::ParseTreeNodePtr& root,
-                               std::string_view name,
-                               std::vector<PegAstNodePtr>& out)
-{
-    if (!root)
-        return;
-    if (root->name == name && root->value) {
-        out.push_back(root->value);
-        return; // don't descend into a match's own children
-    }
-    for (auto& c : root->children)
-        collect_named_impl(c, name, out);
-}
-
-inline std::vector<PegAstNodePtr> collect_named(const PegParseCtx::ParseTreeNodePtr& root,
-                                                std::string_view name)
-{
-    std::vector<PegAstNodePtr> out;
-    collect_named_impl(root, name, out);
-    return out;
-}
 
 inline const Grammar<char, PegAstNodePtr>& meta_grammar()
 {
     using Ctx = PegParseCtx;
     using NodePtr = PegAstNodePtr;
-    using TreePtr = PegParseCtx::ParseTreeNodePtr;
 
     static Grammar<char, PegAstNodePtr> grammar = []() {
         Grammar<char, PegAstNodePtr> g;
-
-        // Helper: pass-through action. NonTerminal may reuse the body's tree
-        // (when body is a single NonTerminal or AlternationExpr returning a
-        // branch). In that case node->value is already set by the body.
-        // Otherwise we search the body's children for the first sub-rule
-        // that produced a value.
-        auto pass_through = [](Ctx&, const TreePtr& node) -> NodePtr {
-            if (node->value)
-                return node->value;
-            for (auto& child : node->children) {
-                if (child && child->value)
-                    return child->value;
-            }
-            return nullptr;
-        };
 
         auto any_char = g.terminal([](char c) { return c != '\0'; });
         auto non_nl = g.terminal([](char c) { return c != '\n' && c != '\0'; });
 
         // ==================================================================
-        // Whitespace and comments (transparent — return nullptr)
+        // Whitespace and comments (transparent — return nullptr).
+        //
+        // These rules' bodies contain transparent sub-rules (WSChar/Comment)
+        // whose static result type is NodePtr (a Rule always has result
+        // node_type, even when its action returns null at runtime). So e.g.
+        // Spacing = *(WSChar|Comment) has result_of vector<NodePtr>. The
+        // action doesn't care about those (all-null) values, so we use the
+        // untyped hook for the transparent rules — cleaner than spelling out
+        // null vector args.
         // ==================================================================
         g["Comment"] = g.terminal('#') >> *non_nl >> -g.terminal('\n');
-        g["Comment"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["Comment"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["WSChar"] = g.terminal(' ') | g.terminal('\t') | g.terminal('\r') | g.terminal('\n');
-        g["WSChar"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["WSChar"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["Spacing"] = *(g["WSChar"] | g["Comment"]);
-        g["Spacing"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["Spacing"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["EndOfFile"] = !any_char;
-        g["EndOfFile"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["EndOfFile"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
-        // Char — transparent (decoded by Literal/Class actions via offsets)
+        // Char — transparent (decoded by Literal/Class actions via spans).
         // ==================================================================
         g["Escape"] = g.terminal('\\') >>
                       (g.terminal('n') | g.terminal('r') | g.terminal('t') | g.terminal('\'') |
                        g.terminal('"') | g.terminal('\\') | g.terminal('[') | g.terminal(']'));
-        g["Escape"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["Escape"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["RawChar"] = g.terminal([](char c) { return c != '\\' && c != '\n' && c != '\0'; });
-        g["RawChar"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["RawChar"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["Char"] = g["Escape"] | g["RawChar"];
-        g["Char"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["Char"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
         // Identifier
         // ==================================================================
         g["IdentStart"] = g.terminal('a', 'z') | g.terminal('A', 'Z') | g.terminal('_');
-        g["IdentStart"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["IdentStart"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["IdentCont"] = g["IdentStart"] | g.terminal('0', '9');
-        g["IdentCont"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["IdentCont"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
+        // IdentifierRaw: IdentStart >> *IdentCont. IdentStart/IdentCont are
+        // transparent Rules (result_of NodePtr, runtime null), so result_of is
+        // (NodePtr, vector<NodePtr>). The action only needs the span → untyped.
         g["IdentifierRaw"] = g["IdentStart"] >> *g["IdentCont"];
-        g["IdentifierRaw"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
-            std::string name =
-                ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
-            return PegAstNode::make(
-                NodeKind::RuleRef, std::move(name), node->start_offset, node->end_offset);
+        g["IdentifierRaw"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            std::string name = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+            return PegAstNode::make(NodeKind::RuleRef, std::move(name), node->start_offset, node->end_offset);
         });
-
-        // Identifier: pass through IdentifierRaw's value. The body is
-        // (IdentifierRaw >> Spacing). NonTerminal reuses the body's tree
-        // (a SequenceExpr anonymous node). IdentifierRaw's tree is a child.
-        g["Identifier"] = g["IdentifierRaw"] >> g["Spacing"];
-        g["Identifier"].set_action(pass_through);
+        // Identifier: IdentifierRaw >> Spacing. Spacing is a transparent Rule
+        // (result_of NodePtr, runtime null). Typed action forwards idraw.
+        {
+            auto h = (g["Identifier"] = g["IdentifierRaw"] >> g["Spacing"]);
+            h.set_action([](Ctx&, Span, NodePtr idraw, NodePtr /*spacing*/) -> NodePtr {
+                return idraw;
+            });
+        }
 
         // ==================================================================
         // Literal — single- or double-quoted string.
@@ -175,18 +120,10 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
             for (std::size_t i = 0; i < src.size(); ++i) {
                 if (src[i] == '\\' && i + 1 < src.size()) {
                     switch (src[i + 1]) {
-                    case 'n':
-                        out += '\n';
-                        break;
-                    case 'r':
-                        out += '\r';
-                        break;
-                    case 't':
-                        out += '\t';
-                        break;
-                    default:
-                        out += src[i + 1];
-                        break;
+                    case 'n': out += '\n'; break;
+                    case 'r': out += '\r'; break;
+                    case 't': out += '\t'; break;
+                    default: out += src[i + 1]; break;
                     }
                     ++i;
                 } else {
@@ -196,66 +133,67 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
             return out;
         };
 
+        // SingleQuotedCore/DoubleQuotedCore: quote *(!quote Char) quote.
+        // The body references Char (a transparent Rule), so result_of is a
+        // vector<NodePtr>; the action only needs the source span → untyped.
         g["SingleQuotedCore"] =
             g.terminal('\'') >> *(!g.terminal('\'') >> g["Char"]) >> g.terminal('\'');
-        g["SingleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx,
-                                                              const TreePtr& node) -> NodePtr {
-            // node spans the full 'xyz' (with quotes). Body is [1, -1).
+        g["SingleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(
-                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
+            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
         });
 
         g["DoubleQuotedCore"] =
             g.terminal('"') >> *(!g.terminal('"') >> g["Char"]) >> g.terminal('"');
-        g["DoubleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx,
-                                                              const TreePtr& node) -> NodePtr {
+        g["DoubleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(
-                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
+            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
         });
 
-        // LiteralCore: pass through SingleQuotedCore / DoubleQuotedCore value.
-        // AlternationExpr returns the successful branch's ParseResult; the
-        // branch is a NonTerminal whose value is already set. So node->value
-        // already carries the Literal PegAstNode — just forward it.
-        g["LiteralCore"] = g["SingleQuotedCore"] | g["DoubleQuotedCore"];
-        g["LiteralCore"].set_action(pass_through);
-
-        // Literal: pass through LiteralCore's value.
-        g["Literal"] = g["LiteralCore"] >> g["Spacing"];
-        g["Literal"].set_action(pass_through);
+        // LiteralCore: SingleQuotedCore | DoubleQuotedCore. Typed (forward).
+        {
+            auto h = (g["LiteralCore"] = g["SingleQuotedCore"] | g["DoubleQuotedCore"]);
+            h.set_action([](Ctx&, Span, NodePtr core) -> NodePtr { return core; });
+        }
+        // Literal: LiteralCore >> Spacing. Typed (forward core, ignore spacing).
+        {
+            auto h = (g["Literal"] = g["LiteralCore"] >> g["Spacing"]);
+            h.set_action([](Ctx&, Span, NodePtr core, NodePtr /*spacing*/) -> NodePtr { return core; });
+        }
 
         // ==================================================================
-        // Class — character class with optional negation.
-        // Action captures the raw bracketed source for the compiler to decode.
+        // Class — character class. Action captures the raw bracketed source.
         // ==================================================================
         g["Range"] = g["Char"] >> -(g.terminal('-') >> g["Char"]);
-        g["Range"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["Range"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
-        g["ClassCore"] = g.terminal('[') >> -g.terminal('^') >> *(!g.terminal(']') >> g["Range"]) >>
-                         g.terminal(']');
-        g["ClassCore"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
-            std::string raw =
-                ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
-            return PegAstNode::make(
-                NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
+        // ClassCore: "[" -"^"? *(!"]" Range) "]". References Range (transparent
+        // Rule) → result_of has a vector<NodePtr>; action reads span → untyped.
+        g["ClassCore"] = g.terminal('[') >> -g.terminal('^') >>
+                         *(!g.terminal(']') >> g["Range"]) >> g.terminal(']');
+        g["ClassCore"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            std::string raw = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+            return PegAstNode::make(NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
         });
 
-        // Class: pass through ClassCore's value.
-        g["Class"] = g["ClassCore"] >> g["Spacing"];
-        g["Class"].set_action(pass_through);
+        // Class: ClassCore >> Spacing. Typed (forward core).
+        {
+            auto h = (g["Class"] = g["ClassCore"] >> g["Spacing"]);
+            h.set_action([](Ctx&, Span, NodePtr core, NodePtr /*spacing*/) -> NodePtr { return core; });
+        }
 
         // ==================================================================
-        // Punctuation tokens — match + trailing Spacing, never push.
+        // Punctuation tokens — match + trailing Spacing, transparent.
+        // Bodies reference Spacing (a transparent Rule, result_of NodePtr), so
+        // these are NOT void-typed; use the untyped hook (return nullptr).
         // ==================================================================
         auto make_punct = [&](const char* name, const auto& expr) {
             g[name] = expr;
-            g[name].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+            g[name].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
         };
 
         make_punct("LEFTARROW", g.terminal('<') >> g.terminal('-') >> g["Spacing"]);
@@ -268,34 +206,22 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         make_punct("OPEN", g.terminal('(') >> g["Spacing"]);
         make_punct("CLOSE", g.terminal(')') >> g["Spacing"]);
 
-        // CUT — tilde. A standalone primary (leaf), not a prefix operator
-        // (unlike & and !). Emits a Cut AST node directly. Action is set
-        // below (it produces a value, so it can't use the transparent
-        // make_punct helper).
-        make_punct("CUT", g.terminal('~') >> g["Spacing"]);
+        // CUT — tilde. A standalone primary (leaf). Emits a Cut AST node.
+        g["CUT"] = g.terminal('~') >> g["Spacing"];
+        g["CUT"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            return PegAstNode::make(NodeKind::Cut, {}, node->start_offset, node->end_offset);
+        });
 
-        // LESSTHAN / GREATERTHAN — lexeme delimiters `< e >`. LESSTHAN must
-        // disambiguate from LEFTARROW (`<-`): the `!g.terminal('-')` lookahead
-        // rejects the arrow form so `<-` is not misparsed as a lexeme open.
         make_punct("LESSTHAN", g.terminal('<') >> !g.terminal('-') >> g["Spacing"]);
         make_punct("GREATERTHAN", g.terminal('>') >> g["Spacing"]);
-
-        // PERCENT_RECOVER — the directive prefix `%recover`. Matched as a
-        // contiguous keyword so `%recoverX` doesn't partially match; the
-        // trailing Spacing is the natural token boundary.
         make_punct("PERCENT_RECOVER",
                    g.terminal('%') >> g.terminal('r') >> g.terminal('e') >> g.terminal('c') >>
                        g.terminal('o') >> g.terminal('v') >> g.terminal('e') >> g.terminal('r') >>
                        g["Spacing"]);
 
         g["DOT"] = g.terminal('.') >> g["Spacing"];
-        g["DOT"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
+        g["DOT"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
             return PegAstNode::make(NodeKind::Dot, {}, node->start_offset, node->end_offset);
-        });
-
-        // CUT action: emit a Cut AST node (leaf, no payload, no children).
-        g["CUT"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            return PegAstNode::make(NodeKind::Cut, {}, node->start_offset, node->end_offset);
         });
 
         // ==================================================================
@@ -305,34 +231,44 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         //             / LESSTHAN Expression GREATERTHAN   (lexeme)
         //             / Literal / Class / DOT / CUT
         //
-        // CUT is a leaf primary (no child). Lexeme wraps its inner
-        // Expression in a Lexeme AST node.
+        // This is the trickiest rule: the alternation has 7 branches with
+        // heterogeneous result types. The old action used find_named/has_named
+        // to disambiguate. With typed actions, each branch must share a result
+        // type (AlternationExpr requires it). All branches ultimately produce
+        // a NodePtr, but their *intermediate* seq_result shapes differ:
+        //   - Identifier !LEFTARROW           → (NodePtr)        // !term void
+        //   - OPEN Expression CLOSE           → (NodePtr,NodePtr,NodePtr)
+        //   - LESSTHAN Expression GREATERTHAN → (NodePtr,NodePtr,NodePtr)
+        //   - Literal / Class / DOT / CUT     → NodePtr
+        // Alternation requires all branches' result_of to be identical. They
+        // are NOT (some are NodePtr scalars, some are tuples). So we cannot
+        // attach a single typed action to this alternation directly.
+        //
+        // Solution: keep this one rule on the untyped hook (Rule::set_action),
+        // which is the documented escape hatch for cases the positional model
+        // can't express (heterogeneous alternation branches). The old
+        // find_named/has_named helpers are removed from the library; this rule
+        // reads node->children directly (a local, contained walk).
         // ==================================================================
         g["Primary"] = (g["Identifier"] >> !g["LEFTARROW"]) |
                        (g["OPEN"] >> g["Expression"] >> g["CLOSE"]) |
                        (g["LESSTHAN"] >> g["Expression"] >> g["GREATERTHAN"]) | g["Literal"] |
                        g["Class"] | g["DOT"] | g["CUT"];
-
-        // Primary: pass through the meaningful child's value, except for
-        // Lexeme (which needs to wrap its inner Expression) — detect that
-        // by finding LESSTHAN among the children.
-        g["Primary"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
+        g["Primary"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
             // Lexeme form: wrap the inner Expression's value in a Lexeme node.
             for (auto& child : node->children) {
-                if (child && has_named(child, "LESSTHAN")) {
-                    auto inner = find_named(node, "Expression");
-                    if (!inner || !inner->value)
-                        return nullptr;
-                    auto n = PegAstNode::make(
-                        NodeKind::Lexeme, {}, node->start_offset, node->end_offset);
-                    n->children.push_back(inner->value);
-                    return n;
+                if (child && child->name == "LESSTHAN") {
+                    // Find the Expression sibling.
+                    for (auto& c2 : node->children) {
+                        if (c2 && c2->name == "Expression" && c2->value) {
+                            auto n = PegAstNode::make(NodeKind::Lexeme, {}, node->start_offset, node->end_offset);
+                            n->children.push_back(c2->value);
+                            return n;
+                        }
+                    }
                 }
             }
-            // All other forms: pass through the meaningful child's value
-            // (Identifier/Literal/Class/DOT/CUT/OPEN-Expression-CLOSE all
-            // either set node->value directly via their own action or have
-            // a single meaningful child whose value we forward).
+            // All other forms: forward the single meaningful child's value.
             if (node->value)
                 return node->value;
             for (auto& child : node->children) {
@@ -344,236 +280,213 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
 
         // ==================================================================
         // Suffixed — Primary with optional postfix (? * +).
+        //
+        // The postfix operators (QUESTION/STAR/PLUS) are transparent
+        // punctuation rules: their NodePtr value is null, so the typed arg
+        // can't carry the operator *identity* — only its presence. Since the
+        // action must distinguish *, +, ? to emit the right NodeKind, we read
+        // the operator's source span. This is the documented escape hatch
+        // (untyped Rule::set_action) for a rule whose action needs data the
+        // positional model doesn't surface (here: which of several
+        // transparent tokens matched).
         // ==================================================================
         g["Suffixed"] = g["Primary"] >> -(g["QUESTION"] | g["STAR"] | g["PLUS"]);
-        g["Suffixed"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            auto primary = find_named(node, "Primary");
-            NodePtr child_val = primary ? primary->value : node->value;
-            if (!child_val)
-                return nullptr;
-
-            // Postfix operators are siblings of Primary (inside the
-            // OptionalExpr wrapper). Search only those siblings — NOT
-            // Primary's subtree, so operators inside groups like
-            // ('a'?)* don't leak to the outer level.
-            NodeKind k = NodeKind::Optional;
-            bool has_op = false;
+        g["Suffixed"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            NodePtr child_val;
+            std::string op_text;
             for (auto& child : node->children) {
-                if (!child || child->name == "Primary")
-                    continue;
-                if (has_named(child, "QUESTION")) {
-                    k = NodeKind::Optional;
-                    has_op = true;
-                    break;
-                }
-                if (has_named(child, "STAR")) {
-                    k = NodeKind::Star;
-                    has_op = true;
-                    break;
-                }
-                if (has_named(child, "PLUS")) {
-                    k = NodeKind::Plus;
-                    has_op = true;
-                    break;
+                if (!child) continue;
+                if (child->name == "Primary") {
+                    child_val = child->value;
+                } else if (op_text.empty()) {
+                    op_text = ctx.input().slice(child->start_offset, child->end_offset - child->start_offset);
                 }
             }
-            if (!has_op)
+            if (!child_val)
+                return nullptr;
+            if (op_text.empty())
                 return child_val;
-
+            NodeKind k = NodeKind::Optional;
+            if (op_text.find('*') != std::string::npos) k = NodeKind::Star;
+            else if (op_text.find('+') != std::string::npos) k = NodeKind::Plus;
             auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
             n->children.push_back(child_val);
             return n;
         });
 
         // ==================================================================
-        // Prefixed — optional prefix (& !) then Suffixed.
+        // Prefixed — optional prefix (& !) then Suffixed. Same operator-
+        // identity issue as Suffixed: use the untyped hook, read source.
         // ==================================================================
         g["Prefixed"] = -(g["AND"] | g["NOT"]) >> g["Suffixed"];
-        g["Prefixed"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            auto suffixed = find_named(node, "Suffixed");
-            NodePtr child_val = suffixed ? suffixed->value : node->value;
-            if (!child_val)
-                return nullptr;
-
-            // Prefix operators are siblings of Suffixed. Don't descend
-            // into Suffixed's subtree — operators inside groups must
-            // not leak to the outer level.
-            NodeKind k = NodeKind::AndPred;
-            bool has_op = false;
+        g["Prefixed"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            NodePtr child_val;
+            std::string op_text;
             for (auto& child : node->children) {
-                if (!child || child->name == "Suffixed")
-                    continue;
-                if (has_named(child, "AND")) {
-                    k = NodeKind::AndPred;
-                    has_op = true;
-                    break;
-                }
-                if (has_named(child, "NOT")) {
-                    k = NodeKind::NotPred;
-                    has_op = true;
-                    break;
+                if (!child) continue;
+                if (child->name == "Suffixed") {
+                    child_val = child->value;
+                } else if (op_text.empty()) {
+                    op_text = ctx.input().slice(child->start_offset, child->end_offset - child->start_offset);
                 }
             }
-            if (!has_op)
+            if (!child_val)
+                return nullptr;
+            if (op_text.empty())
                 return child_val;
-
+            NodeKind k = (op_text.find('!') != std::string::npos) ? NodeKind::NotPred : NodeKind::AndPred;
             auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
             n->children.push_back(child_val);
             return n;
         });
 
         // ==================================================================
-        // Sequence — one or more Prefixed.
+        // Sequence — one or more Prefixed. Typed: vector<NodePtr>.
         // ==================================================================
-        g["Sequence"] = +g["Prefixed"];
-        g["Sequence"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            std::vector<NodePtr> items;
-            for (auto& child : node->children) {
-                if (child && child->value)
-                    items.push_back(child->value);
-            }
-            if (items.empty())
-                return nullptr;
-            if (items.size() == 1)
-                return items[0];
-            auto n = PegAstNode::make(NodeKind::Sequence, {}, node->start_offset, node->end_offset);
-            n->children = std::move(items);
-            return n;
-        });
+        {
+            auto h = (g["Sequence"] = +g["Prefixed"]);
+            h.set_action([](Ctx&, Span sp, std::vector<NodePtr> items) -> NodePtr {
+                // Filter out nulls (transparent Prefixed results shouldn't
+                // occur, but be defensive).
+                std::vector<NodePtr> filtered;
+                for (auto& it : items)
+                    if (it) filtered.push_back(std::move(it));
+                if (filtered.empty())
+                    return nullptr;
+                if (filtered.size() == 1)
+                    return std::move(filtered[0]);
+                auto n = PegAstNode::make(NodeKind::Sequence, {}, sp.start, sp.end);
+                n->children = std::move(filtered);
+                return n;
+            });
+        }
 
         // ==================================================================
         // Expression — Sequence (SLASH Sequence)*
+        // result_of = (NodePtr, vector<pair<NodePtr,NodePtr>>)
+        //   first Sequence → NodePtr
+        //   each (SLASH Sequence) iteration → (NodePtr /*slash*/, NodePtr)
+        //     SLASH is transparent → null; Sequence → value.
         // ==================================================================
-        g["Expression"] = g["Sequence"] >> *(g["SLASH"] >> g["Sequence"]);
-        g["Expression"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            auto alts = collect_named(node, "Sequence");
-            if (alts.empty())
-                return nullptr;
-            if (alts.size() == 1)
-                return alts[0];
-            auto n = PegAstNode::make(NodeKind::Choice, {}, node->start_offset, node->end_offset);
-            n->children = std::move(alts);
-            return n;
-        });
+        {
+            auto h = (g["Expression"] = g["Sequence"] >> *(g["SLASH"] >> g["Sequence"]));
+            h.set_action([](Ctx&, Span sp, NodePtr first,
+                            std::vector<std::tuple<NodePtr, NodePtr>> rest) -> NodePtr {
+                if (!first)
+                    return nullptr;
+                if (rest.empty())
+                    return first;
+                auto n = PegAstNode::make(NodeKind::Choice, {}, sp.start, sp.end);
+                n->children.push_back(first);
+                for (auto& alt : rest) {
+                    // tuple<SLASH (null), Sequence value>
+                    auto& seq = std::get<1>(alt);
+                    if (seq) n->children.push_back(seq);
+                }
+                return n;
+            });
+        }
 
         // ==================================================================
         // Recovery suffix (peglib extension).
-        //
-        //   Definition <- Identifier LEFTARROW Expression Recovery?
-        //   Recovery   <- PERCENT_RECOVER OPEN RecoverSpec CLOSE
-        //   RecoverSpec <- eof
-        //                 / eol
-        //                 / OPENBRACE (SyncChar (COMMA? SyncChar)*)? CLOSEBRACE
-        //
-        // The sync spec is encoded into the Recovery node's text:
-        //   "set:XY" — recover_set on chars X, Y, ...
-        //   "eof"    — recover_eof
-        //   "eol"    — recover_eol
-        // (No predicate form in text — recover_predicate stays C++-API-only.)
-        //
-        // SyncChar reuses the existing Char rule (so escape sequences work),
-        // but restricts to single characters — the action reads the matched
-        // span directly from the source.
         // ==================================================================
-
-        // eof / eol keywords inside RecoverSpec. Matched as contiguous
-        // identifiers followed by a word boundary (next char is not an
-        // ident-continuation) so `eofx` is not partially matched.
+        // RECOVER_EOF/EOL: keyword + !IdentCont + Spacing. References Spacing
+        // (transparent Rule) → untyped.
         g["RECOVER_EOF"] = g.terminal('e') >> g.terminal('o') >> g.terminal('f') >>
                            !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOF"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["RECOVER_EOF"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
         g["RECOVER_EOL"] = g.terminal('e') >> g.terminal('o') >> g.terminal('l') >>
                            !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOL"].set_action([](Ctx&, const TreePtr&) -> NodePtr { return nullptr; });
+        g["RECOVER_EOL"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
-        // A single sync character: a single-quoted Char. Reuse the existing
-        // Char rule so escapes (\n, \t, ...) work. The action extracts the
-        // decoded character from the source span (quotes stripped).
+        // SyncChar: "'" Char "'" Spacing. References Char/Spacing → untyped.
         g["SyncChar"] = g.terminal('\'') >> g["Char"] >> g.terminal('\'') >> g["Spacing"];
-        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, const TreePtr& node) -> NodePtr {
-            // node spans 'x' (with quotes). Body is [1, -1).
+        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
             std::size_t s = node->start_offset + 1;
             std::size_t e = node->end_offset - 1;
             std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(
-                NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
+            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
         });
 
-        // RecoverSpec: eof / eol / { SyncChar (COMMA? SyncChar)* }
-        // The optional COMMA between sync chars is purely cosmetic.
         make_punct("OPENBRACE", g.terminal('{') >> g["Spacing"]);
         make_punct("CLOSEBRACE", g.terminal('}') >> g["Spacing"]);
         make_punct("COMMA", g.terminal(',') >> g["Spacing"]);
 
+        // RecoverSpec: eof / eol / { SyncChar (COMMA? SyncChar)* }
+        // Heterogeneous branches → untyped hook reading source (the old comment
+        // noted has_named was unreliable; source-reading is robust).
         g["RecoverSpec"] =
             g["RECOVER_EOF"] | g["RECOVER_EOL"] |
             (g["OPENBRACE"] >> -g["SyncChar"] >>
              *(g["COMMA"] >> g["SyncChar"] | !g["CLOSEBRACE"] >> g["SyncChar"]) >> g["CLOSEBRACE"]);
-        g["RecoverSpec"].set_action([](Ctx& ctx, const TreePtr& node) -> NodePtr {
-            // Distinguish eof/eol/set by reading the matched source text
-            // directly. Relying on has_named("RECOVER_EOF"/"RECOVER_EOL")
-            // is unreliable because a failed first-alternative attempt can
-            // leave a named node in the parse subtree.
-            auto span =
-                ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+        g["RecoverSpec"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+            auto span = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
             if (span == "eof")
-                return PegAstNode::make(
-                    NodeKind::Recovery, "eof", node->start_offset, node->end_offset);
+                return PegAstNode::make(NodeKind::Recovery, "eof", node->start_offset, node->end_offset);
             if (span == "eol")
-                return PegAstNode::make(
-                    NodeKind::Recovery, "eol", node->start_offset, node->end_offset);
-            // Set form: concatenate all SyncChar values into "set:XYZ".
-            auto chars = collect_named(node, "SyncChar");
+                return PegAstNode::make(NodeKind::Recovery, "eol", node->start_offset, node->end_offset);
+            // Set form: concatenate SyncChar children's text into "set:XYZ".
             std::string spec = "set:";
-            for (auto& c : chars) {
-                if (c && !c->text.empty())
-                    spec += c->text;
-            }
-            return PegAstNode::make(
-                NodeKind::Recovery, std::move(spec), node->start_offset, node->end_offset);
+            // Pre-order DFS that stops at each SyncChar match (don't descend).
+            std::function<void(const PegParseCtx::ParseTreeNodePtr&)> collect =
+                [&](const PegParseCtx::ParseTreeNodePtr& n) {
+                    if (!n) return;
+                    if (n->name == "SyncChar" && n->value) {
+                        if (!n->value->text.empty()) spec += n->value->text;
+                        return;
+                    }
+                    for (auto& c : n->children) collect(c);
+                };
+            collect(node);
+            return PegAstNode::make(NodeKind::Recovery, std::move(spec), node->start_offset, node->end_offset);
         });
 
-        // Recovery wrapper: %recover ( RecoverSpec ).
-        g["Recovery"] = g["PERCENT_RECOVER"] >> g["OPEN"] >> g["RecoverSpec"] >> g["CLOSE"];
-        g["Recovery"].set_action(pass_through);
+        {
+            // Recovery = PERCENT_RECOVER OPEN RecoverSpec CLOSE
+            // result_of = (NodePtr,NodePtr,NodePtr,NodePtr) — PERCENT_RECOVER,
+            // OPEN, CLOSE are transparent (null); RecoverSpec carries the value.
+            auto h = (g["Recovery"] = g["PERCENT_RECOVER"] >> g["OPEN"] >> g["RecoverSpec"] >> g["CLOSE"]);
+            h.set_action([](Ctx&, Span, NodePtr /*pct*/, NodePtr /*open*/,
+                            NodePtr spec, NodePtr /*close*/) -> NodePtr {
+                return spec;
+            });
+        }
 
         // ==================================================================
         // Definition — Identifier LEFTARROW Expression Recovery?
-        //
-        // Children in node->children: Identifier, LEFTARROW, Expression,
-        // optional Recovery. find_named locates them by rule name. The
-        // body Expression goes into def->children[0]; if Recovery is
-        // present, it goes into def->children[1].
+        // result_of = (NodePtr, NodePtr, NodePtr, optional<NodePtr>)
+        //   Identifier → value; LEFTARROW → null; Expression → value;
+        //   Recovery → optional (present/absent).
         // ==================================================================
-        g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"];
-        g["Definition"].set_action([](Ctx&, const TreePtr& node) -> NodePtr {
-            auto id = find_named(node, "Identifier");
-            auto expr = find_named(node, "Expression");
-            auto recovery = find_named(node, "Recovery");
-            if (!id || !id->value)
-                return nullptr;
-            // Span the whole Definition (name <- body); position diagnostics
-            // (e.g. undefined-rule references inside the body) at the def.
-            auto def = PegAstNode::make(
-                NodeKind::Definition, id->value->text, node->start_offset, node->end_offset);
-            if (expr && expr->value)
-                def->children.push_back(expr->value);
-            if (recovery && recovery->value)
-                def->children.push_back(recovery->value);
-            return def;
-        });
+        {
+            auto h = (g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"]);
+            h.set_action([](Ctx&, Span sp, NodePtr id, NodePtr /*leftarrow*/,
+                            NodePtr expr, std::optional<NodePtr> recovery) -> NodePtr {
+                if (!id)
+                    return nullptr;
+                auto def = PegAstNode::make(NodeKind::Definition, id->text, sp.start, sp.end);
+                if (expr)
+                    def->children.push_back(expr);
+                if (recovery && *recovery)
+                    def->children.push_back(*recovery);
+                return def;
+            });
+        }
 
         // ==================================================================
         // Grammar — Spacing Definition+ EndOfFile
+        // Each reference is a Rule → result_of NodePtr. So result_of =
+        // (NodePtr /*spacing*/, vector<NodePtr>, NodePtr /*eof*/).
         // ==================================================================
-        g["Grammar"] = g["Spacing"] >> +g["Definition"] >> g["EndOfFile"];
-        // Grammar: pass through all Definition children's values.
-        g["Grammar"].set_action([](Ctx&, const TreePtr& /*node*/) -> NodePtr {
-            // Return the first definition; caller can inspect the full tree
-            // for multiple definitions. This is a convention: the tree's
-            // children carry all Definition nodes.
-            return nullptr;
-        });
+        {
+            auto h = (g["Grammar"] = g["Spacing"] >> +g["Definition"] >> g["EndOfFile"]);
+            h.set_action([](Ctx&, Span, NodePtr /*spacing*/, std::vector<NodePtr> defs,
+                            NodePtr /*eof*/) -> NodePtr {
+                // Return the first definition; GrammarCompiler walks the tree
+                // for multiple definitions.
+                return defs.empty() ? nullptr : defs[0];
+            });
+        }
 
         g.set_start("Grammar");
         return g;
