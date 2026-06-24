@@ -207,8 +207,8 @@ private:
             context.record_failure(
                 pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
         } else {
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Literal, .text = "<token>"});
+            context.record_failure(pos,
+                                   ExpectedItem{.kind = ExpectedKind::Literal, .text = "<token>"});
         }
     }
 };

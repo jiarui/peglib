@@ -273,14 +273,18 @@ protected:
 template<typename Context, typename Child>
 struct ZeroOrMoreExpr : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>
 {
-    explicit ZeroOrMoreExpr(const Child& child) : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>(child, 0, -1) {}
+    explicit ZeroOrMoreExpr(const Child& child)
+        : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>(child, 0, -1)
+    {}
 };
 
 // OneOrMoreExpr: `+e` — min=1, max=unbounded.
 template<typename Context, typename Child>
 struct OneOrMoreExpr : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>
 {
-    explicit OneOrMoreExpr(const Child& child) : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>(child, 1, -1) {}
+    explicit OneOrMoreExpr(const Child& child)
+        : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>(child, 1, -1)
+    {}
 };
 
 // NTimesExpr: `n*e` — min=max=n (exactly n matches).
@@ -288,14 +292,18 @@ template<typename Context, typename Child>
 struct NTimesExpr : Repetition<Context, Child, NTimesExpr<Context, Child>>
 {
     NTimesExpr(const Child& child, std::size_t n_reps)
-        : Repetition<Context, Child, NTimesExpr<Context, Child>>(child, n_reps, static_cast<std::int64_t>(n_reps)) {}
+        : Repetition<Context, Child, NTimesExpr<Context, Child>>(
+              child, n_reps, static_cast<std::int64_t>(n_reps))
+    {}
 };
 
 // OptionalExpr: `-e` / `e?` — min=0, max=1.
 template<typename Context, typename Child>
 struct OptionalExpr : Repetition<Context, Child, OptionalExpr<Context, Child>>
 {
-    explicit OptionalExpr(const Child& child) : Repetition<Context, Child, OptionalExpr<Context, Child>>(child, 0, 1) {}
+    explicit OptionalExpr(const Child& child)
+        : Repetition<Context, Child, OptionalExpr<Context, Child>>(child, 0, 1)
+    {}
 };
 
 // ---------------------------------------------------------------------------

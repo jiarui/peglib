@@ -143,8 +143,7 @@ struct all_same<typelist<T>>
 template<typename T0, typename T1, typename... Rest>
 struct all_same<typelist<T0, T1, Rest...>>
 {
-    static constexpr bool value =
-        std::is_same_v<T0, T1> && all_same<typelist<T1, Rest...>>::value;
+    static constexpr bool value = std::is_same_v<T0, T1> && all_same<typelist<T1, Rest...>>::value;
 };
 
 // First type of a typelist (for picking the common type).
@@ -273,12 +272,30 @@ public:
 // `optional<void>` are ill-formed, so we map void→void here via rep_of/opt_of.
 namespace detail
 {
-template<typename T> struct rep_of { using type = std::vector<T>; };
-template<> struct rep_of<void> { using type = void; };
-template<typename T> struct opt_of { using type = std::optional<T>; };
-template<> struct opt_of<void> { using type = void; };
-template<typename T> using rep_of_t = typename rep_of<T>::type;
-template<typename T> using opt_of_t = typename opt_of<T>::type;
+template<typename T>
+struct rep_of
+{
+    using type = std::vector<T>;
+};
+template<>
+struct rep_of<void>
+{
+    using type = void;
+};
+template<typename T>
+struct opt_of
+{
+    using type = std::optional<T>;
+};
+template<>
+struct opt_of<void>
+{
+    using type = void;
+};
+template<typename T>
+using rep_of_t = typename rep_of<T>::type;
+template<typename T>
+using opt_of_t = typename opt_of<T>::type;
 } // namespace detail
 
 template<typename C, typename Child, typename Self>
@@ -512,8 +529,7 @@ auto extract_expr_impl(const OptionalExpr<C, Ch>*, const NodePtr& node, Cursor& 
 namespace seqimpl
 {
 template<typename NodePtr, typename... Children, typename Acc, std::size_t I>
-auto step(const NodePtr& node, detail::Cursor& cur, Acc acc,
-          std::integral_constant<std::size_t, I>)
+auto step(const NodePtr& node, detail::Cursor& cur, Acc acc, std::integral_constant<std::size_t, I>)
 {
     using Child = std::tuple_element_t<I, std::tuple<Children...>>;
     using R = result_of_t<Child>;

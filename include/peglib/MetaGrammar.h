@@ -60,16 +60,20 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // null vector args.
         // ==================================================================
         g["Comment"] = g.terminal('#') >> *non_nl >> -g.terminal('\n');
-        g["Comment"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["Comment"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["WSChar"] = g.terminal(' ') | g.terminal('\t') | g.terminal('\r') | g.terminal('\n');
-        g["WSChar"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["WSChar"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["Spacing"] = *(g["WSChar"] | g["Comment"]);
-        g["Spacing"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["Spacing"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["EndOfFile"] = !any_char;
-        g["EndOfFile"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["EndOfFile"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
         // Char — transparent (decoded by Literal/Class actions via spans).
@@ -77,38 +81,47 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         g["Escape"] = g.terminal('\\') >>
                       (g.terminal('n') | g.terminal('r') | g.terminal('t') | g.terminal('\'') |
                        g.terminal('"') | g.terminal('\\') | g.terminal('[') | g.terminal(']'));
-        g["Escape"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["Escape"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["RawChar"] = g.terminal([](char c) { return c != '\\' && c != '\n' && c != '\0'; });
-        g["RawChar"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["RawChar"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["Char"] = g["Escape"] | g["RawChar"];
-        g["Char"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["Char"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // ==================================================================
         // Identifier
         // ==================================================================
         g["IdentStart"] = g.terminal('a', 'z') | g.terminal('A', 'Z') | g.terminal('_');
-        g["IdentStart"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["IdentStart"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         g["IdentCont"] = g["IdentStart"] | g.terminal('0', '9');
-        g["IdentCont"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["IdentCont"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // IdentifierRaw: IdentStart >> *IdentCont. IdentStart/IdentCont are
         // transparent Rules (result_of NodePtr, runtime null), so result_of is
         // (NodePtr, vector<NodePtr>). The action only needs the span → untyped.
         g["IdentifierRaw"] = g["IdentStart"] >> *g["IdentCont"];
-        g["IdentifierRaw"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            std::string name = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
-            return PegAstNode::make(NodeKind::RuleRef, std::move(name), node->start_offset, node->end_offset);
-        });
+        g["IdentifierRaw"].set_action(
+            [](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                std::string name =
+                    ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+                return PegAstNode::make(
+                    NodeKind::RuleRef, std::move(name), node->start_offset, node->end_offset);
+            });
         // Identifier: IdentifierRaw >> Spacing. Spacing is a transparent Rule
         // (result_of NodePtr, runtime null). Typed action forwards idraw.
         {
             auto h = (g["Identifier"] = g["IdentifierRaw"] >> g["Spacing"]);
-            h.set_action([](Ctx&, Span, NodePtr idraw, NodePtr /*spacing*/) -> NodePtr {
-                return idraw;
-            });
+            h.set_action(
+                [](Ctx&, Span, const NodePtr& idraw, const NodePtr& /*spacing*/) -> NodePtr {
+                    return idraw;
+                });
         }
 
         // ==================================================================
@@ -120,10 +133,18 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
             for (std::size_t i = 0; i < src.size(); ++i) {
                 if (src[i] == '\\' && i + 1 < src.size()) {
                     switch (src[i + 1]) {
-                    case 'n': out += '\n'; break;
-                    case 'r': out += '\r'; break;
-                    case 't': out += '\t'; break;
-                    default: out += src[i + 1]; break;
+                    case 'n':
+                        out += '\n';
+                        break;
+                    case 'r':
+                        out += '\r';
+                        break;
+                    case 't':
+                        out += '\t';
+                        break;
+                    default:
+                        out += src[i + 1];
+                        break;
                     }
                     ++i;
                 } else {
@@ -138,21 +159,29 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // vector<NodePtr>; the action only needs the source span → untyped.
         g["SingleQuotedCore"] =
             g.terminal('\'') >> *(!g.terminal('\'') >> g["Char"]) >> g.terminal('\'');
-        g["SingleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            std::size_t s = node->start_offset + 1;
-            std::size_t e = node->end_offset - 1;
-            std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
-        });
+        g["SingleQuotedCore"].set_action(
+            [decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                std::size_t s = node->start_offset + 1;
+                std::size_t e = node->end_offset - 1;
+                std::string body = ctx.input().slice(s, e - s);
+                return PegAstNode::make(NodeKind::Literal,
+                                        decode_peg_escapes(body),
+                                        node->start_offset,
+                                        node->end_offset);
+            });
 
         g["DoubleQuotedCore"] =
             g.terminal('"') >> *(!g.terminal('"') >> g["Char"]) >> g.terminal('"');
-        g["DoubleQuotedCore"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            std::size_t s = node->start_offset + 1;
-            std::size_t e = node->end_offset - 1;
-            std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
-        });
+        g["DoubleQuotedCore"].set_action(
+            [decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                std::size_t s = node->start_offset + 1;
+                std::size_t e = node->end_offset - 1;
+                std::string body = ctx.input().slice(s, e - s);
+                return PegAstNode::make(NodeKind::Literal,
+                                        decode_peg_escapes(body),
+                                        node->start_offset,
+                                        node->end_offset);
+            });
 
         // LiteralCore: SingleQuotedCore | DoubleQuotedCore. Typed (forward).
         {
@@ -162,28 +191,38 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // Literal: LiteralCore >> Spacing. Typed (forward core, ignore spacing).
         {
             auto h = (g["Literal"] = g["LiteralCore"] >> g["Spacing"]);
-            h.set_action([](Ctx&, Span, NodePtr core, NodePtr /*spacing*/) -> NodePtr { return core; });
+            h.set_action(
+                [](Ctx&, Span, const NodePtr& core, const NodePtr& /*spacing*/) -> NodePtr {
+                    return core;
+                });
         }
 
         // ==================================================================
         // Class — character class. Action captures the raw bracketed source.
         // ==================================================================
         g["Range"] = g["Char"] >> -(g.terminal('-') >> g["Char"]);
-        g["Range"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["Range"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // ClassCore: "[" -"^"? *(!"]" Range) "]". References Range (transparent
         // Rule) → result_of has a vector<NodePtr>; action reads span → untyped.
-        g["ClassCore"] = g.terminal('[') >> -g.terminal('^') >>
-                         *(!g.terminal(']') >> g["Range"]) >> g.terminal(']');
-        g["ClassCore"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            std::string raw = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
-            return PegAstNode::make(NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
-        });
+        g["ClassCore"] = g.terminal('[') >> -g.terminal('^') >> *(!g.terminal(']') >> g["Range"]) >>
+                         g.terminal(']');
+        g["ClassCore"].set_action(
+            [](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                std::string raw =
+                    ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+                return PegAstNode::make(
+                    NodeKind::CharClass, std::move(raw), node->start_offset, node->end_offset);
+            });
 
         // Class: ClassCore >> Spacing. Typed (forward core).
         {
             auto h = (g["Class"] = g["ClassCore"] >> g["Spacing"]);
-            h.set_action([](Ctx&, Span, NodePtr core, NodePtr /*spacing*/) -> NodePtr { return core; });
+            h.set_action(
+                [](Ctx&, Span, const NodePtr& core, const NodePtr& /*spacing*/) -> NodePtr {
+                    return core;
+                });
         }
 
         // ==================================================================
@@ -193,7 +232,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // ==================================================================
         auto make_punct = [&](const char* name, const auto& expr) {
             g[name] = expr;
-            g[name].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+            g[name].set_action(
+                [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
         };
 
         make_punct("LEFTARROW", g.terminal('<') >> g.terminal('-') >> g["Spacing"]);
@@ -261,7 +301,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
                     // Find the Expression sibling.
                     for (auto& c2 : node->children) {
                         if (c2 && c2->name == "Expression" && c2->value) {
-                            auto n = PegAstNode::make(NodeKind::Lexeme, {}, node->start_offset, node->end_offset);
+                            auto n = PegAstNode::make(
+                                NodeKind::Lexeme, {}, node->start_offset, node->end_offset);
                             n->children.push_back(c2->value);
                             return n;
                         }
@@ -291,54 +332,63 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // transparent tokens matched).
         // ==================================================================
         g["Suffixed"] = g["Primary"] >> -(g["QUESTION"] | g["STAR"] | g["PLUS"]);
-        g["Suffixed"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            NodePtr child_val;
-            std::string op_text;
-            for (auto& child : node->children) {
-                if (!child) continue;
-                if (child->name == "Primary") {
-                    child_val = child->value;
-                } else if (op_text.empty()) {
-                    op_text = ctx.input().slice(child->start_offset, child->end_offset - child->start_offset);
+        g["Suffixed"].set_action(
+            [](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                NodePtr child_val;
+                std::string op_text;
+                for (auto& child : node->children) {
+                    if (!child)
+                        continue;
+                    if (child->name == "Primary") {
+                        child_val = child->value;
+                    } else if (op_text.empty()) {
+                        op_text = ctx.input().slice(child->start_offset,
+                                                    child->end_offset - child->start_offset);
+                    }
                 }
-            }
-            if (!child_val)
-                return nullptr;
-            if (op_text.empty())
-                return child_val;
-            NodeKind k = NodeKind::Optional;
-            if (op_text.find('*') != std::string::npos) k = NodeKind::Star;
-            else if (op_text.find('+') != std::string::npos) k = NodeKind::Plus;
-            auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
-            n->children.push_back(child_val);
-            return n;
-        });
+                if (!child_val)
+                    return nullptr;
+                if (op_text.empty())
+                    return child_val;
+                NodeKind k = NodeKind::Optional;
+                if (op_text.find('*') != std::string::npos)
+                    k = NodeKind::Star;
+                else if (op_text.find('+') != std::string::npos)
+                    k = NodeKind::Plus;
+                auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
+                n->children.push_back(child_val);
+                return n;
+            });
 
         // ==================================================================
         // Prefixed — optional prefix (& !) then Suffixed. Same operator-
         // identity issue as Suffixed: use the untyped hook, read source.
         // ==================================================================
         g["Prefixed"] = -(g["AND"] | g["NOT"]) >> g["Suffixed"];
-        g["Prefixed"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            NodePtr child_val;
-            std::string op_text;
-            for (auto& child : node->children) {
-                if (!child) continue;
-                if (child->name == "Suffixed") {
-                    child_val = child->value;
-                } else if (op_text.empty()) {
-                    op_text = ctx.input().slice(child->start_offset, child->end_offset - child->start_offset);
+        g["Prefixed"].set_action(
+            [](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                NodePtr child_val;
+                std::string op_text;
+                for (auto& child : node->children) {
+                    if (!child)
+                        continue;
+                    if (child->name == "Suffixed") {
+                        child_val = child->value;
+                    } else if (op_text.empty()) {
+                        op_text = ctx.input().slice(child->start_offset,
+                                                    child->end_offset - child->start_offset);
+                    }
                 }
-            }
-            if (!child_val)
-                return nullptr;
-            if (op_text.empty())
-                return child_val;
-            NodeKind k = (op_text.find('!') != std::string::npos) ? NodeKind::NotPred : NodeKind::AndPred;
-            auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
-            n->children.push_back(child_val);
-            return n;
-        });
+                if (!child_val)
+                    return nullptr;
+                if (op_text.empty())
+                    return child_val;
+                NodeKind k = (op_text.find('!') != std::string::npos) ? NodeKind::NotPred
+                                                                      : NodeKind::AndPred;
+                auto n = PegAstNode::make(k, {}, node->start_offset, node->end_offset);
+                n->children.push_back(child_val);
+                return n;
+            });
 
         // ==================================================================
         // Sequence — one or more Prefixed. Typed: vector<NodePtr>.
@@ -350,7 +400,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
                 // occur, but be defensive).
                 std::vector<NodePtr> filtered;
                 for (auto& it : items)
-                    if (it) filtered.push_back(std::move(it));
+                    if (it)
+                        filtered.push_back(std::move(it));
                 if (filtered.empty())
                     return nullptr;
                 if (filtered.size() == 1)
@@ -370,7 +421,9 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // ==================================================================
         {
             auto h = (g["Expression"] = g["Sequence"] >> *(g["SLASH"] >> g["Sequence"]));
-            h.set_action([](Ctx&, Span sp, NodePtr first,
+            h.set_action([](Ctx&,
+                            Span sp,
+                            NodePtr first,
                             std::vector<std::tuple<NodePtr, NodePtr>> rest) -> NodePtr {
                 if (!first)
                     return nullptr;
@@ -381,7 +434,8 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
                 for (auto& alt : rest) {
                     // tuple<SLASH (null), Sequence value>
                     auto& seq = std::get<1>(alt);
-                    if (seq) n->children.push_back(seq);
+                    if (seq)
+                        n->children.push_back(seq);
                 }
                 return n;
             });
@@ -394,19 +448,25 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // (transparent Rule) → untyped.
         g["RECOVER_EOF"] = g.terminal('e') >> g.terminal('o') >> g.terminal('f') >>
                            !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOF"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["RECOVER_EOF"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
         g["RECOVER_EOL"] = g.terminal('e') >> g.terminal('o') >> g.terminal('l') >>
                            !g["IdentCont"] >> g["Spacing"];
-        g["RECOVER_EOL"].set_action([](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
+        g["RECOVER_EOL"].set_action(
+            [](Ctx&, const PegParseCtx::ParseTreeNodePtr&) -> NodePtr { return nullptr; });
 
         // SyncChar: "'" Char "'" Spacing. References Char/Spacing → untyped.
         g["SyncChar"] = g.terminal('\'') >> g["Char"] >> g.terminal('\'') >> g["Spacing"];
-        g["SyncChar"].set_action([decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            std::size_t s = node->start_offset + 1;
-            std::size_t e = node->end_offset - 1;
-            std::string body = ctx.input().slice(s, e - s);
-            return PegAstNode::make(NodeKind::Literal, decode_peg_escapes(body), node->start_offset, node->end_offset);
-        });
+        g["SyncChar"].set_action(
+            [decode_peg_escapes](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                std::size_t s = node->start_offset + 1;
+                std::size_t e = node->end_offset - 1;
+                std::string body = ctx.input().slice(s, e - s);
+                return PegAstNode::make(NodeKind::Literal,
+                                        decode_peg_escapes(body),
+                                        node->start_offset,
+                                        node->end_offset);
+            });
 
         make_punct("OPENBRACE", g.terminal('{') >> g["Spacing"]);
         make_punct("CLOSEBRACE", g.terminal('}') >> g["Spacing"]);
@@ -419,37 +479,48 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
             g["RECOVER_EOF"] | g["RECOVER_EOL"] |
             (g["OPENBRACE"] >> -g["SyncChar"] >>
              *(g["COMMA"] >> g["SyncChar"] | !g["CLOSEBRACE"] >> g["SyncChar"]) >> g["CLOSEBRACE"]);
-        g["RecoverSpec"].set_action([](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
-            auto span = ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
-            if (span == "eof")
-                return PegAstNode::make(NodeKind::Recovery, "eof", node->start_offset, node->end_offset);
-            if (span == "eol")
-                return PegAstNode::make(NodeKind::Recovery, "eol", node->start_offset, node->end_offset);
-            // Set form: concatenate SyncChar children's text into "set:XYZ".
-            std::string spec = "set:";
-            // Pre-order DFS that stops at each SyncChar match (don't descend).
-            std::function<void(const PegParseCtx::ParseTreeNodePtr&)> collect =
-                [&](const PegParseCtx::ParseTreeNodePtr& n) {
-                    if (!n) return;
-                    if (n->name == "SyncChar" && n->value) {
-                        if (!n->value->text.empty()) spec += n->value->text;
-                        return;
-                    }
-                    for (auto& c : n->children) collect(c);
-                };
-            collect(node);
-            return PegAstNode::make(NodeKind::Recovery, std::move(spec), node->start_offset, node->end_offset);
-        });
+        g["RecoverSpec"].set_action(
+            [](Ctx& ctx, const PegParseCtx::ParseTreeNodePtr& node) -> NodePtr {
+                auto span =
+                    ctx.input().slice(node->start_offset, node->end_offset - node->start_offset);
+                if (span == "eof")
+                    return PegAstNode::make(
+                        NodeKind::Recovery, "eof", node->start_offset, node->end_offset);
+                if (span == "eol")
+                    return PegAstNode::make(
+                        NodeKind::Recovery, "eol", node->start_offset, node->end_offset);
+                // Set form: concatenate SyncChar children's text into "set:XYZ".
+                std::string spec = "set:";
+                // Pre-order DFS that stops at each SyncChar match (don't descend).
+                std::function<void(const PegParseCtx::ParseTreeNodePtr&)> collect =
+                    [&](const PegParseCtx::ParseTreeNodePtr& n) {
+                        if (!n)
+                            return;
+                        if (n->name == "SyncChar" && n->value) {
+                            if (!n->value->text.empty())
+                                spec += n->value->text;
+                            return;
+                        }
+                        for (auto& c : n->children)
+                            collect(c);
+                    };
+                collect(node);
+                return PegAstNode::make(
+                    NodeKind::Recovery, std::move(spec), node->start_offset, node->end_offset);
+            });
 
         {
             // Recovery = PERCENT_RECOVER OPEN RecoverSpec CLOSE
             // result_of = (NodePtr,NodePtr,NodePtr,NodePtr) — PERCENT_RECOVER,
             // OPEN, CLOSE are transparent (null); RecoverSpec carries the value.
-            auto h = (g["Recovery"] = g["PERCENT_RECOVER"] >> g["OPEN"] >> g["RecoverSpec"] >> g["CLOSE"]);
-            h.set_action([](Ctx&, Span, NodePtr /*pct*/, NodePtr /*open*/,
-                            NodePtr spec, NodePtr /*close*/) -> NodePtr {
-                return spec;
-            });
+            auto h = (g["Recovery"] =
+                          g["PERCENT_RECOVER"] >> g["OPEN"] >> g["RecoverSpec"] >> g["CLOSE"]);
+            h.set_action([](Ctx&,
+                            Span,
+                            const NodePtr& /*pct*/,
+                            const NodePtr& /*open*/,
+                            const NodePtr& spec,
+                            const NodePtr& /*close*/) -> NodePtr { return spec; });
         }
 
         // ==================================================================
@@ -459,9 +530,14 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         //   Recovery → optional (present/absent).
         // ==================================================================
         {
-            auto h = (g["Definition"] = g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"]);
-            h.set_action([](Ctx&, Span sp, NodePtr id, NodePtr /*leftarrow*/,
-                            NodePtr expr, std::optional<NodePtr> recovery) -> NodePtr {
+            auto h = (g["Definition"] =
+                          g["Identifier"] >> g["LEFTARROW"] >> g["Expression"] >> -g["Recovery"]);
+            h.set_action([](Ctx&,
+                            Span sp,
+                            const NodePtr& id,
+                            const NodePtr& /*leftarrow*/,
+                            const NodePtr& expr,
+                            std::optional<NodePtr> recovery) -> NodePtr {
                 if (!id)
                     return nullptr;
                 auto def = PegAstNode::make(NodeKind::Definition, id->text, sp.start, sp.end);
@@ -480,8 +556,11 @@ inline const Grammar<char, PegAstNodePtr>& meta_grammar()
         // ==================================================================
         {
             auto h = (g["Grammar"] = g["Spacing"] >> +g["Definition"] >> g["EndOfFile"]);
-            h.set_action([](Ctx&, Span, NodePtr /*spacing*/, std::vector<NodePtr> defs,
-                            NodePtr /*eof*/) -> NodePtr {
+            h.set_action([](Ctx&,
+                            Span,
+                            const NodePtr& /*spacing*/,
+                            std::vector<NodePtr> defs,
+                            const NodePtr& /*eof*/) -> NodePtr {
                 // Return the first definition; GrammarCompiler walks the tree
                 // for multiple definitions.
                 return defs.empty() ? nullptr : defs[0];

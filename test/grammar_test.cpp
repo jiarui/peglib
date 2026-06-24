@@ -183,11 +183,11 @@ TEST_CASE("[grammar] semantic-action")
 {
     using Ctx = Context<char>;
     Grammar<> g;
-    g["digit"] = g.terminal('0', '9');
 
     int value = -1;
-    g["digit"].set_action([&value](Ctx& ctx, const Ctx::ParseTreeNodePtr& node) -> std::monostate {
-        value = ctx.at(node->start_offset) - '0';
+    auto digit = (g["digit"] = g.terminal('0', '9'));
+    digit.set_action([&value](Ctx& ctx, peg::Span sp) -> std::monostate {
+        value = ctx.at(sp.start) - '0';
         return {};
     });
 
@@ -205,8 +205,8 @@ TEST_CASE("[grammar] rule-chaining")
     using Ctx = Context<char>;
     Grammar<> g;
     int count = 0;
-    g["token"] = g.terminal('a');
-    g["token"].set_action([&count](Ctx&, const Ctx::ParseTreeNodePtr&) -> std::monostate {
+    auto token = (g["token"] = g.terminal('a'));
+    token.set_action([&count](Ctx&, peg::Span) -> std::monostate {
         count++;
         return {};
     });

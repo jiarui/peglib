@@ -326,13 +326,17 @@ TEST_CASE("non-trivial-token-end-to-end-parse-with-semantic-action")
     g["open"] = g.terminal(RealTok{1, {}});
     g["mid"] = g.terminal(RealTok{5, {}});
     g["close"] = g.terminal(RealTok{2, {}});
-    g["group"] = g["open"] >> g["mid"] >> g["close"];
-    g["group"].set_action([](Context<RealTok, RealNode>& ctx,
-                             const Context<RealTok, RealNode>::ParseTreeNodePtr& node) {
+    auto group = (g["group"] = g["open"] >> g["mid"] >> g["close"]);
+    group.set_action([](Context<RealTok, RealNode>& ctx,
+                        peg::Span sp,
+                        const RealNode& /*open*/,
+                        const RealNode& /*mid*/,
+                        const RealNode& /*close*/) {
         // Tokens carry their own identity — read the opener by offset, no
-        // string slicing needed.
+        // string slicing needed. (The open/mid/close child RealNodes are
+        // unused; this action keys on the opener token's id.)
         RealNode n;
-        n.matched_id = ctx.at(node->start_offset).id;
+        n.matched_id = ctx.at(sp.start).id;
         n.lexeme = "group";
         return n;
     });

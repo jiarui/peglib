@@ -287,6 +287,10 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // operator& as the and-predicate combinator (Rule.h), so &rhs would
     // build an AndExpr rather than yielding a Rule*.
     auto operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Context>>;
+    // Not noexcept: NonTerminal::template operator= does make_shared (can
+    // throw bad_alloc), and set_name does a std::string assign. Same throwing
+    // nature as the legacy Rule copy/move assignment (documented & accepted).
+    // NOLINTNEXTLINE(performance-noexcept-move-constructor)
     auto operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>;
 
     // Untyped semantic-action hook (dynamic-path escape hatch). The typed
@@ -395,8 +399,9 @@ struct RuleHandle
         // NonTerminal's action-invocation path (NonTerminal.h:153) and packrat
         // memoisation are unchanged — the stored std::function has the same
         // signature as an untyped action.
-        SemanticAction erased = [f = std::move(f)](Context& ctx,
-                                                   const typename Context::ParseTreeNodePtr& n) -> NodeType {
+        SemanticAction erased =
+            [f = std::move(f)](Context& ctx,
+                               const typename Context::ParseTreeNodePtr& n) -> NodeType {
             return parsers::invoke_action<F, ExprType, Context, typename Context::ParseTreeNodePtr>(
                 f, ctx, n);
         };
@@ -453,6 +458,7 @@ auto Rule<Context>::operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Conte
 }
 
 template<typename Context>
+// NOLINTNEXTLINE(performance-noexcept-move-constructor)
 auto Rule<Context>::operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>
 {
     if (this == std::addressof(rhs)) {

@@ -48,9 +48,9 @@ TEST_CASE("value-stack-custom-node-type")
     MyContext context(input);
 
     Grammar<char, IntNode> g;
-    g["num"] = g.terminal('0', '9');
-    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
-        char c = ctx.at(node->start_offset);
+    auto num = (g["num"] = g.terminal('0', '9'));
+    num.set_action([](MyContext& ctx, peg::Span sp) {
+        char c = ctx.at(sp.start);
         return IntNode{c - '0'};
     });
 
@@ -68,9 +68,9 @@ TEST_CASE("value-stack-clear")
     using MyContext = Context<char, IntNode>;
 
     Grammar<char, IntNode> g;
-    g["num"] = g.terminal('0', '9');
-    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
-        char c = ctx.at(node->start_offset);
+    auto num = (g["num"] = g.terminal('0', '9'));
+    num.set_action([](MyContext& ctx, peg::Span sp) {
+        char c = ctx.at(sp.start);
         return IntNode{c - '0'};
     });
 
@@ -101,9 +101,9 @@ TEST_CASE("value-stack-action-result-pushed")
     // Construct a TerminalExpr that matches any digit using std::set<char>.
     std::set<char> digits = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
     Grammar<char, IntNode> g;
-    g["num"] = g.terminal(digits);
-    g["num"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
-        char c = ctx.at(node->start_offset);
+    auto num = (g["num"] = g.terminal(digits));
+    num.set_action([](MyContext& ctx, peg::Span sp) {
+        char c = ctx.at(sp.start);
         return IntNode{c - '0'};
     });
 
@@ -126,10 +126,8 @@ TEST_CASE("value-stack-monostate-action-returns-default")
     DefaultCtxt context(input);
 
     Grammar<char> g;
-    g["rule"] = g.terminal('a');
-    g["rule"].set_action([](DefaultCtxt& /*ctx*/, const DefaultCtxt::ParseTreeNodePtr& /*node*/) {
-        return std::monostate{};
-    });
+    auto rule = (g["rule"] = g.terminal('a'));
+    rule.set_action([](DefaultCtxt&, peg::Span) { return std::monostate{}; });
 
     auto tree = g.parse_tree("rule", context);
     REQUIRE(tree);
@@ -208,14 +206,11 @@ TEST_CASE("value-stack-rollback-on-sequence-failure")
 {
     using MyContext = Context<char, IntNode>;
     Grammar<char, IntNode> g;
-    g["digit"] = g.terminal('0', '9');
-    g["digit"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
-        return IntNode{ctx.at(node->start_offset) - '0'};
-    });
-    g["nonzero"] = g.terminal('1', '9');
-    g["nonzero"].set_action([](MyContext& ctx, const MyContext::ParseTreeNodePtr& node) {
-        return IntNode{ctx.at(node->start_offset) - '0'};
-    });
+    auto digit = (g["digit"] = g.terminal('0', '9'));
+    digit.set_action([](MyContext& ctx, peg::Span sp) { return IntNode{ctx.at(sp.start) - '0'}; });
+    auto nonzero = (g["nonzero"] = g.terminal('1', '9'));
+    nonzero.set_action(
+        [](MyContext& ctx, peg::Span sp) { return IntNode{ctx.at(sp.start) - '0'}; });
     // "fail_seq" succeeds only on "<digit><nonzero>"; on "11" the second
     // child ('nonzero' expects 1-9; '1' matches) succeeds, but on "1x" the
     // sequence fails — and the digit's node must not contribute to the
@@ -244,12 +239,10 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
 {
     using MyContext = Context<char, IntNode>;
     Grammar<char, IntNode> g;
-    g["a_node"] = g.terminal('a');
-    g["a_node"].set_action(
-        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
-    g["b_node"] = g.terminal('b');
-    g["b_node"].set_action(
-        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{2}; });
+    auto a_node = (g["a_node"] = g.terminal('a'));
+    a_node.set_action([](MyContext&, peg::Span) { return IntNode{1}; });
+    auto b_node = (g["b_node"] = g.terminal('b'));
+    b_node.set_action([](MyContext&, peg::Span) { return IntNode{2}; });
     // Both alternatives produce a node. The point of this test: when the
     // first alternative fails (after partial match), its node is not
     // contributed to the parent tree before the second alternative is tried.
@@ -287,9 +280,8 @@ TEST_CASE("value-stack-rollback-on-not-predicate")
 {
     using MyContext = Context<char, IntNode>;
     Grammar<char, IntNode> g;
-    g["a_node"] = g.terminal('a');
-    g["a_node"].set_action(
-        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
+    auto a_node = (g["a_node"] = g.terminal('a'));
+    a_node.set_action([](MyContext&, peg::Span) { return IntNode{1}; });
     // !a_node succeeds (because lookahead doesn't match), and must leave
     // zero children — the child's would-be node is discarded by NotExpr.
     g["not_a"] = !g["a_node"];
@@ -305,9 +297,8 @@ TEST_CASE("value-stack-rollback-on-and-predicate")
 {
     using MyContext = Context<char, IntNode>;
     Grammar<char, IntNode> g;
-    g["a_node"] = g.terminal('a');
-    g["a_node"].set_action(
-        [](MyContext&, const MyContext::ParseTreeNodePtr&) { return IntNode{1}; });
+    auto a_node = (g["a_node"] = g.terminal('a'));
+    a_node.set_action([](MyContext&, peg::Span) { return IntNode{1}; });
     // &a_node succeeds (lookahead matches 'a'), and must leave zero children
     // — the child's node is discarded by AndExpr.
     g["and_a"] = &g["a_node"];

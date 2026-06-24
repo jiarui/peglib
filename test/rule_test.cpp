@@ -438,16 +438,14 @@ TEST_CASE("terminal-predicate-expression")
 TEST_CASE("semantic-action-fires-on-match")
 {
     Grammar<> g;
-    g["grammar"] = g.terminal('a');
     int matches = 0;
     const std::string input = "a";
     Context context(input);
-    g["grammar"].set_action(
-        [&matches](decltype(context)&,
-                   const decltype(context)::ParseTreeNodePtr&) -> std::monostate {
-            matches++;
-            return {};
-        });
+    auto grammar = (g["grammar"] = g.terminal('a'));
+    grammar.set_action([&matches](Context&, peg::Span) -> std::monostate {
+        matches++;
+        return {};
+    });
     bool ok = g.parse("grammar", context);
     CHECK(ok);
     CHECK(context.ended());

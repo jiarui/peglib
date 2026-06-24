@@ -43,9 +43,7 @@ TEST_CASE("typed-action: void-body leaf via g.terminal")
     Grammar<char, Node> g;
     // body is a bare terminal (void result). The action receives only Span.
     auto h = (g["a"] = g.terminal('x'));
-    h.set_action([](Ctx& c, Span sp) -> Node {
-        return Node{static_cast<int>(c.at(sp.start))};
-    });
+    h.set_action([](Ctx& c, Span sp) -> Node { return Node{static_cast<int>(c.at(sp.start))}; });
 
     std::string in = "x";
     Ctx ctx(in);
@@ -122,7 +120,8 @@ TEST_CASE("typed-action: zero-or-more yields vector")
     auto h = (g["outer"] = *g["d"]);
     h.set_action([](Ctx&, Span, std::vector<Node> rest) -> Node {
         int sum = 0;
-        for (auto& n : rest) sum += n.value;
+        for (auto& n : rest)
+            sum += n.value;
         return Node{sum};
     });
 
@@ -144,10 +143,12 @@ TEST_CASE("typed-action: left-fold yields vector of (operator, operand) tuples")
     d.set_action([](Ctx&, Span, char) -> Node { return Node{1}; });
 
     auto h = (g["expr"] = g["d"] >> *(g.token('+') >> g["d"]));
-    h.set_action([](Ctx&, Span, Node first,
-                    std::vector<std::tuple<char, Node>> rest) -> Node {
+    h.set_action([](Ctx&, Span, Node first, std::vector<std::tuple<char, Node>> rest) -> Node {
         int acc = first.value;
-        for (auto& [op, rhs] : rest) { (void)op; acc += rhs.value; }
+        for (auto& [op, rhs] : rest) {
+            (void)op;
+            acc += rhs.value;
+        }
         return Node{acc};
     });
 
@@ -189,9 +190,7 @@ TEST_CASE("typed-action: optional yields std::optional")
     d.set_action([](Ctx&, Span, char) -> Node { return Node{5}; });
 
     auto h = (g["outer"] = -g["d"]);
-    h.set_action([](Ctx&, Span, std::optional<Node> n) -> Node {
-        return Node{n ? n->value : -1};
-    });
+    h.set_action([](Ctx&, Span, std::optional<Node> n) -> Node { return Node{n ? n->value : -1}; });
 
     SUBCASE("present")
     {
@@ -225,7 +224,8 @@ TEST_CASE("typed-action: alternation requires shared result type")
     auto h = (g["outer"] = g["a"] | g["b"]);
     h.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value * 10}; });
 
-    for (auto [in, expect] : {std::pair<std::string, int>{"a", 10}, std::pair<std::string, int>{"b", 20}}) {
+    for (auto [in, expect] :
+         {std::pair<std::string, int>{"a", 10}, std::pair<std::string, int>{"b", 20}}) {
         Ctx ctx(in);
         auto tree = g.parse_tree("outer", ctx);
         REQUIRE(tree);
@@ -288,17 +288,18 @@ TEST_CASE("typed-action: left-recursion seed-grow produces final value")
 
     // expr = expr >> '+' >> d  |  d   (left-recursive)
     g["expr"] = (g["expr"] >> g.terminal('+') >> g["d"]) | g["d"];
-    g["expr"].set_action([](Context<char, int>& /*ctx*/, const Context<char, int>::ParseTreeNodePtr& node) -> int {
-        // Recursively sum the integer values in the subtree. For the base case
-        // (just 'd') node->value is already 1 (set by d's action before expr's
-        // runs, since NonTerminal adopts the body node). For expr >> '+' >> d,
-        // the left expr's value and d's value are both children values.
-        return node->value; // passthrough: expr's node IS its body's node
-    });
+    g["expr"].set_action(
+        [](Context<char, int>& /*ctx*/, const Context<char, int>::ParseTreeNodePtr& node) -> int {
+            // Recursively sum the integer values in the subtree. For the base case
+            // (just 'd') node->value is already 1 (set by d's action before expr's
+            // runs, since NonTerminal adopts the body node). For expr >> '+' >> d,
+            // the left expr's value and d's value are both children values.
+            return node->value; // passthrough: expr's node IS its body's node
+        });
 
     std::string in = "1+1+1";
     Context<char, int> ctx(in);
-    REQUIRE(g.parse("expr", ctx));   // explicit rule name — no start needed
+    REQUIRE(g.parse("expr", ctx)); // explicit rule name — no start needed
     REQUIRE(ctx.ended());
 }
 
@@ -320,7 +321,7 @@ TEST_CASE("typed-action: cut-committed failure surfaces as parse failure")
     std::string in = "1y";
     Ctx ctx(in);
     bool ok = g.parse("outer", ctx); // explicit rule name
-    CHECK_FALSE(ok); // cut-committed failure → parse fails, no value produced
+    CHECK_FALSE(ok);                 // cut-committed failure → parse fails, no value produced
 }
 
 // ---------------------------------------------------------------------------
@@ -344,8 +345,8 @@ TEST_CASE("typed-action: recovered rule does not invoke the action")
 
     std::string in = "9;";
     Ctx ctx(in);
-    bool ok = g.parse("outer", ctx);    // explicit rule name
-    CHECK(ok);                       // recovery resyncs to ';', reports success
-    CHECK(action_runs == 0);         // the action did NOT run (recovery path)
+    bool ok = g.parse("outer", ctx);             // explicit rule name
+    CHECK(ok);                                   // recovery resyncs to ';', reports success
+    CHECK(action_runs == 0);                     // the action did NOT run (recovery path)
     CHECK_FALSE(ctx.take_diagnostics().empty()); // a diagnostic was recorded
 }
