@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — Typed semantic actions (Model A)
+
+Compile-time type-checked semantic actions for the static DSL path. The old
+untyped `SemanticAction = std::function<NodeType(Context&, ParseTreeNodePtr)>`
+forced every action to hand-search the parse tree for sub-results by name
+(`find_named`/`pass_through`) — fragile (silent null on typo), O(subtree) per
+action, and impossible to reason about positionally. The new typed API derives
+each rule's result type from its body at compile time and hands the action
+already-typed child results, positionally — no tree search, wrong arity/type
+is a hard compile error.
+
+- **`RuleHandle<Context, ExprType>`**: `g["r"] = body` now returns a typed
+  handle carrying the body's static type. `h.set_action<F>` compile-time-checks
+  that `F` is invocable as `F(Context&, Span, Args...)` where `Args` is the
+  body's filtered result type, positionally unpacked:
+    - void body (`g.terminal`, `g.cut`, predicates)  → `F(Context&, Span)`
+    - single result                                  → `F(Context&, Span, T)`
+    - multi result                                   → `F(Context&, Span, T0, T1, ...)`
+  Internally type-erases into the existing `NonTerminal::m_action`, so packrat
+  memoisation, cut, and error recovery are unchanged.
+- **`Span`**: `{ start, end }` mirroring `ParseTreeNode` offsets; char-level
+  Context → byte offsets, token-level → token indices (read the token via
+  `ctx.at(sp.start)`).
+- **`g.terminal(x)` vs `g.token(x)`** (terminal result model):
+    - `g.terminal(x)` → `void` (filtered; structural tokens like parentheses
+      and keywords never appear as action parameters — no "drop" combinator).
+    - `g.token(x)`    → `value_type` (kept; operator/element identity is
+      visible to left-fold actions via a parallel `ParseTreeNode::token_value`
+      field).
+- **`Rule::set_action` (untyped) retained**: the dynamic path
+  (`GrammarCompiler`/`DynExpr`) and ad-hoc binding keep the untyped hook. To
+  attach a typed action, capture the assignment result:
+  `auto h = (g["r"] = body); h.set_action(...);` (the typed API lives only on
+  `RuleHandle`; `g["r"].set_action(...)` is untyped).
+- **`result_of<E>`, `extract<E>`, `action_matches`** (`include/peglib/ResultType.h`,
+  new): the metaprogramming backbone — per-expression result-type derivation,
+  the extractor (inverse of tree-building), and the arity/type concept.
+- **`MetaGrammar` migrated**: all `find_named`/`has_named`/`collect_named`/
+  `pass_through` helpers deleted; the meta-grammar's actions now use typed/
+  untyped hooks positionally. `meta_grammar_test` passes byte-for-byte.
+
+#### Migration notes (typed actions)
+- `auto h = (g["r"] = body);` then `h.set_action([](Context& c, Span sp, ...) {...});`
+- Structural tokens (parens, keywords, separators): `g.terminal(x)` — they
+  won't appear as action parameters.
+- Operator/value tokens you need in the action: `g.token(x)`.
+- A rule referenced via `g["name"]` is always `node_type`-typed (its body's
+  structure is opaque at the reference site), so transparent sub-rules appear
+  as positional (possibly-null) `NodeType` slots.
+
 ### Changed — Token-level grammars with custom NodeType
 
 Support for `Grammar<TokenType, CustomNodeType>` (non-trivially-copyable token

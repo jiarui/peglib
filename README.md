@@ -40,9 +40,16 @@ real-world case study.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
   throw `peg::ParseError` (a hard error); regular failures are queryable via
   `Context::take_error()`.
-- **Post-parse action model**: `parse()` returns `ParseResult {success, tree}`.
-  Actions receive a `ParseTreeNodePtr` and read `children[i]->value` to access
-  sub-rule results. No value stack — the tree flows through return values.
+- **Semantic actions, typed or untyped**:
+  - **Typed (static DSL)**: `auto h = (g["r"] = body); h.set_action([](Context&,
+    Span, /*typed child results*/...) {...});` — compile-time-checked against
+    the body's derived result type, positional, no tree search. `g.terminal(x)`
+    is filtered (void; structural tokens never appear as params); `g.token(x)`
+    keeps the matched element so operator identity is visible to left-folds.
+  - **Untyped (both paths)**: `g["r"].set_action([](Context&, ParseTreeNodePtr)
+    {...})` — the action hand-reads the tree. Required for the dynamic
+    (`GrammarCompiler`) path; available as an escape hatch on the static path.
+  No value stack — the tree flows through return values.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
   `file:line:col: error: expected A or B` messages. A separate multi-diagnostic
@@ -304,6 +311,44 @@ when building the user-facing AST). Storage-policy generalization (making
 the pointer wrapper itself a template policy parameter) is a tracked future
 refactor; today's design trades a slightly verbose `shared_ptr<T>` argument
 for full control over the recognizer/value/polymorphic spectrum.
+
+## Typed semantic actions
+
+`g["r"] = body` returns a `RuleHandle` carrying the body's static type. Its
+`set_action<F>` is **compile-time-checked**: the action receives the body's
+sub-results as already-typed arguments, positionally — no hand-searching the
+parse tree for children by name.
+
+```cpp
+Grammar<char, Ast> g;
+
+// terminal(x)  → void   (filtered; '(' ')' never appear as params)
+// token(x)     → char   (kept; the operator identity is visible)
+auto paren = (g["paren"] = g.terminal('(') >> g["expr"] >> g.terminal(')'));
+paren.set_action([](Context& c, Span sp, Ast inner) -> Ast { return inner; });
+
+// left-fold: the operator is a typed arg
+auto mul = (g["mul"] = g["unop"] >> *((g.token('*') >> g["unop"])
+                                   | (g.token('/') >> g["unop"])));
+mul.set_action([](Context&, Span, Ast first,
+                  std::vector<std::tuple<char, Ast>> rest) -> Ast {
+    Ast acc = std::move(first);
+    for (auto& [op, rhs] : rest) acc = make_binop(op, std::move(acc), std::move(rhs));
+    return acc;
+});
+```
+
+- `Span{start, end}` mirrors the match offsets (char-level → bytes; token-level
+  → token indices — read the token via `ctx.at(sp.start)`).
+- The action signature follows the body's filtered result type positionally
+  (no projection): wrong arity/type is a readable `static_assert` error.
+- `g["r"].set_action(...)` (the untyped `Rule` returned by `g["r"]`) is still
+  available — the dynamic path (`GrammarCompiler`) and ad-hoc binding use it.
+  To get the compile-time-checked form, capture the assignment:
+  `auto h = (g["r"] = body); h.set_action(...);`
+
+See `CHANGELOG.md` ("Typed semantic actions (Model A)") for the full model,
+including why a rule referenced via `g["name"]` is always `NodeType`-typed.
 
 ## Requirements
 
