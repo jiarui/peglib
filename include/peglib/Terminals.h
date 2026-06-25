@@ -131,19 +131,16 @@ private:
 
 // ---------------------------------------------------------------------------
 // TokenExpr: like TerminalExpr, but **keeps** the matched element as a typed
-// result (Model A's value-bearing terminal).
+// result (value_type). Match behaviour is identical to TerminalExpr (same
+// symbolConsumable logic, same failure-recording); the difference is that
+// TokenExpr builds a ParseTreeNode so its slot survives into the fold, where
+// the matched element is recovered from ctx.at(span.start). No value is
+// stashed on the node — the fold reads it from the span.
 //
-// Match behaviour is identical to TerminalExpr (same symbolConsumable logic,
-// same failure-recording), with one difference: on success TokenExpr builds a
-// ParseTreeNode carrying the matched element in `node->token_value` (a
-// parallel field of type `value_type`, distinct from `node->value` which is
-// NodeType). The extractor reads `token_value` for TokenExpr slots, so the
-// operator/element identity is visible to left-fold actions.
-//
-// Contrast with TerminalExpr (Model A's "void" terminal): TerminalExpr
-// produces no node and is filtered out of sequence results, so structural
-// tokens (parentheses, keywords, separators) never appear as action
-// parameters. TokenExpr is for tokens whose identity the action needs.
+// Contrast with TerminalExpr (void terminal): TerminalExpr produces no node
+// and is filtered out of sequence results, so structural tokens (parentheses,
+// keywords, separators) never appear as action parameters. TokenExpr is for
+// tokens whose identity the action needs.
 // ---------------------------------------------------------------------------
 template<typename Context, typename TerminalValueType>
 struct TokenExpr : ParsingExpr<Context, TokenExpr<Context, TerminalValueType>>
@@ -153,16 +150,12 @@ struct TokenExpr : ParsingExpr<Context, TokenExpr<Context, TerminalValueType>>
     typename Context::ParseResult parse(Context& context) const override
     {
         if (!context.ended() && symbolConsumable(context.current(), m_terminalValue)) {
-            auto matched = context.current();
             context.next();
-            // Build a node carrying the matched element in token_value. We do
-            // NOT touch node->value (that field is NodeType, owned by semantic
-            // actions on NonTerminals). Keeping the two channels separate
-            // preserves the value/transparent conventions unchanged.
+            // Build a node bracketing exactly the one matched element. The fold
+            // recovers the element via ctx.at(start_offset) — no value stash.
             auto node = std::make_shared<typename Context::ParseTreeNode>();
             node->start_offset = context.mark() - 1;
             node->end_offset = context.mark();
-            node->token_value = std::move(matched);
             return {true, node};
         }
         record_expected(context);

@@ -2,6 +2,7 @@
 
 #include "doctest.h"
 
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -9,31 +10,46 @@
 using namespace peg;
 
 // ---------------------------------------------------------------------------
-// Typed semantic-action tests (Model A).
+// Typed semantic-action tests (post-parse fold model).
 //
-// These exercise the compile-time type-checked action API end-to-end:
+// Typed actions run in a post-parse fold (Grammar::parse_ast), NOT during
+// parse. The fold walks the final tree once, dispatching each node to its
+// producer rule's registered typed fold, which owns child values as locals and
+// moves them up. This is unconditionally move-safe: no value is stored at a
+// shared/multi-reader location, so a move-only NodeType composes freely.
+//
+// These exercise end-to-end:
 //   - RuleHandle returned by `g["r"] = body`
 //   - typed set_action<F> with positional, no-projection argument matching
-//   - the extractor (extract<ExprType>) reconstructing typed values from the
-//     parse tree for every expression shape
+//   - the fold reconstructing typed values for every expression shape
 //   - terminal(void) filtering vs token(value_type) keeping
 //   - left-fold (`a >> *(op >> a)`) producing vector<pair/tuple>
 //   - passthrough aliases flowing values at zero cost
-//
-// They also fill the "action + hard feature" regression gaps that had NO
-// coverage before this refactor: packrat memo, left-recursion seed-grow,
-// cut-committed failure, and error recovery — each combined with a typed
-// action. If a future change to the action model breaks the interaction with
-// any of these, these tests catch it.
 // ---------------------------------------------------------------------------
 
-// A user NodeType for the action tests.
+// Copyable NodeType for the common cases.
 struct Node
 {
     int value = 0;
 };
 using Ctx = Context<char, Node>;
-using Ptn = Ctx::ParseTreeNodePtr;
+
+// Move-only NodeType (yueshi-style AST with unique_ptr children). This is the
+// case that the old extractor could not support (copy-removed) and that the
+// fold handles by owning values transitively.
+struct MoveNode
+{
+    int value = 0;
+    std::unique_ptr<MoveNode> child;
+
+    MoveNode() = default;
+    explicit MoveNode(int v) : value{v} {}
+    MoveNode(MoveNode&&) noexcept = default;
+    MoveNode& operator=(MoveNode&&) noexcept = default;
+    MoveNode(const MoveNode&) = delete;
+    MoveNode& operator=(const MoveNode&) = delete;
+};
+using MCtx = Context<char, MoveNode>;
 
 // ---------------------------------------------------------------------------
 // 1. Leaf: void body  →  F(Context&, Span)
@@ -41,15 +57,14 @@ using Ptn = Ctx::ParseTreeNodePtr;
 TEST_CASE("typed-action: void-body leaf via g.terminal")
 {
     Grammar<char, Node> g;
-    // body is a bare terminal (void result). The action receives only Span.
     auto h = (g["a"] = g.terminal('x'));
     h.set_action([](Ctx& c, Span sp) -> Node { return Node{static_cast<int>(c.at(sp.start))}; });
 
     std::string in = "x";
     Ctx ctx(in);
-    auto tree = g.parse_tree("a", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == static_cast<int>('x'));
+    auto ast = g.parse_ast("a", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == static_cast<int>('x'));
 }
 
 // ---------------------------------------------------------------------------
@@ -63,9 +78,9 @@ TEST_CASE("typed-action: TokenExpr keeps the matched element")
 
     std::string in = "x";
     Ctx ctx(in);
-    auto tree = g.parse_tree("a", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == static_cast<int>('x'));
+    auto ast = g.parse_ast("a", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == static_cast<int>('x'));
 }
 
 // ---------------------------------------------------------------------------
@@ -77,14 +92,13 @@ TEST_CASE("typed-action: sequence filters void terminal, unwraps single result")
     auto inner = (g["inner"] = g.token('1'));
     inner.set_action([](Ctx&, Span, char) -> Node { return Node{7}; });
 
-    // body: terminal('a') >> inner  →  result_of = Node (terminal filtered)
     auto h = (g["outer"] = g.terminal('a') >> g["inner"]);
     h.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value + 1}; });
     std::string in = "a1";
     Ctx ctx(in);
-    auto tree = g.parse_tree("outer", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == 8);
+    auto ast = g.parse_ast("outer", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -103,9 +117,9 @@ TEST_CASE("typed-action: sequence keeps tuple when two non-void children")
 
     std::string in = "a1";
     Ctx ctx(in);
-    auto tree = g.parse_tree("outer", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == static_cast<int>('a') + 9);
+    auto ast = g.parse_ast("outer", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == static_cast<int>('a') + 9);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,9 +141,9 @@ TEST_CASE("typed-action: zero-or-more yields vector")
 
     std::string in = "111";
     Ctx ctx(in);
-    auto tree = g.parse_tree("outer", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == 3);
+    auto ast = g.parse_ast("outer", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -154,17 +168,16 @@ TEST_CASE("typed-action: left-fold yields vector of (operator, operand) tuples")
 
     for (std::string in : {"1", "1+1", "1+1+1+1"}) {
         Ctx ctx(in);
-        auto tree = g.parse_tree("expr", ctx);
-        REQUIRE(tree);
-        // each '1' contributes 1; the '+' are not counted.
+        auto ast = g.parse_ast("expr", ctx);
+        REQUIRE(ast);
         int expected = static_cast<int>(in.size() + 1) / 2;
-        CHECK(tree->value.value == expected);
+        CHECK(ast->value == expected);
     }
 }
 
 // ---------------------------------------------------------------------------
 // 7. Passthrough alias: g["wrap"] = g["d"]  (no set_action) flows the value
-//    through at zero cost — the typed value is inherited via node->value.
+//    through at zero cost — the typed value is inherited via the fold.
 // ---------------------------------------------------------------------------
 TEST_CASE("typed-action: alias rule passes value through with no action")
 {
@@ -175,9 +188,9 @@ TEST_CASE("typed-action: alias rule passes value through with no action")
     g["wrap"] = g["d"]; // alias — no set_action
     std::string in = "1";
     Ctx ctx(in);
-    auto tree = g.parse_tree("wrap", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == 42);
+    auto ast = g.parse_ast("wrap", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == 42);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,17 +209,17 @@ TEST_CASE("typed-action: optional yields std::optional")
     {
         std::string in = "1";
         Ctx ctx(in);
-        auto tree = g.parse_tree("outer", ctx);
-        REQUIRE(tree);
-        CHECK(tree->value.value == 5);
+        auto ast = g.parse_ast("outer", ctx);
+        REQUIRE(ast);
+        CHECK(ast->value == 5);
     }
     SUBCASE("absent")
     {
         std::string in = "";
         Ctx ctx(in);
-        auto tree = g.parse_tree("outer", ctx);
-        REQUIRE(tree);
-        CHECK(tree->value.value == -1);
+        auto ast = g.parse_ast("outer", ctx);
+        REQUIRE(ast);
+        CHECK(ast->value == -1);
     }
 }
 
@@ -227,85 +240,137 @@ TEST_CASE("typed-action: alternation requires shared result type")
     for (auto [in, expect] :
          {std::pair<std::string, int>{"a", 10}, std::pair<std::string, int>{"b", 20}}) {
         Ctx ctx(in);
-        auto tree = g.parse_tree("outer", ctx);
-        REQUIRE(tree);
-        CHECK(tree->value.value == expect);
+        auto ast = g.parse_ast("outer", ctx);
+        REQUIRE(ast);
+        CHECK(ast->value == expect);
     }
 }
 
 // ===========================================================================
-// Hard-feature regression tests (NO prior coverage in the test suite — these
-// were the riskiest parts of the refactor: action results interacting with
-// packrat memoisation, left-recursion seed-grow, cut, and error recovery).
+// Defect regression cases (the two bugs this fold model fixes).
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// 10. Packrat memoisation + typed action: a sub-rule reached at the SAME
-//     position via two different parent paths is parsed (and actioned) ONCE;
-//     the second reach is a memo hit that returns the cached value.
-//     Grammar:  shared = d   ; outer = shared shared   on "11"
-//     'shared' is referenced twice but both refs point to the SAME NonTerminal,
-//     so the two references parse it at *different* positions (0 and 1) — that
-//     gives 2 action runs, not a memo hit. To force a memo hit we need the
-//     same (rule, position) pair twice. Use:
-//       a = d          (at pos 0)
-//       b = d          (a separate rule also matching '1' at pos 0 — different
-//                       rule, so NOT a memo hit either).
-//     The clean memo test: a single rule 'x' parsed, then re-referenced inside
-//     a failing alternative that backtracks. We just assert the value is the
-//     same on both reaches (the cached value), which proves memo correctness
-//     for actions regardless of run count.
+// 10. Defect 2: alternation-of-tokens. g.token('+') | g.token('-') has
+//     result_of = value_type (char). The old extractor read node->value
+//     (NodeType) for alternations → type mismatch / compile error. The fold
+//     dispatches on the winner's type, so the matched element is recovered
+//     from (ctx, span) regardless of the branch.
 // ---------------------------------------------------------------------------
-TEST_CASE("typed-action: packrat memo returns the cached value")
+TEST_CASE("typed-action: alternation-of-tokens (Defect 2)")
+{
+    Grammar<char, Node> g;
+    auto h = (g["op"] = g.token('+') | g.token('-'));
+    h.set_action([](Ctx&, Span, char op) -> Node { return Node{static_cast<int>(op)}; });
+
+    for (auto [in, expect] :
+         {std::pair<std::string, int>{"+", '+'}, std::pair<std::string, int>{"-", '-'}}) {
+        Ctx ctx(in);
+        auto ast = g.parse_ast("op", ctx);
+        REQUIRE(ast);
+        CHECK(ast->value == expect);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 11. Defect 1: move-only NodeType. The old extractor `return node->value;`
+//     copy-removed a move-only type → compile error. The fold owns child
+//     values transitively, so a move-only NodeType with unique_ptr children
+//     composes: by-value params AND vector<MoveOnly>.
+// ---------------------------------------------------------------------------
+TEST_CASE("typed-action: move-only NodeType (Defect 1)")
+{
+    Grammar<char, MoveNode> g;
+    auto d = (g["d"] = g.token('1'));
+    d.set_action([](MCtx&, Span, char) -> MoveNode { return MoveNode{1}; });
+
+    // outer = d >> *(('+' | '-') >> d)  →  F(MCtx&, Span, MoveNode, vector<tuple<char,MoveNode>>)
+    // The vector<tuple<char,MoveNode>> holds move-only MoveNode by value — the
+    // case that cannot compile under any copy-based or shared_ptr-free model
+    // except the fold.
+    auto h = (g["expr"] = g["d"] >> *((g.token('+') | g.token('-')) >> g["d"]));
+    h.set_action(
+        [](MCtx&, Span, MoveNode first, std::vector<std::tuple<char, MoveNode>> rest) -> MoveNode {
+            MoveNode acc{first.value};
+            for (auto& alt : rest) {
+                auto& rhs = std::get<1>(alt);
+                acc.value += rhs.value;
+            }
+            return acc;
+        });
+
+    for (std::string in : {"1", "1+1", "1+1-1+1"}) {
+        MCtx ctx(in);
+        auto ast = g.parse_ast("expr", ctx);
+        REQUIRE(ast);
+        int expected = static_cast<int>(in.size() + 1) / 2;
+        CHECK(ast->value == expected);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 12. Memo-collision / aliasing hazard (the case the std::move approach
+//     broke). Two successful parents reference the same sub-rule S at the
+//     same position via a backtracking alternation. Under std::move the first
+//     parent's action moved from node->value, leaving the memo-cached node
+//     moved-from for the second parent. The fold visits the FINAL tree once
+//     (the backtracked branch is gone), so each node is folded exactly once
+//     — no double-read, no moved-from hazard.
+//
+//     Grammar: shared = (P1 >> 'x') | P2 ;  P1 = S ;  P2 = S ;  S = token('s')
+//     On "s": P1 matches S (cached at (S,0)), then 'x' fails, branch
+//     backtracks. P2 memo-hits (S,0). In the final tree only P2→S survives.
+// ---------------------------------------------------------------------------
+TEST_CASE("typed-action: backtracking memo-collision folds each node once")
+{
+    Grammar<char, Node> g;
+    auto s = (g["S"] = g.token('s'));
+    s.set_action([](Ctx&, Span, char) -> Node { return Node{7}; });
+
+    // P1/P2 are plain aliases of S (no action) — the fold reaches S's action
+    // via the producer chain.
+    g["P1"] = g["S"];
+    g["P2"] = g["S"];
+
+    auto h = (g["shared"] = (g["P1"] >> g.terminal('x')) | g["P2"]);
+    h.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value + 1}; });
+
+    std::string in = "s";
+    Ctx ctx(in);
+    auto ast = g.parse_ast("shared", ctx);
+    REQUIRE(ast);
+    // P2 won (P1's 'x' failed): S's action returned 7, shared's action +1.
+    CHECK(ast->value == 8);
+}
+
+// ===========================================================================
+// Hard-feature regression (action + memo / cut / recovery). These use the
+// untyped hook where they read node->value directly; the typed path coexists.
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 13. Packrat memoisation + typed action: a sub-rule referenced twice composes
+//     with the fold (each reference folds independently from the final tree).
+// ---------------------------------------------------------------------------
+TEST_CASE("typed-action: packrat memo composes with the fold")
 {
     Grammar<char, Node> g;
     auto d = (g["d"] = g.token('1'));
     d.set_action([](Ctx&, Span, char) -> Node { return Node{7}; });
 
-    // outer = d d  → both d's action produce Node{7}; the two values must be
-    // equal and correct (the second d is at a different position, but its
-    // action still fires and produces the same value — memo for d at pos 1
-    // is independent of d at pos 0). This confirms actions + memo compose.
     auto h = (g["outer"] = g["d"] >> g["d"]);
     h.set_action([](Ctx&, Span, Node a, Node b) -> Node { return Node{a.value + b.value}; });
 
     std::string in = "11";
     Ctx ctx(in);
-    auto tree = g.parse_tree("outer", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.value == 14); // 7 + 7
+    auto ast = g.parse_ast("outer", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == 14); // 7 + 7
 }
 
 // ---------------------------------------------------------------------------
-// 11. Left-recursion seed-grow + typed action: the action fires on each
-//     growing seed; the final value reflects the longest match.
-// ---------------------------------------------------------------------------
-TEST_CASE("typed-action: left-recursion seed-grow produces final value")
-{
-    Grammar<char, int> g;
-    auto d = (g["d"] = g.token('1'));
-    d.set_action([](Context<char, int>&, Span, char) -> int { return 1; });
-
-    // expr = expr >> '+' >> d  |  d   (left-recursive)
-    g["expr"] = (g["expr"] >> g.terminal('+') >> g["d"]) | g["d"];
-    g["expr"].set_action(
-        [](Context<char, int>& /*ctx*/, const Context<char, int>::ParseTreeNodePtr& node) -> int {
-            // Recursively sum the integer values in the subtree. For the base case
-            // (just 'd') node->value is already 1 (set by d's action before expr's
-            // runs, since NonTerminal adopts the body node). For expr >> '+' >> d,
-            // the left expr's value and d's value are both children values.
-            return node->value; // passthrough: expr's node IS its body's node
-        });
-
-    std::string in = "1+1+1";
-    Context<char, int> ctx(in);
-    REQUIRE(g.parse("expr", ctx)); // explicit rule name — no start needed
-    REQUIRE(ctx.ended());
-}
-
-// ---------------------------------------------------------------------------
-// 12. Cut-committed failure does not pollute the action value: when a
-//     committed failure occurs, the rule's value is not set / does not leak.
+// 14. Cut-committed failure: the parse fails, parse_ast returns nullopt, no
+//     value is produced.
 // ---------------------------------------------------------------------------
 TEST_CASE("typed-action: cut-committed failure surfaces as parse failure")
 {
@@ -313,29 +378,24 @@ TEST_CASE("typed-action: cut-committed failure surfaces as parse failure")
     auto d = (g["d"] = g.token('1'));
     d.set_action([](Ctx&, Span, char) -> Node { return Node{1}; });
 
-    // outer: d >> cut >> 'x'   — on "1y", 'x' fails AFTER the cut commits.
-    // 'x' is a structural terminal (void) so the action only receives d's Node.
     auto h = (g["outer"] = g["d"] >> g.cut() >> g.terminal('x'));
     h.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value}; });
 
     std::string in = "1y";
     Ctx ctx(in);
-    bool ok = g.parse("outer", ctx); // explicit rule name
-    CHECK_FALSE(ok);                 // cut-committed failure → parse fails, no value produced
+    auto ast = g.parse_ast("outer", ctx);
+    CHECK_FALSE(ast); // cut-committed failure → no AST
 }
 
 // ---------------------------------------------------------------------------
-// 13. Error recovery: a recovered rule's action does NOT fire (the recovery
-//     path returns a transparent null tree, NonTerminal.h:127). We configure
-//     recovery to sync on ';', feed malformed input, and assert that the
-//     rule's typed action never ran.
+// 15. Error recovery: a recovered rule's action does NOT fire (the recovery
+//     path returns a transparent null tree). parse_ast returns nullopt for a
+//     null tree; the diagnostic is still recorded.
 // ---------------------------------------------------------------------------
 TEST_CASE("typed-action: recovered rule does not invoke the action")
 {
     Grammar<char, Node> g;
     int action_runs = 0;
-    // body expects '1' followed by ';' — but we feed '9;' so '1' fails.
-    // Wait: token('1') on '9' fails immediately, before cut — recovery fires.
     auto h = (g["outer"] = g.token('1') >> g.terminal(';'));
     h.set_action([&action_runs](Ctx&, Span, char) -> Node {
         ++action_runs;
@@ -345,8 +405,8 @@ TEST_CASE("typed-action: recovered rule does not invoke the action")
 
     std::string in = "9;";
     Ctx ctx(in);
-    bool ok = g.parse("outer", ctx);             // explicit rule name
-    CHECK(ok);                                   // recovery resyncs to ';', reports success
-    CHECK(action_runs == 0);                     // the action did NOT run (recovery path)
-    CHECK_FALSE(ctx.take_diagnostics().empty()); // a diagnostic was recorded
+    auto ast = g.parse_ast("outer", ctx);
+    CHECK_FALSE(ast);        // recovery → null tree → nullopt
+    CHECK(action_runs == 0); // the typed action did NOT run
+    CHECK_FALSE(ctx.take_diagnostics().empty());
 }

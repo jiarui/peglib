@@ -102,15 +102,16 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // Token factories (Model A: value-bearing terminals).
+    // Token factories (value-bearing terminals).
     //
     // token(...) is the value-keeping counterpart of terminal(...): identical
-    // match behaviour, but the matched element is carried in
-    // ParseTreeNode::token_value and surfaced to the typed action as a
-    // `value_type` argument (terminal(...) is void/filtered). Use token(...) for
-    // tokens whose identity the action needs (operators, significant
-    // elements); use terminal(...) for structural tokens that should never
-    // appear as action parameters (parentheses, keywords, separators).
+    // match behaviour, but TokenExpr builds a node whose slot survives into
+    // the fold, where the matched element is recovered from ctx.at(span.start)
+    // and surfaced to the typed action as a `value_type` argument (terminal(...)
+    // is void/filtered). Use token(...) for tokens whose identity the action
+    // needs (operators, significant elements); use terminal(...) for structural
+    // tokens that should never appear as action parameters (parentheses,
+    // keywords, separators).
     // -----------------------------------------------------------------------
 
     // token(predicate): match one element for which f(elem) is true; keep it.
@@ -337,10 +338,12 @@ public:
     }
 
     // Parse and return the parse tree (nullptr on failure or if the start
-    // rule is transparent). Useful for AST construction. Like parse(), this
-    // catches cut-committed failures and returns nullptr; retrieve the
-    // diagnostic via ctx.take_error(). Throws std::out_of_range if `rule`
-    // is not defined.
+    // rule is transparent). Returns structure for introspection/tooling
+    // (offsets, children, names). Typed-action values are NOT on the tree —
+    // use parse_ast to retrieve them. The untyped hook (m_action) still
+    // populates node->value for side-effect rules. Catches cut-committed
+    // failures and returns nullptr; retrieve the diagnostic via
+    // ctx.take_error(). Throws std::out_of_range if `rule` is not defined.
     typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -355,6 +358,26 @@ public:
         } catch (const ParseError&) {
             return nullptr;
         }
+    }
+
+    // Parse and fold the result tree into a typed AST value (the two-phase
+    // typed-action model). parse() builds the tree; fold_start walks it once
+    // via the START rule's typed fold, owning child values as locals and
+    // moving them up. Unconditionally move-safe — no value is stored at a
+    // shared location. Returns std::nullopt on parse failure or a null tree.
+    // Throws std::out_of_range if `rule` is not defined.
+    std::optional<NodeType> parse_ast(std::string_view rule, Context& ctx) const
+    {
+        auto it = m_rules.find(std::string{rule});
+        if (it == m_rules.end()) {
+            throw std::out_of_range{"Grammar::parse_ast: rule '" + std::string{rule} +
+                                    "' not found"};
+        }
+        auto tree = parse_tree(rule, ctx);
+        if (!tree)
+            return std::nullopt;
+        return parsers::fold_start<Context, typename Context::ParseTreeNodePtr>(
+            ctx, tree, it->second);
     }
 
     // Convenience: parse a string input using the start rule.

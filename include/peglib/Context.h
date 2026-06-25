@@ -107,13 +107,18 @@ struct Context
         std::size_t start_offset = 0; // byte offset of match start
         std::size_t end_offset = 0;   // byte offset past match end
         std::vector<std::shared_ptr<ParseTreeNode>> children;
-        NodeType value{}; // filled by semantic action
-        // Parallel channel for TokenExpr (typed-action Model A): the matched
-        // element/value itself, distinct from `value` (which is NodeType).
-        // Filled only by TokenExpr::parse; read only by the typed extractor
-        // for TokenExpr slots. Left nullopt for every other node, so existing
-        // value/transparent/memo conventions are unchanged.
-        std::optional<value_type> token_value;
+        NodeType value{}; // filled by the untyped semantic action (escape hatch)
+        // Producer rule (typed-fold dispatch). Stamped by NonTerminal::parse so
+        // the post-parse typed fold can find each node's registered action via
+        // pointer identity (no name/string lookup). Null for anonymous
+        // combinator nodes and for transparent rules with no typed action.
+        const NonTerminalType* producer = nullptr;
+        // Winning-branch index for an AlternationExpr's node (the node IS the
+        // winner's node, passed through). Stamped by parseAlt so the typed fold
+        // can dispatch on the actual winning branch's static type at runtime
+        // (the fold knows the branch TYPES but not which won). SIZE_MAX = not
+        // an alternation winner / not stamped.
+        std::size_t alt_winner = static_cast<std::size_t>(-1);
     };
     using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
 

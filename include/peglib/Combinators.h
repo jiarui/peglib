@@ -108,6 +108,10 @@ protected:
         if constexpr (Index < sizeof...(Children)) {
             auto result = std::get<Index>(m_children).parse(context);
             if (result.success) {
+                // Stamp the winning branch index so the typed fold can dispatch
+                // on the winner's static type at runtime.
+                if (result.tree)
+                    result.tree->alt_winner = Index;
                 return result;
             }
             if (context.cut()) {
@@ -342,8 +346,6 @@ predicate_parse_impl(Context& context, ChildOp parse_child, bool negate)
 // into this indexed form would introduce a runtime branch on `i > 0` for the
 // skipper inside what is currently a fully-inlined recursion, destroying the
 // static DSL's devirtualization (see TODO.md "ChildContainer Concept" row).
-// This impl is the indexed-child counterpart that future DynExpr types
-// (DynCaptureExpr, DynRecoverExpr, …) can reuse.
 //
 // `parse_at` is any callable returning ParseResult for child `i`.
 // `count` is the number of children. The skipper is run between adjacent

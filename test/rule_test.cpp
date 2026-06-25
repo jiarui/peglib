@@ -440,14 +440,14 @@ TEST_CASE("semantic-action-fires-on-match")
     Grammar<> g;
     int matches = 0;
     const std::string input = "a";
-    Context context(input);
+    Context<char> context(input);
     auto grammar = (g["grammar"] = g.terminal('a'));
-    grammar.set_action([&matches](Context&, peg::Span) -> std::monostate {
+    grammar.set_action([&matches](Context<char>&, peg::Span) -> std::monostate {
         matches++;
         return {};
     });
-    bool ok = g.parse("grammar", context);
-    CHECK(ok);
+    auto ast = g.parse_ast("grammar", context); // typed actions run in the post-parse fold
+    REQUIRE(ast);
     CHECK(context.ended());
     CHECK(matches == 1);
 }

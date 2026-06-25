@@ -6,55 +6,104 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added — Typed semantic actions (Model A)
+### Removed — Dynamic PEG (runtime grammar-text compilation)
 
-Compile-time type-checked semantic actions for the static DSL path. The old
-untyped `SemanticAction = std::function<NodeType(Context&, ParseTreeNodePtr)>`
-forced every action to hand-search the parse tree for sub-results by name
+The runtime PEG-text layer is removed: `GrammarCompiler`, `DynExpr`, the
+bootstrapping `MetaGrammar`, and `PegAst`/`PegAstNode`. peglib is now a
+**pure static combinator library** — grammars are built from C++ combinators
+(`g["r"] = g.token('+') >> g["x"]`), not parsed from `.peg` text at runtime.
+
+This removes ~2900 lines of a parallel (untyped, tree-walk) expression
+hierarchy that no static-grammar user needed, and — more importantly — removes
+the static/dynamic coexistence collision that blocked move-only typed actions.
+The dynamic path's values were built by Flavor-1 tree-walk (untyped actions
+reading `node->children[i]->value` during parse), which fundamentally cannot
+interleave with the typed fold (which computes values post-parse). Removing it
+lets the typed model collapse to a single, clean two-phase design (below).
+
+- Deleted headers: `DynExpr.h`, `GrammarCompiler.h`, `MetaGrammar.h`,
+  `PegAst.h`.
+- Deleted tests: `dynexpr_test`, `meta_grammar_test`, `self_parse_test`,
+  `from_string_test`, `peg_text_extensions_test`, and the `GrammarCompiler`
+  subcases of `skipper_test` / `recursive_leak_test`.
+- The untyped `Rule::set_action` hook is **retained** as an escape hatch for
+  side-effect actions (e.g. `lua_lex`'s tokenization), but no longer has a
+  dynamic-grammar consumer.
+
+### Added — Typed semantic actions (pure two-phase fold model)
+
+Compile-time type-checked semantic actions for the static DSL. The old untyped
+`SemanticAction = std::function<NodeType(Context&, ParseTreeNodePtr)>` forced
+every action to hand-search the parse tree for sub-results by name
 (`find_named`/`pass_through`) — fragile (silent null on typo), O(subtree) per
 action, and impossible to reason about positionally. The new typed API derives
 each rule's result type from its body at compile time and hands the action
-already-typed child results, positionally — no tree search, wrong arity/type
-is a hard compile error.
+already-typed child results, positionally — no tree search, wrong arity/type is
+a hard compile error.
 
-- **`RuleHandle<Context, ExprType>`**: `g["r"] = body` now returns a typed
-  handle carrying the body's static type. `h.set_action<F>` compile-time-checks
-  that `F` is invocable as `F(Context&, Span, Args...)` where `Args` is the
-  body's filtered result type, positionally unpacked:
+The model is **two-phase and unconditionally move-safe**:
+
+1. **Parse phase** — `parse()` builds the tree (structure + offsets), memoized,
+   with `shared_ptr` nodes (required for backtrack-safety). Typed actions do
+   **not** run during parse.
+2. **Fold phase** — `parse_ast()` walks the final (acyclic) tree **once** and
+   builds the AST bottom-up. Each child value is an owned local, moved up to
+   the parent exactly once. No value is ever stored at a shared/multi-reader
+   location, so a **move-only NodeType** (e.g. an AST with `unique_ptr`
+   children, like yueshi's) composes freely — `vector<MoveOnly>`,
+   `optional<MoveOnly>`, `tuple<char, MoveNode>` all work, with natural
+   by-value action signatures and **no `shared_ptr<AstNode>`** required.
+
+This resolves two defects that blocked yueshi (a move-only AST over a
+token-level grammar):
+- **Defect 1 (move-only NodeType):** the old extractor `return node->value;`
+  copy-removed a move-only type → compile error. The fold owns values
+  transitively, so move-only composes. Regression: `typed-action: move-only
+  NodeType (Defect 1)`.
+- **Defect 2 (alternation-of-tokens):** the old extractor read `node->value`
+  (the `NodeType` channel) for alternations, but a `token | token` winner's
+  value is a `value_type`. The fold dispatches on the **winning branch's**
+  static type via a runtime `alt_winner` index stamped during parse, so there
+  is no wrong-channel read. Regression: `typed-action: alternation-of-tokens
+  (Defect 2)`.
+
+API surface:
+- **`RuleHandle<Context, ExprType>`**: `g["r"] = body` returns a typed handle
+  carrying the body's static type. `h.set_action<F>` compile-time-checks that
+  `F` is invocable as `F(Context&, Span, Args...)` where `Args` is the body's
+  filtered result type, positionally unpacked:
     - void body (`g.terminal`, `g.cut`, predicates)  → `F(Context&, Span)`
     - single result                                  → `F(Context&, Span, T)`
     - multi result                                   → `F(Context&, Span, T0, T1, ...)`
-  Internally type-erases into the existing `NonTerminal::m_action`, so packrat
-  memoisation, cut, and error recovery are unchanged.
+  `set_action` registers the action as a **typed fold** on the producing
+  `NonTerminal` (NOT on `m_action`) — the action runs only in the fold.
 - **`Span`**: `{ start, end }` mirroring `ParseTreeNode` offsets; char-level
   Context → byte offsets, token-level → token indices (read the token via
   `ctx.at(sp.start)`).
 - **`g.terminal(x)` vs `g.token(x)`** (terminal result model):
     - `g.terminal(x)` → `void` (filtered; structural tokens like parentheses
       and keywords never appear as action parameters — no "drop" combinator).
-    - `g.token(x)`    → `value_type` (kept; operator/element identity is
-      visible to left-fold actions via a parallel `ParseTreeNode::token_value`
-      field).
-- **`Rule::set_action` (untyped) retained**: the dynamic path
-  (`GrammarCompiler`/`DynExpr`) and ad-hoc binding keep the untyped hook. To
-  attach a typed action, capture the assignment result:
-  `auto h = (g["r"] = body); h.set_action(...);` (the typed API lives only on
-  `RuleHandle`; `g["r"].set_action(...)` is untyped).
-- **`result_of<E>`, `extract<E>`, `action_matches`** (`include/peglib/ResultType.h`,
-  new): the metaprogramming backbone — per-expression result-type derivation,
-  the extractor (inverse of tree-building), and the arity/type concept.
-- **`MetaGrammar` migrated**: all `find_named`/`has_named`/`collect_named`/
-  `pass_through` helpers deleted; the meta-grammar's actions now use typed/
-  untyped hooks positionally. `meta_grammar_test` passes byte-for-byte.
+    - `g.token(x)`    → `value_type` (kept; the matched element is recovered
+      by the fold from `ctx.at(span.start)` — no value is stashed on the node).
+- **`Grammar::parse_ast(rule, ctx) -> std::optional<NodeType>`**: the value
+  entry point. Parses then folds. `parse_tree` returns structure for
+  introspection/tooling (no typed-action values on the tree); `parse` returns
+  boolean success.
+- **`result_of<E>`, `fold<E>`, `action_matches`** (`include/peglib/ResultType.h`):
+  per-expression result-type derivation, the post-parse fold driver, and the
+  arity/type concept.
+- `ParseTreeNode::token_value` **removed** — the token's matched element is
+  recovered from the span at fold time, not stashed on the node.
 
 #### Migration notes (typed actions)
 - `auto h = (g["r"] = body);` then `h.set_action([](Context& c, Span sp, ...) {...});`
+- Retrieve the result via `g.parse_ast("r", ctx)` → `std::optional<NodeType>`.
 - Structural tokens (parens, keywords, separators): `g.terminal(x)` — they
   won't appear as action parameters.
 - Operator/value tokens you need in the action: `g.token(x)`.
 - A rule referenced via `g["name"]` is always `node_type`-typed (its body's
   structure is opaque at the reference site), so transparent sub-rules appear
-  as positional (possibly-null) `NodeType` slots.
+  as positional `NodeType` slots.
 
 ### Changed — Token-level grammars with custom NodeType
 

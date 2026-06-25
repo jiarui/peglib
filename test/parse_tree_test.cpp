@@ -54,9 +54,9 @@ TEST_CASE("value-stack-custom-node-type")
         return IntNode{c - '0'};
     });
 
-    auto tree = g.parse_tree("num", context);
-    REQUIRE(tree);
-    CHECK(tree->value.value == 4);
+    auto ast = g.parse_ast("num", context);
+    REQUIRE(ast);
+    CHECK(ast->value == 4);
 }
 
 TEST_CASE("value-stack-clear")
@@ -64,7 +64,7 @@ TEST_CASE("value-stack-clear")
     // Originally tested ctx.clear_stack(). The value stack no longer
     // exists; each parse produces an independent ParseResult.tree with no
     // shared mutable state to clear. Verify that successive parses do not
-    // interfere with one another's trees.
+    // interfere with one another's AST values.
     using MyContext = Context<char, IntNode>;
 
     Grammar<char, IntNode> g;
@@ -76,18 +76,18 @@ TEST_CASE("value-stack-clear")
 
     std::string input1 = "1";
     MyContext ctx1(input1);
-    auto tree1 = g.parse_tree("num", ctx1);
-    REQUIRE(tree1);
-    CHECK(tree1->value.value == 1);
+    auto ast1 = g.parse_ast("num", ctx1);
+    REQUIRE(ast1);
+    CHECK(ast1->value == 1);
 
     std::string input2 = "2";
     MyContext ctx2(input2);
-    auto tree2 = g.parse_tree("num", ctx2);
-    REQUIRE(tree2);
-    CHECK(tree2->value.value == 2);
+    auto ast2 = g.parse_ast("num", ctx2);
+    REQUIRE(ast2);
+    CHECK(ast2->value == 2);
 
-    // tree1 is unaffected by the second parse — no shared stack to clear.
-    CHECK(tree1->value.value == 1);
+    // ast1 is unaffected by the second parse — independent values.
+    CHECK(ast1->value == 1);
 }
 
 TEST_CASE("value-stack-action-result-pushed")
@@ -107,15 +107,15 @@ TEST_CASE("value-stack-action-result-pushed")
         return IntNode{c - '0'};
     });
 
-    // Parse two digits in succession; each parse yields its own tree whose
+    // Parse two digits in succession; each parse yields its own AST whose
     // value is the action's return value.
-    auto first = g.parse_tree("num", context);
+    auto first = g.parse_ast("num", context);
     REQUIRE(first);
-    CHECK(first->value.value == 4);
+    CHECK(first->value == 4);
 
-    auto second = g.parse_tree("num", context);
+    auto second = g.parse_ast("num", context);
     REQUIRE(second);
-    CHECK(second->value.value == 2);
+    CHECK(second->value == 2);
 }
 
 TEST_CASE("value-stack-monostate-action-returns-default")
@@ -129,9 +129,9 @@ TEST_CASE("value-stack-monostate-action-returns-default")
     auto rule = (g["rule"] = g.terminal('a'));
     rule.set_action([](DefaultCtxt&, peg::Span) { return std::monostate{}; });
 
-    auto tree = g.parse_tree("rule", context);
-    REQUIRE(tree);
-    static_assert(std::is_same_v<decltype(tree->value), std::monostate>);
+    auto ast = g.parse_ast("rule", context);
+    REQUIRE(ast);
+    static_assert(std::is_same_v<decltype(*ast), std::monostate&>);
 }
 
 // ---------------------------------------------------------------------------
@@ -224,8 +224,8 @@ TEST_CASE("value-stack-rollback-on-sequence-failure")
         auto tree = g.parse_tree("fail_seq", ctx);
         REQUIRE(tree);
         REQUIRE(tree->children.size() == 2);
-        CHECK(tree->children[0]->value.value == 1); // digit '1'
-        CHECK(tree->children[1]->value.value == 2); // nonzero '2'
+        CHECK(tree->children[0]->name == "digit");   // digit '1'
+        CHECK(tree->children[1]->name == "nonzero"); // nonzero '2'
     }
     SUBCASE("failed sequence produces no tree")
     {
@@ -256,23 +256,23 @@ TEST_CASE("value-stack-rollback-on-alternation-failure")
         auto tree = g.parse_tree("seq_ab", ctx);
         REQUIRE(tree);
         REQUIRE(tree->children.size() == 2);
-        // First a_or_b chose a_node (IntNode{1}), second chose b_node (IntNode{2}).
-        CHECK(tree->children[0]->value.value == 1);
-        CHECK(tree->children[1]->value.value == 2);
+        // First a_or_b chose a_node, second chose b_node (by name).
+        CHECK(tree->children[0]->name == "a_or_b");
+        CHECK(tree->children[1]->name == "a_or_b");
     }
 
     SUBCASE("failed first alternative rolls back before retry")
     {
         // Input "ba": first a_or_b tries a_node, fails ('b'), then tries
-        // b_node, succeeds (IntNode{2}). Second a_or_b tries a_node,
-        // succeeds (IntNode{1}). Total: 2 children with values {2, 1}.
+        // b_node, succeeds. Second a_or_b tries a_node, succeeds. Total:
+        // 2 children, both a_or_b.
         std::string input = "ba";
         MyContext ctx(input);
         auto tree = g.parse_tree("seq_ab", ctx);
         REQUIRE(tree);
         REQUIRE(tree->children.size() == 2);
-        CHECK(tree->children[0]->value.value == 2);
-        CHECK(tree->children[1]->value.value == 1);
+        CHECK(tree->children[0]->name == "a_or_b");
+        CHECK(tree->children[1]->name == "a_or_b");
     }
 }
 

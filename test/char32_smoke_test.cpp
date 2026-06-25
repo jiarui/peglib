@@ -3,9 +3,8 @@
 // correctly (UTF-8 / \UNNNNNNNN) instead of truncating them to char.
 //
 // This is the user-visible payoff of the char-debt cleanup: a non-char
-// value_type is now first-class for matching AND error reporting. The
-// PEG-text compilation layer (GrammarCompiler) still produces char-only
-// grammars — Tier 2/3 (UTF-8 decoder, codepoint-aware '.') is future work.
+// value_type is now first-class for matching AND error reporting. Tier 2/3
+// (UTF-8 decoder, codepoint-aware '.') is future work.
 
 #include "peglib.h"
 

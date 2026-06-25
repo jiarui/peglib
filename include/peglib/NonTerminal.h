@@ -39,6 +39,16 @@ public:
     using ParseTreeNodePtr = typename ParsingExpr<Context, NonTerminal<Context>>::ParseTreeNodePtr;
     using NodeType = typename Context::node_type;
 
+    using SemanticAction = typename ParsingExpr<Context, NonTerminal<Context>>::SemanticAction;
+
+    // Typed fold: the post-parse value builder registered by
+    // RuleHandle::set_action<F>. Empty for untyped/transparent rules (which
+    // are folded via node->value fallback). Invoked by the fold driver
+    // (ResultType.h fold_rule) when a node->producer points here.
+    using TypedFold = std::function<NodeType(Context&, const ParseTreeNodePtr&)>;
+    void set_typed_fold(TypedFold f) { m_typed_fold = std::move(f); }
+    [[nodiscard]] const TypedFold& typed_fold() const noexcept { return m_typed_fold; }
+
     NonTerminal() = default;
 
     template<typename ExprType>
@@ -49,6 +59,11 @@ public:
     NonTerminal(const NonTerminal&) = delete;
     NonTerminal& operator=(const NonTerminal&) = delete;
 
+    // Assign a body expression. The typed fold is registered separately by
+    // RuleHandle::set_action (which captures the body's static ExprType). A
+    // rule with no typed action is either transparent (the fold follows
+    // node->producer to an action-bearing rule) or untyped (folded via
+    // node->value).
     template<typename ExprType>
     NonTerminal& operator=(const ParsingExpr<Context, ExprType>& rhs)
     {
@@ -145,6 +160,12 @@ public:
             node = std::make_shared<typename Context::ParseTreeNode>();
         }
         node->name = m_name;
+        // Stamp producer only if the node doesn't already have one: a rule
+        // that adopts its body's node (alias, alternation-passthrough) must
+        // NOT clobber the innermost producer, or the typed fold loses the
+        // reference to the rule whose action built the value.
+        if (!node->producer)
+            node->producer = this;
         node->start_offset = start_pos;
         node->end_offset = context.mark();
 
@@ -214,6 +235,7 @@ protected:
     std::string m_name;
     std::string m_label;
     RecoverSpec<typename Context::value_type> m_recover;
+    TypedFold m_typed_fold; // registered by RuleHandle::set_action (typed path)
 };
 
 // Forward declaration: Rule::operator= returns RuleHandle (defined after Rule).
@@ -293,12 +315,13 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // NOLINTNEXTLINE(performance-noexcept-move-constructor)
     auto operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>;
 
-    // Untyped semantic-action hook (dynamic-path escape hatch). The typed
-    // action API lives on RuleHandle (the return value of operator=); to
-    // attach a compile-time-checked action, capture the assignment result:
+    // Untyped semantic-action hook (escape hatch for side-effect actions).
+    // The typed action API lives on RuleHandle (the return value of
+    // operator=); to attach a compile-time-checked action, capture the
+    // assignment result:
     //   auto h = (g["r"] = body);  h.set_action([](Context&, Span, ...){...});
-    // This overload here is kept for the dynamic (GrammarCompiler) path and
-    // for ad-hoc untyped binding.
+    // This overload is for ad-hoc untyped binding where the typed path is
+    // not needed (e.g. side-effect tokenization in lua_lex).
     Rule& set_action(SemanticAction action)
     {
         m_impl->set_action(std::move(action));
@@ -328,8 +351,8 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
     [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
 
-    // Direct access to the underlying NonTerminal (for Grammar internals and
-    // GrammarCompiler). Non-owning.
+    // Direct access to the underlying NonTerminal (for Grammar internals).
+    // Non-owning.
     [[nodiscard]] const Impl* impl() const noexcept { return m_impl; }
     [[nodiscard]] Impl* impl() noexcept { return m_impl; }
 
@@ -364,7 +387,6 @@ struct RuleHandle
 {
     using Impl = NonTerminal<Context>;
     using NodeType = typename Context::node_type;
-    using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
 
     RuleHandle(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
 
@@ -374,38 +396,35 @@ struct RuleHandle
 
     // Typed semantic-action attachment.
     //
-    // Compile-time checks that F is invocable as (Context&, Span, Args...) where
+    // Compile-time checks F is invocable as (Context&, Span, Args...) where
     // Args is the body's filtered result type, positionally unpacked:
-    //   - void body        : F(Context&, Span)
-    //   - single-result    : F(Context&, Span, T)
-    //   - multi-result     : F(Context&, Span, T0, T1, ...)
-    // On mismatch the static_assert below fires with a readable message.
-    // Internally type-erases into a std::function<NodeType(Context&, ParseTreeNodePtr)>
-    // via the extractor bridge — so NonTerminal's existing action-invocation
-    // path (NonTerminal.h:153) and packrat memoisation are unchanged.
+    //   - void body     : F(Context&, Span)
+    //   - single-result : F(Context&, Span, T)
+    //   - multi-result  : F(Context&, Span, T0, T1, ...)
+    //
+    // Registers the typed fold on the underlying NonTerminal (NOT on m_action):
+    // the action does NOT run during parse. It runs in the post-parse typed
+    // fold (Grammar::parse_ast → fold_start → this fold), where child values
+    // are owned locals moved up once — unconditionally move-safe. This is the
+    // single value path for typed rules; consumers retrieve results via
+    // parse_ast, not via node->value. Parse/memo/cut/recovery are unchanged.
     template<typename F>
     RuleHandle& set_action(F f)
     {
         using R = parsers::result_of_t<ExprType>;
-        // flat_args_t<R> (a free alias in ResultType.h) expands the collapsed
-        // result back into the flat per-argument typelist the action must
-        // accept: void→<>, scalar T→<T>, tuple<T...>→<T...>.
         static_assert(parsers::action_matches<F, Context, parsers::flat_args_t<R>>,
                       "peglib: typed action signature does not match the rule body's "
                       "result type (positional, no projection). The action must be "
                       "invocable as F(Context&, Span, <body-result-args>...).");
 
-        // Type-erase: bridge closure that extract<ExprType> + invokes f.
-        // NonTerminal's action-invocation path (NonTerminal.h:153) and packrat
-        // memoisation are unchanged — the stored std::function has the same
-        // signature as an untyped action.
-        SemanticAction erased =
+        typename Impl::TypedFold typed_fold =
             [f = std::move(f)](Context& ctx,
                                const typename Context::ParseTreeNodePtr& n) -> NodeType {
-            return parsers::invoke_action<F, ExprType, Context, typename Context::ParseTreeNodePtr>(
-                f, ctx, n);
+            return parsers::
+                fold_and_invoke<F, ExprType, Context, typename Context::ParseTreeNodePtr>(
+                    f, ctx, n);
         };
-        m_impl->set_action(std::move(erased));
+        m_impl->set_typed_fold(std::move(typed_fold));
         return *this;
     }
 

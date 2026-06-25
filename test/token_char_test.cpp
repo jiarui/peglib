@@ -345,10 +345,10 @@ TEST_CASE("non-trivial-token-end-to-end-parse-with-semantic-action")
     std::vector<RealTok> input{RealTok{1, std::string{"x"}}, RealTok{5, 42}, RealTok{2, 3.14}};
     Context<RealTok, RealNode> ctx{input};
 
-    auto tree = g.parse_tree("group", ctx);
-    REQUIRE(tree);
-    CHECK(tree->value.matched_id == 1);
-    CHECK(tree->value.lexeme == "group");
+    auto ast = g.parse_ast("group", ctx);
+    REQUIRE(ast);
+    CHECK(ast->matched_id == 1);
+    CHECK(ast->lexeme == "group");
     CHECK(ctx.ended()); // whole stream consumed
 }
 

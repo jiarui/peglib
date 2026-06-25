@@ -55,10 +55,6 @@ add_executable(peglib_test
     sourcemap_test.cpp
     parse_tree_test.cpp
     error_test.cpp
-    dynexpr_test.cpp
-    meta_grammar_test.cpp
-    self_parse_test.cpp
-    from_string_test.cpp
     recursive_leak_test.cpp
     negative_path_test.cpp
     char32_smoke_test.cpp
@@ -66,7 +62,6 @@ add_executable(peglib_test
     skipper_test.cpp
     to_dot_test.cpp
     recover_test.cpp
-    peg_text_extensions_test.cpp
     typed_action_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)

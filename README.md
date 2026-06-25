@@ -2,18 +2,17 @@
 
 Header-only Parsing Expression Grammar (PEG) library in C++20, featuring packrat
 memoization, left-recursion support, a cut operator for committed choice,
-structured error reporting, runtime text-grammar compilation, and a post-parse
-tree-based action model for AST construction.
+structured error reporting, automatic whitespace skipping, and a post-parse
+typed-fold action model for AST construction with unconditional move-safety.
 
 ## Status
 
-Core combinators, infrastructure, Grammar API, textual grammar format, and
-automatic whitespace handling are complete. Phase 2 delivers
-`GrammarCompiler::from_string()` — compile PEG text at runtime into a working
-`Grammar<>`. Phase 3 delivers `set_skipper` + `lexeme` (eliminates manual
-whitespace threading) plus `Grammar::to_dot()` for Graphviz visualization.
-The roadmap now focuses on **error recovery, full tracing/profiling, and
-parameterized rules** — see [TODO.md](TODO.md).
+Core combinators, infrastructure, Grammar API, and automatic whitespace handling
+are complete. Typed semantic actions use a **pure two-phase fold model**: `parse`
+builds the tree (memoized), `parse_ast` folds it once into owned, move-safe values
+— a move-only `NodeType` (e.g. an AST with `unique_ptr` children) composes with
+natural by-value action signatures and no `shared_ptr<AstNode>`. The roadmap now
+focuses on **full tracing/profiling and parameterized rules** — see [TODO.md](TODO.md).
 
 Application-specific work built on peglib lives in consumer projects.
 [yueshi](https://github.com/jiarui/yueshi) is a Lua 5.4 frontend (lexer → typed
@@ -23,33 +22,32 @@ real-world case study.
 ## Features
 
 - **Header-only**, C++20, no external runtime dependencies.
-- **Two ways to define grammars**:
-  - **C++ combinators**: `>>` (sequence), `|` (choice), `*` / `+` / `-` /
-    `n*` (repetition / optional), `!` / `&` (negation / lookahead), plus the
-    `Grammar` member factories `g.terminal(...)`, `g.terminalSeq(...)`,
-    `g.empty()`, `g.cut()` (committed choice), `g.lexeme(...)` (no-skip
-    wrapper). Every expression a `Grammar` builds carries that Grammar's
-    `Context` (and thus `NodeType`), so the operators compose and assign into
-    rules without any explicit Context arguments.
-  - **Textual PEG format**: `GrammarCompiler::from_string("Expr <- Term ('+' Term)*")`
-    compiles PEG text at runtime into a `Grammar<>`. Supports the Ford 2004
-    baseline plus peglib extensions: `~` (cut), `< e >` (lexeme),
-    `%recover({';'})` / `%recover(eof)` / `%recover(eol)` (error recovery).
+- **Static C++ combinator grammars**: `>>` (sequence), `|` (choice), `*` / `+` /
+  `-` / `n*` (repetition / optional), `!` / `&` (negation / lookahead), plus the
+  `Grammar` member factories `g.terminal(...)`, `g.terminalSeq(...)`, `g.token(...)`,
+  `g.empty()`, `g.cut()` (committed choice), `g.lexeme(...)` (no-skip wrapper).
+  Every expression a `Grammar` builds carries that Grammar's `Context` (and thus
+  `NodeType`), so the operators compose and assign into rules without any explicit
+  Context arguments.
 - **Packrat memoization** for linear-time parsing.
 - **Left-recursion** support via seed-grow.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
   throw `peg::ParseError` (a hard error); regular failures are queryable via
   `Context::take_error()`.
 - **Semantic actions, typed or untyped**:
-  - **Typed (static DSL)**: `auto h = (g["r"] = body); h.set_action([](Context&,
-    Span, /*typed child results*/...) {...});` — compile-time-checked against
-    the body's derived result type, positional, no tree search. `g.terminal(x)`
-    is filtered (void; structural tokens never appear as params); `g.token(x)`
-    keeps the matched element so operator identity is visible to left-folds.
-  - **Untyped (both paths)**: `g["r"].set_action([](Context&, ParseTreeNodePtr)
-    {...})` — the action hand-reads the tree. Required for the dynamic
-    (`GrammarCompiler`) path; available as an escape hatch on the static path.
-  No value stack — the tree flows through return values.
+  - **Typed (the primary API)**: `auto h = (g["r"] = body); h.set_action([](Context&,
+    Span, /*typed child results*/...) {...});` — compile-time-checked against the
+    body's derived result type, positional, no tree search. `g.terminal(x)` is
+    filtered (void; structural tokens never appear as params); `g.token(x)` keeps
+    the matched element (recovered from the span at fold time) so operator identity
+    is visible to left-folds. Retrieve results via `g.parse_ast("r", ctx) ->
+    std::optional<NodeType>`. Unconditionally move-safe — move-only `NodeType`
+    composes (`vector<MoveOnly>`, `optional<MoveOnly>`) with no `shared_ptr`.
+  - **Untyped (escape hatch)**: `g["r"].set_action([](Context&, ParseTreeNodePtr)
+    {...})` — the action hand-reads the tree and writes `node->value` during parse.
+    Retained for side-effect actions (e.g. tokenization); not the value path for
+    typed rules.
+  No value stack — the fold flows through owned returns.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
   `file:line:col: error: expected A or B` messages. A separate multi-diagnostic
@@ -102,15 +100,10 @@ real-world case study.
   fixed-size `std::array` per buffer page (compile-time `PageSize`, no per-page
   heap allocation) — suitable for freestanding use and with better cache
   locality than the old `std::vector` buffers.
-- **Parses its own grammar spec**: the C++ meta-grammar can parse `meta/peg.peg`,
-  and `GrammarCompiler` can compile that spec into a working grammar. (A full
-  bootstrap-equivalence test — compiled grammar produces the same AST as the
-  C++ meta-grammar — is a planned follow-up; today both paths are validated
-  independently.)
 
 ## Quick Start
 
-### Textual grammar (recommended)
+### A minimal grammar
 
 ```cpp
 #include "peglib.h"
@@ -119,13 +112,12 @@ real-world case study.
 using namespace peg;
 
 int main() {
-    auto g = GrammarCompiler::from_string(R"(
-        Expr   <- Term ('+' Term)*
-        Term   <- Factor ('*' Factor)*
-        Factor <- [0-9]+ / '(' Expr ')'
-    )");
+    Grammar<> g;
+    g["number"] = +g.terminal('0', '9');
+    g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
+    g.set_start("expr");
 
-    std::string input = "1+2*3";
+    std::string input = "1+2+3";
     Context<> ctx{input};
     if (g.parse(ctx)) {
         std::cout << "parsed successfully\n";
@@ -138,15 +130,35 @@ int main() {
 }
 ```
 
-### C++ combinator grammar
+`g.parse_string("1+2+3")` is a convenience that builds the `Context` for you.
+
+### Building a typed AST (the fold model)
 
 ```cpp
-Grammar<> g;
-g["number"] = +g.terminal('0', '9');
-g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
-g.set_start("expr");
-g.parse_string("1+2+3");  // convenience: creates a Context internally
+struct Ast { int value = 0; };
+using Ctx = Context<char, Ast>;
+
+Grammar<char, Ast> g;
+auto num = (g["num"] = g.terminal('0', '9'));
+num.set_action([](Ctx& c, Span sp) -> Ast { return Ast{c.at(sp.start) - '0'}; });
+
+auto add = (g["add"] = g["num"] >> *(g.token('+') >> g["num"]));
+add.set_action([](Ctx&, Span, Ast first, std::vector<std::tuple<char, Ast>> rest) -> Ast {
+    int acc = first.value;
+    for (auto& [ /*op*/, rhs ] : rest) acc += rhs.value;
+    return Ast{acc};
+});
+
+std::string in = "1+2+3";
+Ctx ctx(in);
+auto ast = g.parse_ast("add", ctx);   // -> std::optional<Ast>
+if (ast) std::cout << ast->value << "\n";   // 6
 ```
+
+`g.token('+')` keeps the matched element (visible to the action as `char`);
+`g.terminal('+')` would be filtered out (void). `parse_ast` runs the post-parse
+fold — owned, move-safe values. A move-only `NodeType` composes with no
+`shared_ptr`.
 
 ### Automatic whitespace skipping
 
@@ -180,49 +192,40 @@ token's characters stay contiguous (`"12 34"` is two numbers, not `"1234"`).
 To disable auto-skip globally, call `clear_skipper()` (or never call
 `set_skipper` — that is the default).
 
-### Text-grammar extensions: cut, lexeme, recovery
+### Cut, lexeme, and recovery (C++ API)
 
-The textual PEG format supports three peglib-specific constructs beyond the
-Ford 2004 baseline. They mirror the C++ combinator API (`g.cut()`,
-`g.lexeme(...)`, `Rule::set_recovery`) so the two surfaces have identical power
-for these features.
+Three peglib-specific features beyond the PEG baseline:
 
-**Cut `~`** — commits the current alternative/repetition scope. After a cut,
-failure in the same scope throws `peg::ParseError` (hard failure). Used inside
-an ordered choice to express "once we've matched this prefix, we're committed":
+**Cut `g.cut()`** — commits the current alternative/repetition scope. After a
+cut, failure in the same scope throws `peg::ParseError` (hard failure). Used
+inside an ordered choice to express "once we've matched this prefix, we're
+committed":
 
-```peg
-# Once 'if' matches, this must be an if-statement — don't backtrack into Stmt
-Stmt <- ('if' ~ Cond 'then' Stmt) / Expr / ...
+```cpp
+g["stmt"] = (g.token('i') >> g.cut() >> cond >> g.token(':') >> g["stmt"])
+          | g["expr"];
+// Once 'i' matches, this must be an if-statement — don't backtrack into expr.
 ```
 
-A standalone `~` outside any Alternation/Repetition scope is a no-op (the cut
-flag is dropped on an empty scope stack).
+A standalone cut outside any Alternation/Repetition scope is a no-op.
 
-**Lexeme `< e >`** — disables auto-skip for the inner expression. With no
-skipper configured (the `GrammarCompiler` default), this is a no-op; the
-plumbing exists so a future `%whitespace` directive can install a skipper
-without changing existing grammars. `<` is disambiguated from `<-`
-(LEFTARROW) by a `!'-'` lookahead.
+**Lexeme `g.lexeme(...)`** — disables auto-skip for the inner expression, so a
+token's characters stay contiguous (`"12 34"` is two numbers, not `"1234"`).
 
-```peg
-Number <- < [0-9]+ >     # contiguous digits (no-op until %whitespace exists)
+**Recovery `Rule::set_recovery(spec)`** (or `peg::recover(rule, spec)` sugar) —
+attaches a sync spec to a rule. On body failure, the rule scans forward to the
+next sync token, records a diagnostic at the original failure position, consumes
+the sync token, and reports recovered success:
+
+```cpp
+g["stmt"].set_recovery(peg::recover_set<char>({';', '}'}), "stmt");
+g["block"].set_recovery(peg::recover_eof(), "block");
 ```
 
-**Recovery `%recover(spec)`** — a definition-level suffix that attaches a
-sync spec to the rule. On body failure, the rule scans forward to the next
-sync token, records a diagnostic at the original failure position, consumes
-the sync token, and reports recovered success. Three spec forms:
-
-```peg
-Stmt   <- Expr ';'  %recover({';', '}'})    # sync on ';' or '}'
-Block  <- '{' Stmt* '}' %recover(eof)        # last-ditch: consume to EOF
-Line   <- Expr '\n' %recover(eol)            # sync on newline
-```
-
-Cut-committed failures are **not** recovered — cut is an explicit programmer
-commitment that overrides recovery. Diagnostics accumulate across recovery
-points via `Context::diagnostics()`, so a single parse can report many errors:
+`recover_predicate(fn, label)` accepts an arbitrary sync predicate. Cut-committed
+failures are **not** recovered — cut is an explicit commitment that overrides
+recovery. Diagnostics accumulate across recovery points via
+`Context::diagnostics()`, so a single parse can report many errors:
 
 ```cpp
 Context<> ctx{input};
@@ -232,10 +235,6 @@ if (g.parse(ctx)) {
     }
 }
 ```
-
-The C++ API retains strictly more power for recovery: `recover_predicate(fn,
-label)` (arbitrary sync predicate) has no textual form, since user-defined
-predicates aren't expressible in PEG text.
 
 ### Grammar visualization
 
@@ -269,15 +268,23 @@ type yourself.
 
 ## `NodeType` — what your actions return
 
-`Grammar<CharT, NodeType>` (default `NodeType = std::monostate`) determines
-the type of `ParseTreeNode::value`, which semantic actions populate. The
-library does **not** force a storage policy — you pick whichever fits:
+`Grammar<CharT, NodeType>` (default `NodeType = std::monostate`) determines the
+type semantic actions return. The library does **not** force a storage policy —
+you pick whichever fits:
 
 | `NodeType`                          | Use case                        | Storage cost                |
 | ---                                 | ---                             | ---                         |
 | `std::monostate` (default)          | pure recognizer (match / no match) | zero (1-byte placeholder) |
 | a value type (e.g. `struct IntNode`)| lightweight product             | inline, stack-allocated     |
-| `std::shared_ptr<T>` (e.g. `PegAstNodePtr`) | polymorphic / shared AST | heap + refcount, nullable   |
+| a move-only type (e.g. an AST with `unique_ptr` children) | recursive AST | inline, exclusive ownership |
+| `std::shared_ptr<T>`                | polymorphic / shared AST        | heap + refcount, nullable   |
+
+The post-parse typed fold owns action results transitively and moves them up
+once, so a **move-only `NodeType`** composes naturally — `vector<MoveOnly>`,
+`optional<MoveOnly>`, `tuple<char, MoveNode>` all work with by-value action
+parameters and no `shared_ptr`. This is the recommended form for a recursive
+AST (e.g. yueshi's). `std::shared_ptr<T>` remains available for genuinely
+polymorphic or shared-ownership ASTs.
 
 `CharT` and `NodeType` are independent axes: `Grammar<char32_t>` matches UTF-32
 codepoints with `NodeType = monostate`; `Grammar<Token, MyAst>` matches a
@@ -291,26 +298,14 @@ struct Ast   { int kind; std::string text; };
 Grammar<Token, Ast> g;
 g["open"]  = g.terminal(Token{1, {}});
 g["close"] = g.terminal(Token{2, {}});
-g["group"] = g["open"] >> *(!g["close"] >> g.terminal([](const Token&) { return true; }))
-                      >> g["close"];
-g["group"].set_action([](Context<Token, Ast>& ctx,
-                         const Context<Token, Ast>::ParseTreeNodePtr& node) {
+auto group = (g["group"] = g["open"] >> *(!g["close"] >> g.terminal([](const Token&) { return true; }))
+                            >> g["close"]);
+group.set_action([](Context<Token, Ast>& ctx, Span sp, Ast /*open*/, std::vector<Ast> /*body*/, Ast /*close*/) {
     Ast a;
-    a.kind = ctx.at(node->start_offset).id;   // read token payload by offset
+    a.kind = ctx.at(sp.start).id;   // read token payload by offset
     return a;
 });
 ```
-
-Passing `std::shared_ptr<PegAstNode>` as the template argument (rather than
-`PegAstNode` with the library wrapping it in `shared_ptr` internally) is
-deliberate: it lets `std::monostate` and value-type products stay zero-cost,
-and lets you choose `unique_ptr`, `boost::intrusive_ptr`, or a custom handle
-if you prefer. A `nullptr` action return marks a transparent rule (its node
-is kept on the tree for positional stability, but parent actions skip it
-when building the user-facing AST). Storage-policy generalization (making
-the pointer wrapper itself a template policy parameter) is a tracked future
-refactor; today's design trades a slightly verbose `shared_ptr<T>` argument
-for full control over the recognizer/value/polymorphic spectrum.
 
 ## Typed semantic actions
 
@@ -342,13 +337,17 @@ mul.set_action([](Context&, Span, Ast first,
   → token indices — read the token via `ctx.at(sp.start)`).
 - The action signature follows the body's filtered result type positionally
   (no projection): wrong arity/type is a readable `static_assert` error.
-- `g["r"].set_action(...)` (the untyped `Rule` returned by `g["r"]`) is still
-  available — the dynamic path (`GrammarCompiler`) and ad-hoc binding use it.
-  To get the compile-time-checked form, capture the assignment:
+- Retrieve the result via `g.parse_ast("r", ctx)` → `std::optional<NodeType>`.
+  `parse_tree` returns structure for introspection (no typed-action values on
+  the tree); `parse` returns boolean success.
+- `g["r"].set_action(...)` (the untyped `Rule` returned by `g["r"]`) is retained
+  as an escape hatch for side-effect actions (it writes `node->value` during
+  parse). To get the compile-time-checked typed form, capture the assignment:
   `auto h = (g["r"] = body); h.set_action(...);`
 
-See `CHANGELOG.md` ("Typed semantic actions (Model A)") for the full model,
-including why a rule referenced via `g["name"]` is always `NodeType`-typed.
+See `CHANGELOG.md` ("Typed semantic actions (pure two-phase fold model)") for
+the full design, including why a rule referenced via `g["name"]` is always
+`NodeType`-typed and why the fold is unconditionally move-safe.
 
 ## Requirements
 
@@ -388,20 +387,17 @@ include/peglib/      header-only library
   Context.h          parsing context (state, memo, cut, error tracking)
   InputSource.h      InputSourceBase polymorphic interface + SpanSource/FileSourceSource adapters
   ParserFwd.h        ScopeGuard, ParsingExprInterface, ParsingExpr, symbolConsumable
-  Terminals.h        TerminalExpr, TerminalSeqExpr, EmptyExpr
+  Terminals.h        TerminalExpr, TerminalSeqExpr, TokenExpr, EmptyExpr
   Combinators.h      SequenceExpr, AlternationExpr, Repetition, NotExpr, AndExpr, CutExpr
   NonTerminal.h      NonTerminal (internal entity), Rule (non-owning handle)
   Grammar.h          Grammar (rule container), the primary user-facing API
   Parser.h           umbrella for the 4 parser headers above
   Rule.h             operator DSL (>>, |, *, +, !, &, ...) — factories live on Grammar
+  ResultType.h       typed-action model: result_of, the post-parse fold, action_matches
   FileSource.h       streaming file-backed input with double buffering
   SourceMap.h        byte offset <-> (line, col) mapping
   ParseError.h       Diagnostic, ParseError, ExpectedItem, escape helpers
   Concepts.h         PegContext concept
-  DynExpr.h          type-erased expressions for runtime grammar compilation
-  PegAst.h           AST node types for the PEG meta-grammar
-  MetaGrammar.h      C++ reference PEG-in-PEG parser (drives GrammarCompiler)
-  GrammarCompiler.h  from_string / try_from_string — compile PEG text
 test/                unit tests (doctest)
   *_test.cpp         per-header test cases
   json_test.cpp      JSON grammar example (real-world PEG use case)
@@ -422,25 +418,27 @@ per-header:
   release_before integration
 - `file_source_test.cpp` — streaming file I/O
 - `sourcemap_test.cpp` — byte offset ↔ (line, col) mapping
-- `value_stack_test.cpp` — value stack, PegContext concept
+- `parse_tree_test.cpp` — parse tree structure, rollback on failure
 - `error_test.cpp` — error reporting, expected set, Diagnostic format, ParseError
+- `typed_action_test.cpp` — the typed two-phase fold model, including the
+  move-only-NodeType and alternation-of-tokens regression cases
 - `skipper_test.cpp` — auto-skip (`set_skipper` + `lexeme`), all CharT
 - `to_dot_test.cpp` — Graphviz DOT output, edge cases, escaping
 - `json_test.cpp` — JSON grammar (real-world example of building a complete
   language grammar with the operator DSL)
 - `json_skipper_test.cpp` — the same JSON grammar built with `set_skipper`
-  instead of manual `>> ws >>` threading (Phase 3 "after" picture)
+  instead of manual `>> ws >>` threading
 - `lua_lex.cpp`, `lua.cpp` — Lua 5.4 lexer + grammar (another real-world
   example; full Lua interpreter lives in
   [yueshi](https://github.com/jiarui/yueshi))
 
 ## Roadmap
 
-The library targets generic PEG-authoring features: a textual grammar format
-(Phase 2, done), automatic whitespace handling (Phase 3, done), error
-recovery (Phase 4, done — including the cut/lexeme/recovery text-grammar
-extensions), tracing/profiling (Phase 5, to_dot() slice done), and
-parameterized rules (Phase 6). See [TODO.md](TODO.md) for the full roadmap.
+The library's PEG-authoring features — automatic whitespace handling (done),
+error recovery with cut/lexeme/recovery (done), tracing/profiling (`to_dot()`
+slice done) — are in place. The roadmap now focuses on **full
+tracing/profiling and parameterized rules**. See [TODO.md](TODO.md) for the
+full roadmap.
 
 For a real-world grammar built on peglib, see
 [yueshi](https://github.com/jiarui/yueshi) — a Lua 5.4 interpreter.

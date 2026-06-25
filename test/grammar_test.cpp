@@ -193,7 +193,7 @@ TEST_CASE("[grammar] semantic-action")
 
     std::string input = "7";
     Ctx ctx(input);
-    CHECK(g.parse("digit", ctx));
+    REQUIRE(g.parse_ast("digit", ctx)); // typed actions run in the post-parse fold
     CHECK(value == 7);
 }
 
@@ -213,7 +213,7 @@ TEST_CASE("[grammar] rule-chaining")
 
     std::string input = "a";
     Ctx ctx(input);
-    g.parse("token", ctx);
+    REQUIRE(g.parse_ast("token", ctx)); // typed actions run in the post-parse fold
     CHECK(count == 1);
 }
 

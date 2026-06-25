@@ -11,7 +11,6 @@
 //   - Nested lexeme (idempotent flag save/restore).
 //   - Backtracking does not leak the skipper's position advance.
 //   - Recursive rule + skipper (memoization key consistency).
-//   - Dyn-sequence path (GrammarCompiler-compiled grammar + set_skipper).
 //   - char32_t context: the skipper is not char-specific.
 //
 // See json_skipper_test.cpp for a real-world grammar comparison.
@@ -215,45 +214,6 @@ TEST_CASE("skipper: recursive rule preserves memoization invariants")
     CHECK(g.parse_string("a ; b ; c"));
     CHECK(g.parse_string("  x ;  y ;z"));
     CHECK_FALSE(g.parse_string(";a")); // empty list not allowed (elem required)
-}
-
-// ===========================================================================
-// Compiled-grammar path (DynSequenceExpr)
-// ===========================================================================
-
-TEST_CASE("skipper: compiled grammar (GrammarCompiler) honours set_skipper")
-{
-    auto g = GrammarCompiler::from_string("Expr  <- Term ('+' Term)*\n"
-                                          "Term  <- Factor ('*' Factor)*\n"
-                                          "Factor <- [0-9]+ / '(' Expr ')'\n");
-    g.set_start("Expr");
-
-    // GrammarCompiler does NOT inject a ws rule, so referring to an
-    // undefined ws rule is rejected. Verify the contract holds: an
-    // undefined skipper rule throws std::invalid_argument.
-    CHECK_THROWS_AS(g.set_skipper(g["__default_ws"]), std::invalid_argument);
-    CHECK_FALSE(g.has_skipper());
-}
-
-TEST_CASE("skipper: user-added ws rule in compiled grammar works")
-{
-    // Compile a grammar and THEN add a ws rule + skipper. The compiled
-    // DynSequenceExpr path must honour the skipper exactly as the static
-    // path does.
-    auto g = GrammarCompiler::from_string("Expr  <- Term ('+' Term)*\n"
-                                          "Term  <- Factor ('*' Factor)*\n"
-                                          "Factor <- [0-9]+ / '(' Expr ')'\n");
-    g.set_start("Expr");
-
-    // Add a whitespace rule after compilation. Compiled rules reference
-    // each other by name through the Grammar map, so adding a new rule
-    // post-compile is fine.
-    g["ws"] = *g.terminal([](char c) { return c == ' ' || c == '\t'; });
-    g.set_skipper(g["ws"]);
-
-    CHECK(g.parse_string("1+2*3"));
-    CHECK(g.parse_string("1 + 2 * 3"));
-    CHECK(g.parse_string("  ( 1 + 2 ) * 3 "));
 }
 
 // ===========================================================================

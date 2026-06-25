@@ -28,24 +28,6 @@ using namespace peg;
 // ---------------------------------------------------------------------------
 TEST_CASE("[lifecycle] recursive-grammar-no-cycle")
 {
-    SUBCASE("textual-grammar path (GrammarCompiler)")
-    {
-        // 100 self-recursive grammars compiled from PEG text. Any leak
-        // here is unmistakable under ASan.
-        for (int i = 0; i < 100; ++i) {
-            auto g = GrammarCompiler::from_string("A <- A 'x' / 'y'");
-            g.set_start("A");
-            // Exercise the last one so we know the grammar still works.
-            // Parse both the base case ('y') and the recursive arm
-            // ('yxx' -> 'y' then 'x' then 'x') so the recursive path is
-            // actually exercised by the leak regression.
-            if (i == 99) {
-                CHECK(g.parse_string("y"));
-                CHECK(g.parse_string("yxx"));
-            }
-        }
-    }
-
     SUBCASE("static-grammar-API path (primary user API)")
     {
         // The primary API (g["add"] = g["add"] ...) forms the recursive

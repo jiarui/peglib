@@ -1,7 +1,6 @@
 #pragma once
 #include "peglib/Context.h"
 #include "peglib/ParseError.h"
-#include "peglib/PegAst.h"
 
 #include <concepts>
 #include <cstddef>
@@ -145,8 +144,6 @@ static_assert(PegValueSeq<std::u32string>, "std::u32string must satisfy PegValue
 // PegContext. If one of these fails, the concept has drifted from the real
 // Context implementation and must be reconciled.
 static_assert(PegContext<Context<char>>, "default char Context must satisfy PegContext");
-static_assert(PegContext<Context<char, PegAstNodePtr>>,
-              "meta-grammar Context (PegAstNodePtr) must satisfy PegContext");
 static_assert(PegContext<Context<char32_t>>,
               "char32_t Context must satisfy PegContext (Tier 1 char)");
 
