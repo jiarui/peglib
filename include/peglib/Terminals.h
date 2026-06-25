@@ -16,12 +16,7 @@ namespace parsers
 template<typename Context, typename TerminalValueType>
 struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>
 {
-    using SemanticAction =
-        typename ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>::SemanticAction;
-    TerminalExpr(TerminalValueType value, SemanticAction action = nullptr)
-        : ParsingExpr<Context, TerminalExpr<Context, TerminalValueType>>(std::move(action)),
-          m_terminalValue{std::move(value)}
-    {}
+    explicit TerminalExpr(TerminalValueType value) : m_terminalValue{std::move(value)} {}
     typename Context::ParseResult parse(Context& context) const override
     {
         if (!context.ended() && symbolConsumable(context.current(), m_terminalValue)) {

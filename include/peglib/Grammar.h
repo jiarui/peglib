@@ -316,13 +316,11 @@ public:
         }
     }
 
-    // Parse and return the parse tree (nullptr on failure or if the start
-    // rule is transparent). Returns structure for introspection/tooling
-    // (offsets, children, names). Typed-action values are NOT on the tree —
-    // use parse_ast to retrieve them. The untyped hook (m_action) still
-    // populates node->value for side-effect rules. Catches cut-committed
-    // failures and returns nullptr; retrieve the diagnostic via
-    // ctx.take_error(). Throws std::out_of_range if `rule` is not defined.
+    // Parse and return the parse tree (nullptr on failure). Pure structure
+    // for introspection/tooling (offsets, children, names) — no value slot,
+    // no hooks fire. Catches cut-committed failures and returns nullptr;
+    // retrieve the diagnostic via ctx.take_error(). Throws std::out_of_range
+    // if `rule` is not defined.
     typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -340,11 +338,13 @@ public:
     }
 
     // Parse and fold the result tree into a typed AST value (the two-phase
-    // typed-action model). parse() builds the tree; fold_start walks it once
-    // via the START rule's typed fold, owning child values as locals and
-    // moving them up. Unconditionally move-safe — no value is stored at a
-    // shared location. Returns std::nullopt on parse failure or a null tree.
-    // Throws std::out_of_range if `rule` is not defined.
+    // model). parse_tree() builds the tree (pure structure); fold_start walks
+    // it once via the START rule's typed fold, owning child values as locals
+    // and moving them up. Unconditionally move-safe — no value is stored at a
+    // shared location. This is also the ONLY entry point that fires on_match
+    // side-effect hooks (once per committed-tree node, in tree order).
+    // Returns std::nullopt on parse failure or a null tree. Throws
+    // std::out_of_range if `rule` is not defined.
     std::optional<NodeType> parse_ast(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -355,6 +355,9 @@ public:
         auto tree = parse_tree(rule, ctx);
         if (!tree)
             return std::nullopt;
+        // Fire side-effect hooks first (pre-order tree walk), then compute
+        // values. The two are independent — on_match reads only structure.
+        parsers::fire_on_match<Context, typename Context::ParseTreeNodePtr>(ctx, tree, it->second);
         return parsers::fold_start<Context, typename Context::ParseTreeNodePtr>(
             ctx, tree, it->second);
     }

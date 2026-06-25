@@ -12,7 +12,7 @@ using namespace peg;
 // Covers:
 //   - Context<CharT, NodeType> template parameter
 //   - Default NodeType == std::monostate
-//   - Action return value stored on ParseTreeNode::value
+//   - Action return value retrieved via parse_ast (the typed fold)
 //   - Parse-tree shape after sequence / alternation / predicates
 //   - PegContext concept (applied as a Grammar constraint)
 // ---------------------------------------------------------------------------
@@ -29,13 +29,15 @@ TEST_CASE("value-stack-default-node-type-is-monostate")
     Context context(input); // defaults to Context<..., std::monostate>
     static_assert(std::is_same_v<decltype(context)::node_type, std::monostate>);
 
-    // Default Context produces a tree whose value is a default-constructed
-    // std::monostate (no action set → node->value is value-initialised).
+    // parse_tree returns pure structure (no value slot). A default Context
+    // still builds a tree naming the rule and bracketing the match.
     Grammar<> g;
     g["rule"] = g.terminal('a');
     auto tree = g.parse_tree("rule", context);
     REQUIRE(tree);
-    static_assert(std::is_same_v<decltype(tree->value), std::monostate>);
+    CHECK(tree->name == "rule");
+    CHECK(tree->start_offset == 0);
+    CHECK(tree->end_offset == 1);
     CHECK(context.ended());
 }
 

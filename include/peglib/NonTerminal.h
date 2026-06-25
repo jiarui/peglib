@@ -20,16 +20,15 @@ namespace parsers
 // key and seed-grow anchor. Users interact via Rule (a bare-pointer,
 // non-owning handle), never directly with NonTerminal.
 //
-// Post-parse action model:
-//   parse() returns ParseResult { success, tree }. On the first successful
-//   match at a given position, a ParseTreeNode is built from the body's
-//   result tree, the semantic action is invoked (receiving the node so it
-//   can read children->value), and the complete ParseResult is cached in
-//   RuleState::m_cached_result. Subsequent memo hits return the cached
-//   result directly — no action re-execution, no value stack, no conflict.
-//
-// Tree retention: the tree node is always kept (even if the action returns
-//   a null value). Parent actions skip children whose ->value is null.
+// Value/side-effect model (both run post-parse, in the fold, via parse_ast):
+//   - parse() returns ParseResult { success, tree }: pure structure. The
+//     complete ParseResult is cached in RuleState::m_cached_result; memo
+//     hits replay the cached tree without re-parsing.
+//   - A typed fold (m_typed_fold, set via RuleHandle::set_action) computes
+//     the rule's value bottom-up, owning child values as locals.
+//   - A side-effect hook (m_on_match, set via Rule::on_match) fires once per
+//     committed-tree node for observational actions.
+//   Neither runs during parse, so backtracked matches never trigger them.
 // ---------------------------------------------------------------------------
 template<typename Context>
 struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>>
@@ -39,15 +38,21 @@ public:
     using ParseTreeNodePtr = typename ParsingExpr<Context, NonTerminal<Context>>::ParseTreeNodePtr;
     using NodeType = typename Context::node_type;
 
-    using SemanticAction = typename ParsingExpr<Context, NonTerminal<Context>>::SemanticAction;
-
     // Typed fold: the post-parse value builder registered by
-    // RuleHandle::set_action<F>. Empty for untyped/transparent rules (which
-    // are folded via node->value fallback). Invoked by the fold driver
-    // (ResultType.h fold_rule) when a node->producer points here.
+    // RuleHandle::set_action<F>. Invoked by the fold driver (ResultType.h
+    // fold_rule / fold_start) on each node whose producer points here.
     using TypedFold = std::function<NodeType(Context&, const ParseTreeNodePtr&)>;
     void set_typed_fold(TypedFold f) { m_typed_fold = std::move(f); }
     [[nodiscard]] const TypedFold& typed_fold() const noexcept { return m_typed_fold; }
+
+    // Side-effect hook: a void callback fired once per committed-tree node
+    // during the post-parse fold (parse_ast only). Use it for actions that
+    // observe a match without producing a value (tokenization, tracing,
+    // symbol-table population). Never fires for backtracked matches — the
+    // fold visits only the accepted tree.
+    using OnMatch = std::function<void(Context&, const ParseTreeNodePtr&)>;
+    void set_on_match(OnMatch f) { m_on_match = std::move(f); }
+    [[nodiscard]] const OnMatch& on_match() const noexcept { return m_on_match; }
 
     NonTerminal() = default;
 
@@ -61,9 +66,8 @@ public:
 
     // Assign a body expression. The typed fold is registered separately by
     // RuleHandle::set_action (which captures the body's static ExprType). A
-    // rule with no typed action is either transparent (the fold follows
-    // node->producer to an action-bearing rule) or untyped (folded via
-    // node->value).
+    // rule with no typed fold is transparent: the fold follows node->producer
+    // to an action-bearing rule, or yields a default-constructed NodeType.
     template<typename ExprType>
     NonTerminal& operator=(const ParsingExpr<Context, ExprType>& rhs)
     {
@@ -169,16 +173,10 @@ public:
         node->start_offset = start_pos;
         node->end_offset = context.mark();
 
-        // Execute semantic action (if any). The action receives the node
-        // and can read node->children[i]->value to access sub-rule results.
+        // parse() is pure structure: it builds and caches the tree. Value
+        // computation (m_typed_fold) and side-effect hooks (m_on_match) run
+        // later, in the post-parse fold (parse_ast → fold_start/fold_rule).
         ParseResult result{true, node};
-        if (this->m_action) {
-            node->value = this->m_action(context, node);
-        }
-        // Note: even if the action returns null (transparent rule), we keep
-        // the tree node. This lets parent actions reliably access children
-        // by position. Parents that build user-facing AST skip children
-        // whose ->value is null.
 
         rule_state.m_cached_result = result;
         context.update_rule_state(this, start_pos, rule_state);
@@ -235,7 +233,8 @@ protected:
     std::string m_name;
     std::string m_label;
     RecoverSpec<typename Context::value_type> m_recover;
-    TypedFold m_typed_fold; // registered by RuleHandle::set_action (typed path)
+    TypedFold m_typed_fold; // value computation; set via RuleHandle::set_action
+    OnMatch m_on_match;     // side-effect hook; set via Rule::on_match
 };
 
 // Forward declaration: Rule::operator= returns RuleHandle (defined after Rule).
@@ -278,7 +277,7 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
 {
     using Impl = NonTerminal<Context>;
     using ParseResult = typename ParsingExpr<Context, Rule<Context>>::ParseResult;
-    using SemanticAction = typename ParsingExpr<Context, Rule<Context>>::SemanticAction;
+    using OnMatch = typename Impl::OnMatch;
 
     Rule(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
 
@@ -315,16 +314,16 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     // NOLINTNEXTLINE(performance-noexcept-move-constructor)
     auto operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>;
 
-    // Untyped semantic-action hook (escape hatch for side-effect actions).
-    // The typed action API lives on RuleHandle (the return value of
-    // operator=); to attach a compile-time-checked action, capture the
-    // assignment result:
+    // Side-effect hook: register a void callback fired once per committed-
+    // tree node during the post-parse fold (parse_ast only). For actions
+    // that observe a match without producing a value (tokenization,
+    // tracing). The typed value-computation API lives on RuleHandle (the
+    // return value of operator=):
     //   auto h = (g["r"] = body);  h.set_action([](Context&, Span, ...){...});
-    // This overload is for ad-hoc untyped binding where the typed path is
-    // not needed (e.g. side-effect tokenization in lua_lex).
-    Rule& set_action(SemanticAction action)
+    // Clear the hook by passing nullptr (e.g. for teardown).
+    Rule& on_match(OnMatch hook)
     {
-        m_impl->set_action(std::move(action));
+        m_impl->set_on_match(std::move(hook));
         return *this;
     }
 
@@ -366,17 +365,16 @@ protected:
 //
 // Carries the body's static ExprType at the type level (no runtime storage),
 // so its set_action<F> can compile-time-check the action's parameter list
-// against the body's derived result type and generate an extractor-backed
-// bridge into the type-erased std::function<NodeType(Context&, ParseTreeNodePtr)>
-// that NonTerminal::m_action stores.
+// against the body's derived result type and generate a bridge into the
+// type-erased TypedFold stored on NonTerminal::m_typed_fold.
 //
-// Usage (the ONLY way to attach a typed action):
+// Usage (the ONLY way to attach a typed value-computation):
 //   auto h = (g["add"] = mul >> g.token('+') >> mul);
 //   h.set_action([](Context& c, Span sp, AstNode l, AstNode r) { ... });
 //
-// Contrast with Rule (returned by g["r"]): Rule's set_action is untyped
-// (the untyped hook for side-effect actions). The two do not conflict —
-// they are different types.
+// Contrast with Rule (returned by g["r"]): Rule::on_match attaches a void
+// side-effect hook (NonTerminal::m_on_match), not a value computation. The
+// two slots are independent: a rule may have either, both, or neither.
 //
 // RuleHandle is a view: it does not own the NonTerminal (Grammar does). It
 // implicitly converts to Rule so all Rule's introspection/recovery methods
@@ -390,11 +388,11 @@ struct RuleHandle
 
     RuleHandle(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
 
-    // Implicit conversion to the untyped Rule view (for introspection, aliasing,
+    // Implicit conversion to the Rule view (for introspection, aliasing,
     // recovery, re-reference in another rule's body, etc.).
     operator Rule<Context>() const { return Rule<Context>{m_impl, m_name}; }
 
-    // Typed semantic-action attachment.
+    // Typed value-computation attachment (the primary API).
     //
     // Compile-time checks F is invocable as (Context&, Span, Args...) where
     // Args is the body's filtered result type, positionally unpacked:
@@ -402,12 +400,12 @@ struct RuleHandle
     //   - single-result : F(Context&, Span, T)
     //   - multi-result  : F(Context&, Span, T0, T1, ...)
     //
-    // Registers the typed fold on the underlying NonTerminal (NOT on m_action):
-    // the action does NOT run during parse. It runs in the post-parse typed
-    // fold (Grammar::parse_ast → fold_start → this fold), where child values
-    // are owned locals moved up once — unconditionally move-safe. This is the
-    // single value path for typed rules; consumers retrieve results via
-    // parse_ast, not via node->value. Parse/memo/cut/recovery are unchanged.
+    // Registers the typed fold on the underlying NonTerminal. It does NOT run
+    // during parse; it runs in the post-parse fold (Grammar::parse_ast →
+    // fold_start → this fold), where child values are owned locals moved up
+    // once — unconditionally move-safe. Consumers retrieve results via
+    // parse_ast. (For side-effects without a value, use Rule::on_match.)
+    // Parse/memo/cut/recovery are unchanged.
     template<typename F>
     RuleHandle& set_action(F f)
     {

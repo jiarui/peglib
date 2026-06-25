@@ -108,24 +108,24 @@ struct TokenizerTest
     std::vector<Token> m_token_buf;
     void run(const std::string& input)
     {
-        g["names"].set_action(
-            [this](Context<char>& context,
-                   const Context<char>::ParseTreeNodePtr& node) -> std::monostate {
-                std::string m = context.input().slice(node->start_offset,
-                                                      node->end_offset - node->start_offset);
-                if (m == "if") {
-                    m_token_buf.emplace_back(TokenID::TK_IF);
-                } else if (node->end_offset > node->start_offset) {
-                    m_token_buf.emplace_back(m);
-                }
-                return {};
-            });
+        g["names"].on_match([this](Context<char>& context,
+                                   const Context<char>::ParseTreeNodePtr& node) -> void {
+            std::string m =
+                context.input().slice(node->start_offset, node->end_offset - node->start_offset);
+            if (m == "if") {
+                m_token_buf.emplace_back(TokenID::TK_IF);
+            } else if (node->end_offset > node->start_offset) {
+                m_token_buf.emplace_back(m);
+            }
+        });
         Context context(input);
         while (!context.ended()) {
-            g.parse("token", context);
+            // parse_ast runs the post-parse fold, which is where on_match
+            // hooks fire (once per committed-tree node).
+            g.parse_ast("token", context);
         }
     }
-    ~TokenizerTest() { g["names"].set_action(nullptr); }
+    ~TokenizerTest() { g["names"].on_match(nullptr); }
 };
 
 TEST_CASE("lua-lex-token")
@@ -152,19 +152,18 @@ TEST_CASE("lua-lex-names")
     {
         std::string input = R"(   print)";
         Context context(input);
-        g["names"].set_action(
-            ([](decltype(context)& c,
-                const decltype(context)::ParseTreeNodePtr& node) -> std::monostate {
+        g["names"].on_match(
+            ([](decltype(context)& c, const decltype(context)::ParseTreeNodePtr& node) -> void {
                 CHECK(c.input().slice(node->start_offset, node->end_offset - node->start_offset) ==
                       "print");
-                return {};
             }));
 
         g["ws"] = +g.terminal(std::set<char>{' ', '\f', '\t', '\v'});
         bool ok = g.parse("ws", context);
         CHECK(ok);
         auto start = context.mark();
-        CHECK(g.parse("names", context));
+        // parse_ast fires the on_match hook during the post-parse fold.
+        CHECK(g.parse_ast("names", context));
         CHECK(context.input().slice(start, context.mark() - start) == "print");
     }
 }
@@ -223,9 +222,7 @@ TEST_CASE("lua-lex-tokens")
 {
     std::string input = R"(print('hello world'))";
     Context context(input);
-    g["names"].set_action(
-        [](decltype(context)& /*c*/,
-           const decltype(context)::ParseTreeNodePtr& /*node*/) -> std::monostate { return {}; });
+    // No on_match hook here — these are pure token-shape checks via parse.
     {
         auto start = context.mark();
         CHECK(g.parse("token", context));

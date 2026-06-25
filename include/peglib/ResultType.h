@@ -576,7 +576,8 @@ auto fold(Ctx& ctx, const NodePtr& node) -> result_of_t<E>
 // fold_rule: the Rule/NonTerminal case for Rule references INSIDE a body.
 // Dispatches on node->producer's typed fold (the innermost rule that built
 // the node — producer is preserved, not overwritten, so alias/alternation-
-// passthrough keeps the right target).
+// passthrough keeps the right target). Pure value computation; side-effect
+// hooks fire in a separate walk (fire_on_match below).
 template<typename Ctx, typename NodePtr>
 auto fold_rule(Ctx& ctx, const NodePtr& node) -> typename Ctx::node_type
 {
@@ -588,7 +589,7 @@ auto fold_rule(Ctx& ctx, const NodePtr& node) -> typename Ctx::node_type
 
 // fold_start: the ROOT entry (parse_ast). Dispatches on the START rule's
 // NonTerminal (known explicitly), NOT on node->producer — so the start rule's
-// action runs even when it adopted a body node whose producer is inner.
+// fold runs even when it adopted a body node whose producer is inner.
 template<typename Ctx, typename NodePtr, typename NonTerminalPtr>
 auto fold_start(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start) ->
     typename Ctx::node_type
@@ -596,10 +597,31 @@ auto fold_start(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start) ->
     if (start && start->typed_fold()) {
         return start->typed_fold()(ctx, node);
     }
-    if (node->producer && node->producer->typed_fold()) {
-        return node->producer->typed_fold()(ctx, node);
+    return fold_rule<Ctx, NodePtr>(ctx, node);
+}
+
+// fire_on_match: the side-effect walk. Visits every node in the (committed,
+// acyclic) tree in pre-order and fires the producer's on_match hook where one
+// is registered. Independent of the typed fold: a rule with only an on_match
+// (no typed fold) still has its hook fire, because this walk is structural —
+// it recurses through node->children regardless of whether any value
+// computation is registered. Dispatch order mirrors the value fold: the
+// START rule's hook is tried first, then node->producer.
+template<typename Ctx, typename NodePtr, typename NonTerminalPtr>
+void fire_on_match(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start)
+{
+    if (!node)
+        return;
+    if (start && start->on_match()) {
+        start->on_match()(ctx, node);
+    } else if (node->producer && node->producer->on_match()) {
+        node->producer->on_match()(ctx, node);
     }
-    return typename Ctx::node_type{};
+    for (const auto& child : node->children) {
+        // Children carry their own producer (inner rules); pass nullptr as
+        // the start so each child dispatches on its own producer.
+        fire_on_match<Ctx, NodePtr, NonTerminalPtr>(ctx, child, nullptr);
+    }
 }
 
 template<typename C, typename Ctx, typename NodePtr>

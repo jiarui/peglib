@@ -34,7 +34,7 @@ real-world case study.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
   throw `peg::ParseError` (a hard error); regular failures are queryable via
   `Context::take_error()`.
-- **Semantic actions, typed or untyped**:
+- **Semantic actions: typed values + side-effect hooks**:
   - **Typed (the primary API)**: `auto h = (g["r"] = body); h.set_action([](Context&,
     Span, /*typed child results*/...) {...});` — compile-time-checked against the
     body's derived result type, positional, no tree search. `g.terminal(x)` is
@@ -43,10 +43,11 @@ real-world case study.
     is visible to left-folds. Retrieve results via `g.parse_ast("r", ctx) ->
     std::optional<NodeType>`. Unconditionally move-safe — move-only `NodeType`
     composes (`vector<MoveOnly>`, `optional<MoveOnly>`) with no `shared_ptr`.
-  - **Untyped (escape hatch)**: `g["r"].set_action([](Context&, ParseTreeNodePtr)
-    {...})` — the action hand-reads the tree and writes `node->value` during parse.
-    Retained for side-effect actions (e.g. tokenization); not the value path for
-    typed rules.
+  - **Side-effect hook**: `g["r"].on_match([](Context&, ParseTreeNodePtr) {...})` —
+    a `void` callback fired once per committed-tree node during the post-parse fold
+    (via `parse_ast`). For observational actions that don't produce a value
+    (tokenization, tracing). Never fires for backtracked matches. Independent of
+    the typed fold — a rule may have either, both, or neither.
   No value stack — the fold flows through owned returns.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
@@ -340,10 +341,11 @@ mul.set_action([](Context&, Span, Ast first,
 - Retrieve the result via `g.parse_ast("r", ctx)` → `std::optional<NodeType>`.
   `parse_tree` returns structure for introspection (no typed-action values on
   the tree); `parse` returns boolean success.
-- `g["r"].set_action(...)` (the untyped `Rule` returned by `g["r"]`) is retained
-  as an escape hatch for side-effect actions (it writes `node->value` during
-  parse). To get the compile-time-checked typed form, capture the assignment:
-  `auto h = (g["r"] = body); h.set_action(...);`
+- `g["r"].on_match(...)` (on the `Rule` returned by `g["r"]`) registers a `void`
+  side-effect hook fired once per committed-tree node during the post-parse fold.
+  To get the compile-time-checked typed value form, capture the assignment:
+  `auto h = (g["r"] = body); h.set_action(...);` A rule may have either, both,
+  or neither.
 
 See `CHANGELOG.md` ("Typed semantic actions (pure two-phase fold model)") for
 the full design, including why a rule referenced via `g["name"]` is always
@@ -351,14 +353,15 @@ the full design, including why a rule referenced via `g["name"]` is always
 
 ## Requirements
 
-| Toolchain          | Minimum version |
-| ---                | ---             |
-| GCC                | 11              |
-| Clang              | 14              |
-| MSVC               | 19.30 (VS 2022) |
-| CMake              | 3.22            |
+| Toolchain          | Tested version (CI) |
+| ---                | ---                 |
+| GCC                | 15                  |
+| Clang              | 17, 22 (clang-tidy) |
+| MSVC               | latest (VS 2022)    |
+| CMake              | 3.22                |
 
-C++20 is required (`std::span`, `concepts`, `ranges`).
+C++20 is required (`std::span`, `concepts`, `ranges`). Older toolchains
+may compile but are not verified by CI.
 
 ## Build & Test
 

@@ -95,11 +95,9 @@ struct Context
     // -------------------------------------------------------------------
     // ParseTreeNode: immutable record of a successful match.
     //
-    // Produced by parse() and carried in ParseResult. The tree structure
-    // mirrors the grammar: each NonTerminal that succeeds creates a node
-    // named after the rule; combinator nodes (Sequence, Choice, etc.) are
-    // anonymous grouping nodes. Semantic actions read children->value to
-    // build parent values — no value stack involved.
+    // Pure structure: name, offsets, children, and dispatch metadata. No
+    // value slot — the typed fold (parse_ast) owns computed values as locals
+    // and moves them up, which is what makes a move-only NodeType safe.
     // -------------------------------------------------------------------
     struct ParseTreeNode
     {
@@ -107,11 +105,10 @@ struct Context
         std::size_t start_offset = 0; // byte offset of match start
         std::size_t end_offset = 0;   // byte offset past match end
         std::vector<std::shared_ptr<ParseTreeNode>> children;
-        NodeType value{}; // filled by the untyped semantic action (escape hatch)
         // Producer rule (typed-fold dispatch). Stamped by NonTerminal::parse so
-        // the post-parse typed fold can find each node's registered action via
+        // the post-parse typed fold can find each node's registered fold via
         // pointer identity (no name/string lookup). Null for anonymous
-        // combinator nodes and for transparent rules with no typed action.
+        // combinator nodes and for transparent rules with no typed fold.
         const NonTerminalType* producer = nullptr;
         // Winning-branch index for an AlternationExpr's node (the node IS the
         // winner's node, passed through). Stamped by parseAlt so the typed fold
@@ -124,8 +121,7 @@ struct Context
 
     // Result of every parse() call: success flag + optional tree node.
     // On failure, tree is nullptr. On success, tree may still be nullptr
-    // for transparent rules (action returned a null value) or for leaf
-    // expressions that don't create named nodes.
+    // for leaf expressions (terminals, predicates) that build no node.
     struct ParseResult
     {
         bool success = false;

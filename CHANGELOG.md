@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Single value channel; `on_match` side-effect hook
+
+The untyped value channel is retired. A rule now has exactly one value
+computation (the typed fold, via `RuleHandle::set_action`) and one side-effect
+hook (`Rule::on_match`), both running post-parse in `parse_ast`.
+
+- **`Rule::set_action(SemanticAction)` → `Rule::on_match(OnMatch)`**. The old
+  untyped hook returned a `NodeType` stored on `node->value` during parse; the
+  new hook returns `void` and fires once per committed-tree node during the
+  post-parse fold. This removes the parse-phase backtracking hazard (a hook
+  could formerly fire for a match that was later backtracked away) — the
+  side-effect walk visits only the accepted tree.
+- **`ParseTreeNode::value` removed.** No value is stored on the shared tree;
+  move-safety is now a property of the data structure, not just the fold
+  algorithm. `parse_tree` returns pure structure for every rule.
+- **`ParsingExpr` no longer carries action storage.** The `m_action` member,
+  the `SemanticAction` alias, and the action constructor parameter have left
+  the CRTP base — they were dead weight on every leaf/combinator expression
+  (only `NonTerminal` ever used them). `TerminalExpr` loses its action ctor
+  parameter accordingly.
+- `on_match` fires via a dedicated pre-order tree walk (`fire_on_match`)
+  independent of the typed fold, so a rule with only an `on_match` (no typed
+  fold) still has its hook fire. Migration: `g["r"].set_action(...)` →
+  `g["r"].on_match(...)` (drop the return value); tokenization loops switch
+  `g.parse(...)` → `g.parse_ast(...)` so the hook fires.
+
 ### Removed — Dynamic PEG (runtime grammar-text compilation)
 
 The runtime PEG-text layer is removed: `GrammarCompiler`, `DynExpr`, the

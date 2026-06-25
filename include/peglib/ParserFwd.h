@@ -58,16 +58,14 @@ struct ParsingExprInterface
 };
 
 // ---------------------------------------------------------------------------
-// ParsingExpr: CRTP base providing semantic-action storage.
-// NodeType is derived from the Context (defaults to std::monostate).
+// ParsingExpr: CRTP base for every parsing expression type.
 //
-// Post-parse action model:
-//   The action receives the ParseTreeNodePtr for this rule's match. The
-//   node's children contain the sub-rule results (each child's ->value
-//   is already computed by the child's action). The action returns a
-//   NodeType which is stored in node->value. If the action returns a
-//   null value (for pointer-like NodeTypes), the rule is transparent:
-//   its node is not added to the parent's children.
+// Carries the derived-type tag (ExprType) and the shared typedefs the
+// combining operators and fold driver need. It holds no semantic-action
+// storage: value computation lives on NonTerminal as a typed fold
+// (ResultType.h), and parse-time side-effects as on_match (NonTerminal.h).
+// Keeping action storage off the base avoids a dead std::function on every
+// leaf/combinator expression object.
 // ---------------------------------------------------------------------------
 template<typename Context, typename ExprType>
 struct ParsingExpr : ParsingExprInterface<Context>
@@ -79,17 +77,11 @@ struct ParsingExpr : ParsingExprInterface<Context>
     using NodeType = typename Context::node_type;
     using ParseResult = typename Context::ParseResult;
     using ParseTreeNodePtr = typename Context::ParseTreeNodePtr;
-    using SemanticAction = std::function<NodeType(Context&, const ParseTreeNodePtr&)>;
-    void set_action(SemanticAction action) { m_action = std::move(action); }
     ParsingExpr() = default;
-    ParsingExpr(SemanticAction action) : m_action(std::move(action)) {}
     ParsingExpr(const ParsingExpr&) = default;
     ParsingExpr(ParsingExpr&&) = default;
     ParsingExpr& operator=(const ParsingExpr&) = default;
     ParsingExpr& operator=(ParsingExpr&&) = default;
-
-protected:
-    SemanticAction m_action;
 };
 
 // ---------------------------------------------------------------------------
