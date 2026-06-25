@@ -28,60 +28,12 @@ struct TerminalExpr : ParsingExpr<Context, TerminalExpr<Context, TerminalValueTy
             context.next();
             return {true, nullptr};
         }
-        record_expected(context);
+        record_terminal_expected(context, m_terminalValue, "<terminal>");
         return {false, nullptr};
     }
 
 protected:
     TerminalValueType m_terminalValue;
-
-private:
-    // Record the expected item at the current position for error reporting.
-    void record_expected(Context& context) const
-    {
-        std::size_t pos = context.mark();
-        // Visit the terminal value to produce an ExpectedItem.text.
-        // We handle shapes in order of specificity:
-        //   1. Single value (char): print as 'x'
-        //   2. Array of size 2 (range): print as 'a'..'z'
-        //   3. Other container (set): print each element, joined
-        //   4. Predicate/functor: generic placeholder
-        if constexpr (std::is_same_v<TerminalValueType, typename Context::value_type>) {
-            context.record_failure(pos,
-                                   ExpectedItem{.kind = ExpectedKind::Literal,
-                                                .text = escape_char_for_expected(m_terminalValue)});
-        } else if constexpr (requires {
-                                 std::get<0>(m_terminalValue);
-                                 std::get<1>(m_terminalValue);
-                             }) {
-            // Array-of-2 / pair: range terminal. Produces "'lo'..'hi'".
-            // Keep the element types intact so escape_char_for_expected can
-            // render them correctly for any value_type (char, char32_t, ...).
-            auto lo = std::get<0>(m_terminalValue);
-            auto hi = std::get<1>(m_terminalValue);
-            std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
-        } else if constexpr (requires {
-                                 m_terminalValue.begin();
-                                 m_terminalValue.end();
-                             }) {
-            // Set-like container: print as set of literals.
-            std::string text;
-            bool first = true;
-            for (const auto& v : m_terminalValue) {
-                if (!first)
-                    text += ", ";
-                first = false;
-                text += escape_char_for_expected(v);
-            }
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
-        } else {
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Literal, .text = "<terminal>"});
-        }
-    }
 };
 
 // ---------------------------------------------------------------------------
@@ -158,52 +110,12 @@ struct TokenExpr : ParsingExpr<Context, TokenExpr<Context, TerminalValueType>>
             node->end_offset = context.mark();
             return {true, node};
         }
-        record_expected(context);
+        record_terminal_expected(context, m_terminalValue, "<token>");
         return {false, nullptr};
     }
 
 protected:
     TerminalValueType m_terminalValue;
-
-private:
-    // Record the expected item at the current position for error reporting.
-    // Mirrors TerminalExpr::record_expected so error diagnostics are
-    // indistinguishable between the two terminal forms.
-    void record_expected(Context& context) const
-    {
-        std::size_t pos = context.mark();
-        if constexpr (std::is_same_v<TerminalValueType, typename Context::value_type>) {
-            context.record_failure(pos,
-                                   ExpectedItem{.kind = ExpectedKind::Literal,
-                                                .text = escape_char_for_expected(m_terminalValue)});
-        } else if constexpr (requires {
-                                 std::get<0>(m_terminalValue);
-                                 std::get<1>(m_terminalValue);
-                             }) {
-            auto lo = std::get<0>(m_terminalValue);
-            auto hi = std::get<1>(m_terminalValue);
-            std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
-        } else if constexpr (requires {
-                                 m_terminalValue.begin();
-                                 m_terminalValue.end();
-                             }) {
-            std::string text;
-            bool first = true;
-            for (const auto& v : m_terminalValue) {
-                if (!first)
-                    text += ", ";
-                first = false;
-                text += escape_char_for_expected(v);
-            }
-            context.record_failure(
-                pos, ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
-        } else {
-            context.record_failure(pos,
-                                   ExpectedItem{.kind = ExpectedKind::Literal, .text = "<token>"});
-        }
-    }
 };
 
 // ---------------------------------------------------------------------------

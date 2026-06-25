@@ -121,5 +121,53 @@ bool symbolConsumable(const elem& v, const Functor& f)
     return f(v);
 }
 
+// ---------------------------------------------------------------------------
+// record_terminal_expected: record the diagnostic for a failed terminal/token
+// match. Shared by TerminalExpr and TokenExpr (identical match semantics;
+// only the fallback placeholder differs). Shapes handled in order of
+// specificity: single value → 'x'; array/pair of 2 → 'lo'..'hi'; iterable
+// container → comma-joined literals; else → `fallback`.
+// ---------------------------------------------------------------------------
+template<typename Context, typename V>
+void record_terminal_expected(Context& context, const V& value, std::string_view fallback)
+{
+    std::size_t pos = context.mark();
+    if constexpr (std::is_same_v<V, typename Context::value_type>) {
+        context.record_failure(
+            pos,
+            ExpectedItem{.kind = ExpectedKind::Literal, .text = escape_char_for_expected(value)});
+    } else if constexpr (requires {
+                             std::get<0>(value);
+                             std::get<1>(value);
+                         }) {
+        // Array-of-2 / pair: range terminal. Produces "'lo'..'hi'". Keep the
+        // element types intact so escape_char_for_expected renders them
+        // correctly for any value_type (char, char32_t, ...).
+        auto lo = std::get<0>(value);
+        auto hi = std::get<1>(value);
+        std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
+        context.record_failure(pos,
+                               ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+    } else if constexpr (requires {
+                             value.begin();
+                             value.end();
+                         }) {
+        // Set-like container: comma-joined literals.
+        std::string text;
+        bool first = true;
+        for (const auto& v : value) {
+            if (!first)
+                text += ", ";
+            first = false;
+            text += escape_char_for_expected(v);
+        }
+        context.record_failure(pos,
+                               ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+    } else {
+        context.record_failure(
+            pos, ExpectedItem{.kind = ExpectedKind::Literal, .text = std::string{fallback}});
+    }
+}
+
 } // namespace parsers
 } // namespace peg

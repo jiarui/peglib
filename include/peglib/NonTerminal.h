@@ -248,8 +248,8 @@ struct RuleHandle;
 // Stores a bare NonTerminal* (Grammar is the sole owner via shared_ptr) plus
 // a copied rule name (std::string). Copy is shallow — multiple Rule copies
 // can point to the same NonTerminal. Expression trees (SequenceExpr,
-// DynSequenceExpr, etc.) store Rule copies by value (~40 bytes on libstdc++:
-// 8-byte pointer + SSO string).
+// AlternationExpr, Repetition, etc.) store Rule copies by value (~40 bytes on
+// libstdc++: 8-byte pointer + SSO string).
 //
 // **Design constraint**: a Rule cannot outlive its Grammar. This is
 // intentional — it eliminates shared_ptr cycles at the source (recursive
@@ -375,8 +375,8 @@ protected:
 //   h.set_action([](Context& c, Span sp, AstNode l, AstNode r) { ... });
 //
 // Contrast with Rule (returned by g["r"]): Rule's set_action is untyped
-// (the dynamic-path escape hatch). The two do not conflict — they are
-// different types.
+// (the untyped hook for side-effect actions). The two do not conflict —
+// they are different types.
 //
 // RuleHandle is a view: it does not own the NonTerminal (Grammar does). It
 // implicitly converts to Rule so all Rule's introspection/recovery methods

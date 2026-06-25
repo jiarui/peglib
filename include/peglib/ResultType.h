@@ -199,7 +199,7 @@ struct result_of<AndExpr<C, Ch>>
     using type = void;
 };
 
-// --- Rules / non-terminals (passthrough via node->value) -----------------
+// --- Rules / non-terminals (node_type; dispatched via node->producer) ----
 template<typename C>
 struct result_of<NonTerminal<C>>
 {
@@ -248,11 +248,10 @@ public:
 // Repetition / ZeroOrMore / OneOrMore / NTimes → std::vector<child result>.
 // OptionalExpr → std::optional<child result>.
 //
-// Each subclass carries its own CRTP identity via the Repetition Self hook
-// (Combinators.h), so it is a distinct type and gets its own specialisation.
-// `result_of<Repetition<C,Child>>` covers the bare default-Self case (rarely
-// instantiated directly); the subclass specialisations below take precedence
-// for `*e` / `+e` / `n*e` / `?e`.
+// All four repetition forms (the Repetition base and its three Self-hooked
+// subclasses) share one result type and one fold body. `repetition_child<E>`
+// exposes the child type for any of them and is absent otherwise, so a single
+// result_of specialization and a single fold_expr_impl overload cover the lot.
 //
 // void-collapse: a repetition/optional of a void-result child is itself void
 // (e.g. `*terminal` / `?cut()` produce no values). `vector<void>` and
@@ -283,28 +282,47 @@ template<typename T>
 using rep_of_t = typename rep_of<T>::type;
 template<typename T>
 using opt_of_t = typename opt_of<T>::type;
+
+// repetition_child<E>: the child expression type of any Repetition-family
+// expression (Repetition base, ZeroOrMoreExpr, OneOrMoreExpr, NTimesExpr).
+// Absent for everything else. Lets one result_of specialization + one
+// fold_expr_impl overload cover all four forms.
+template<typename E>
+struct repetition_child; // undefined
+template<typename C, typename Child, typename Self>
+struct repetition_child<Repetition<C, Child, Self>>
+{
+    using type = Child;
+};
+template<typename C, typename Child>
+struct repetition_child<ZeroOrMoreExpr<C, Child>>
+{
+    using type = Child;
+};
+template<typename C, typename Child>
+struct repetition_child<OneOrMoreExpr<C, Child>>
+{
+    using type = Child;
+};
+template<typename C, typename Child>
+struct repetition_child<NTimesExpr<C, Child>>
+{
+    using type = Child;
+};
+template<typename E>
+    requires requires { typename repetition_child<E>::type; }
+using repetition_child_t = typename repetition_child<E>::type;
 } // namespace detail
 
-template<typename C, typename Child, typename Self>
-struct result_of<Repetition<C, Child, Self>>
+// One specialization for every repetition form: the child's result wrapped in
+// rep_of_t (vector<T>, or void if the child is void-result).
+template<typename E>
+    requires requires { typename detail::repetition_child_t<E>; }
+struct result_of<E>
 {
-    using type = detail::rep_of_t<typename result_of<Child>::type>;
+    using type = detail::rep_of_t<typename result_of<detail::repetition_child_t<E>>::type>;
 };
-template<typename C, typename Child>
-struct result_of<ZeroOrMoreExpr<C, Child>>
-{
-    using type = detail::rep_of_t<typename result_of<Child>::type>;
-};
-template<typename C, typename Child>
-struct result_of<OneOrMoreExpr<C, Child>>
-{
-    using type = detail::rep_of_t<typename result_of<Child>::type>;
-};
-template<typename C, typename Child>
-struct result_of<NTimesExpr<C, Child>>
-{
-    using type = detail::rep_of_t<typename result_of<Child>::type>;
-};
+
 template<typename C, typename Child>
 struct result_of<OptionalExpr<C, Child>>
 {
@@ -317,14 +335,13 @@ using result_of_t = typename result_of<E>::type;
 // ===========================================================================
 // Fold: post-parse typed value builder.
 //
-// fold<E>(ctx, node) walks a ParseTreeNode (built during the parse phase) and
-// reconstructs E's typed result by recursion, owning each child value as a
-// local and moving it up once. Values are never stored on the shared tree for
-// the typed path, so a move-only NodeType composes freely. The fold runs once,
-// after parse, on the final (acyclic) tree — no memo, no aliasing.
+// fold<E>(ctx, node) walks a ParseTreeNode and reconstructs E's typed result,
+// owning each child value as a local and moving it up once. Because no value
+// is stored on the shared tree, a move-only NodeType composes freely. The
+// fold runs once, after parse, on the final (acyclic) tree.
 //
-// Cases mirror the tree-construction rules in Combinators.h. See each
-// fold_expr_impl overload below.
+// Each fold_expr_impl overload below mirrors a tree-construction rule in
+// Combinators.h.
 // ===========================================================================
 namespace detail
 {
@@ -381,7 +398,8 @@ auto fold_expr_impl(const LexemeExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, Cur
 // passed through. The fold cannot statically know which branch won, so
 // parseAlt stamps node->alt_winner with the winning index and we dispatch over
 // the branch types via a runtime jump table. All branches share a result type
-// (result_of static_assert), so each branch's fold yields the right type.
+// (enforced by result_of<AlternationExpr>'s all_same static_assert), so each
+// branch's fold yields the right type.
 namespace altimpl
 {
 template<std::size_t I, typename Ctx, typename NodePtr, typename Cursor, typename... Children>
@@ -420,9 +438,6 @@ auto fold_expr_impl(const AlternationExpr<C, Children...>*,
                     const NodePtr& node,
                     Cursor& cur)
 {
-    static_assert((std::is_same_v<result_of_t<Children>, result_of_t<Children>> && ...),
-                  "peglib: typed fold from an alternation requires uniform branch "
-                  "result types (wrap mixed branches in named rules).");
     if constexpr (sizeof...(Children) == 0) {
         return; // void (empty alternation — never matches)
     } else {
@@ -449,25 +464,13 @@ auto fold_rep(Ctx& ctx, const NodePtr& node, Cursor& cur)
         return out;
     }
 }
-template<typename C, typename Ch, typename Ctx, typename NodePtr>
-auto fold_expr_impl(const ZeroOrMoreExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, Cursor& cur)
+// One overload for every repetition form (Repetition base + the three
+// Self-hooked subclasses). Dispatches via repetition_child_t<E>.
+template<typename E, typename Ctx, typename NodePtr>
+    requires requires { typename repetition_child_t<E>; }
+auto fold_expr_impl(const E*, Ctx& ctx, const NodePtr& node, Cursor& cur)
 {
-    return fold_rep<Ch>(ctx, node, cur);
-}
-template<typename C, typename Ch, typename Ctx, typename NodePtr>
-auto fold_expr_impl(const OneOrMoreExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, Cursor& cur)
-{
-    return fold_rep<Ch>(ctx, node, cur);
-}
-template<typename C, typename Ch, typename Ctx, typename NodePtr>
-auto fold_expr_impl(const NTimesExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, Cursor& cur)
-{
-    return fold_rep<Ch>(ctx, node, cur);
-}
-template<typename C, typename Ch, typename Self, typename Ctx, typename NodePtr>
-auto fold_expr_impl(const Repetition<C, Ch, Self>*, Ctx& ctx, const NodePtr& node, Cursor& cur)
-{
-    return fold_rep<Ch>(ctx, node, cur);
+    return fold_rep<repetition_child_t<E>>(ctx, node, cur);
 }
 
 // Optional: 0 children → nullopt; 1 → fold<Child>; void→void.

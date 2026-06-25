@@ -66,87 +66,66 @@ public:
     // functions and deduce Context from their operands' context_type.
     // -----------------------------------------------------------------------
 
-    // terminal(predicate): match one element for which f(elem) is true.
-    template<typename Pred>
+    // -----------------------------------------------------------------------
+    // terminal(...) / token(...) — the single-element matchers.
+    //
+    // The two families share identical match behaviour and overload set
+    // (predicate / value / set / range); they differ only in the expression
+    // class: `terminal` → TerminalExpr (void result, filtered out of sequence
+    // results — for structural tokens that must never reach an action), `token`
+    // → TokenExpr (value_type result, kept — for tokens whose identity the
+    // action needs). The shared `make_matcher<ExprT>` helper below carries the
+    // overload set once; each public name delegates.
+    // -----------------------------------------------------------------------
+private:
+    // The single overload set for both terminal and token. ExprT is either
+    // TerminalExpr or TokenExpr.
+    template<template<typename, typename> class ExprT, typename Pred>
         requires std::predicate<Pred, CharT>
-    auto terminal(const Pred& f) const
+    auto make_matcher(const Pred& f) const
     {
-        return parsers::TerminalExpr<Context, Pred>(f);
+        return ExprT<Context, Pred>(f);
     }
-
-    // terminal(value): match one element equal to `value`.
-    template<typename V>
+    template<template<typename, typename> class ExprT, typename V>
         requires PegValue<V> && std::convertible_to<V, CharT>
-    auto terminal(V value) const
+    auto make_matcher(V value) const
     {
-        return parsers::TerminalExpr<Context, CharT>(static_cast<CharT>(value));
+        return ExprT<Context, CharT>(static_cast<CharT>(value));
+    }
+    template<template<typename, typename> class ExprT>
+    auto make_matcher(const std::set<CharT>& values) const
+    {
+        return ExprT<Context, std::set<CharT>>(values);
+    }
+    template<template<typename, typename> class ExprT>
+    auto make_matcher(const std::array<CharT, 2>& values) const
+    {
+        return ExprT<Context, std::array<CharT, 2>>(values);
     }
 
-    // terminal(set): match one element found in `values`.
-    auto terminal(const std::set<CharT>& values) const
+public:
+    // terminal(...): void-result matcher (filtered from sequence results).
+    template<typename T>
+    auto terminal(T&& v) const -> decltype(make_matcher<parsers::TerminalExpr>(std::forward<T>(v)))
     {
-        return parsers::TerminalExpr<Context, std::set<CharT>>(values);
+        return make_matcher<parsers::TerminalExpr>(std::forward<T>(v));
     }
-
-    // terminal(array): match one element within the [lo, hi] range.
-    auto terminal(const std::array<CharT, 2>& values) const
-    {
-        return parsers::TerminalExpr<Context, std::array<CharT, 2>>(values);
-    }
-
-    // terminal(lo, hi): match one element within the [lo, hi] range.
+    // terminal(lo, hi): range shorthand.
     auto terminal(const CharT& value_min, const CharT& value_max) const
     {
-        std::array<CharT, 2> values = {value_min, value_max};
-        return terminal(values);
+        return terminal(std::array<CharT, 2>{value_min, value_max});
     }
 
-    // -----------------------------------------------------------------------
-    // Token factories (value-bearing terminals).
-    //
-    // token(...) is the value-keeping counterpart of terminal(...): identical
-    // match behaviour, but TokenExpr builds a node whose slot survives into
-    // the fold, where the matched element is recovered from ctx.at(span.start)
-    // and surfaced to the typed action as a `value_type` argument (terminal(...)
-    // is void/filtered). Use token(...) for tokens whose identity the action
-    // needs (operators, significant elements); use terminal(...) for structural
-    // tokens that should never appear as action parameters (parentheses,
-    // keywords, separators).
-    // -----------------------------------------------------------------------
-
-    // token(predicate): match one element for which f(elem) is true; keep it.
-    template<typename Pred>
-        requires std::predicate<Pred, CharT>
-    auto token(const Pred& f) const
+    // token(...): value_type-result matcher (kept; surfaced to typed actions).
+    template<typename T>
+    auto token(T&& v) const -> decltype(make_matcher<parsers::TokenExpr>(std::forward<T>(v)))
     {
-        return parsers::TokenExpr<Context, Pred>(f);
+        return make_matcher<parsers::TokenExpr>(std::forward<T>(v));
     }
-
-    // token(value): match one element equal to `value`; keep it.
-    template<typename V>
-        requires PegValue<V> && std::convertible_to<V, CharT>
-    auto token(V value) const
-    {
-        return parsers::TokenExpr<Context, CharT>(static_cast<CharT>(value));
-    }
-
-    // token(set): match one element found in `values`; keep it.
-    auto token(const std::set<CharT>& values) const
-    {
-        return parsers::TokenExpr<Context, std::set<CharT>>(values);
-    }
-
-    // token(array): match one element within the [lo, hi] range; keep it.
-    auto token(const std::array<CharT, 2>& values) const
-    {
-        return parsers::TokenExpr<Context, std::array<CharT, 2>>(values);
-    }
-
-    // token(lo, hi): match one element within the [lo, hi] range; keep it.
+    // token(lo, hi): range shorthand.
     auto token(const CharT& value_min, const CharT& value_max) const
     {
-        std::array<CharT, 2> values = {value_min, value_max};
-        return token(values);
+        return token(std::array<CharT, 2>{value_min, value_max});
     }
 
     // terminalSeq(range): match a contiguous run of elements equal to the

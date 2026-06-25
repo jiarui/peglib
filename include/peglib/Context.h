@@ -296,9 +296,9 @@ struct Context
     // -------------------------------------------------------------------
 
     // Invoke the skipper if one is set and auto-skip is enabled. Called
-    // by SequenceExpr / DynSequenceExpr / repeat_parse_impl between
-    // adjacent children. No-op (and zero virtual dispatch) when no
-    // skipper is set or when skip_enabled() is false (inside lexeme).
+    // by SequenceExpr and repeat_parse_impl between adjacent children.
+    // No-op (and zero virtual dispatch) when no skipper is set or when
+    // skip_enabled() is false (inside lexeme).
     //
     // Reentrancy guard: while the skipper itself runs, auto-skip is
     // temporarily disabled so the skipper's own internal Repetition /
