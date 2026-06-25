@@ -75,7 +75,8 @@ TEST_CASE("matcher-composes-in-sequence")
     auto h = (g["rule"] = g.matcher(match_balanced<Ctx>('x')) >> g.token('a'));
     (void)h;
 
-    Ctx ctx(std::string{"xxaxxa"});
+    std::string input = "xxaxxa";
+    Ctx ctx(input);
     REQUIRE(g.parse_ast("rule", ctx));
     CHECK(ctx.mark() == 6);
     CHECK(ctx.ended());
@@ -100,7 +101,8 @@ TEST_CASE("matcher-on-match-observes-span")
 
     // "xxx body xxx" is 12 chars: a level-3 pair (xxx ... xxx) with body
     // " body ". The matcher consumes the whole thing.
-    Ctx ctx(std::string{"xxx body xxx"});
+    std::string input = "xxx body xxx";
+    Ctx ctx(input);
     REQUIRE(g.parse_ast("balanced", ctx));
     CHECK(cap.start == 0);
     CHECK(cap.end == 12);
@@ -126,7 +128,8 @@ TEST_CASE("matcher-backtracking-does-not-fire-on-match")
     // the whole sequence fails and the matcher's match is discarded.
     g["rule"] = (g["balanced"] >> g.terminal('!')) | g.terminal('a');
 
-    Ctx ctx(std::string{"xxaxx"});
+    std::string input = "xxaxx";
+    Ctx ctx(input);
     // Parse fails: '!' absent (EOF after the matcher) and input isn't 'a'.
     CHECK_FALSE(g.parse_ast("rule", ctx));
     // The matcher matched the whole input speculatively, but that match was
@@ -148,11 +151,13 @@ TEST_CASE("matcher-reject-fails-parse")
     });
     g["rule"].on_match([&hits](Ctx&, const NodePtr&) { ++hits; });
 
-    Ctx ctx(std::string{"n"});
+    std::string input_n = "n";
+    Ctx ctx(input_n);
     CHECK_FALSE(g.parse_ast("rule", ctx));
     CHECK(hits == 0);
 
-    Ctx ctx2(std::string{"y"});
+    std::string input_y = "y";
+    Ctx ctx2(input_y);
     REQUIRE(g.parse_ast("rule", ctx2));
     CHECK(hits == 1);
 }
@@ -173,7 +178,8 @@ TEST_CASE("matcher-result-is-void-filtered-from-sequence")
     h.set_action([](NCtx&, Span, char ch) -> Node { return Node{ch}; });
 
     // Input "xxaxxa": match_balanced('x') consumes "xxaxx", token('a') the 'a'.
-    NCtx ctx(std::string{"xxaxxa"});
+    std::string input = "xxaxxa";
+    NCtx ctx(input);
     auto ast = g.parse_ast("rule", ctx);
     REQUIRE(ast);
     CHECK(ast->matched == 'a');
