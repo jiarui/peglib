@@ -18,6 +18,18 @@
 #include "ParseError.h"
 namespace peg
 {
+// ---------------------------------------------------------------------------
+// Span: an offset pair describing a match. `start`/`end` mirror
+// ParseTreeNode::start_offset/end_offset; their semantics are set by
+// Context::value_type (byte offsets for char-level, token indices for
+// token-level). Handed to typed actions and match-time matchers.
+// ---------------------------------------------------------------------------
+struct Span
+{
+    std::size_t start{};
+    std::size_t end{};
+};
+
 namespace parsers
 {
 template<typename Context>

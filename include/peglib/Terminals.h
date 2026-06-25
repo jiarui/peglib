@@ -114,6 +114,53 @@ protected:
 };
 
 // ---------------------------------------------------------------------------
+// MatcherExpr: a match-time primitive (a weakened lpeg.Cmt).
+//
+// Wraps a user function `fn(Context&, Span) -> std::optional<Span>` that reads
+// the context read-only and returns the span it consumed, or std::nullopt to
+// reject. MatcherExpr::parse then advances the context to span.end and builds a
+// node bracketing [start, span.end). The node survives into the tree so its
+// offsets are observable — via on_match (the side-effect hook) or parse_tree.
+//
+// CONTRACT:
+//   - fn reads the input via context.current()/at()/mark()/ended()/
+//     input_size(). It must NOT mutate position (no next()/reset()) —
+//     MatcherExpr owns the single advance to span.end.
+//   - The incoming Span is {start, start} (match begins at the current pos);
+//     the returned Span.end is where consumption stopped (>= start).
+//   - result_of<MatcherExpr> is void: it is a recognizer (filtered from
+//     sequence results, like terminal), NOT a value source. Observation of
+//     what it matched flows through on_match reading the node's span.
+//
+// Use it for matches that depend on runtime information not expressible as a
+// static combinator tree — Lua long brackets/comments (count '=' and verify
+// the close level matches), balanced delimiters, indentation-sensitive blocks.
+// ---------------------------------------------------------------------------
+template<typename Context, typename Fn>
+struct MatcherExpr : ParsingExpr<Context, MatcherExpr<Context, Fn>>
+{
+    explicit MatcherExpr(Fn fn) : m_fn(std::move(fn)) {}
+
+    typename Context::ParseResult parse(Context& context) const override
+    {
+        std::size_t start = context.mark();
+        std::optional<Span> consumed = m_fn(context, Span{start, start});
+        if (consumed) {
+            // MatcherExpr owns the position advance — fn never touches it.
+            context.reset(consumed->end);
+            auto node = std::make_shared<typename Context::ParseTreeNode>();
+            node->start_offset = start;
+            node->end_offset = consumed->end;
+            return {true, node};
+        }
+        return {false, nullptr};
+    }
+
+protected:
+    Fn m_fn;
+};
+
+// ---------------------------------------------------------------------------
 // EmptyExpr: always succeeds, consumes nothing.
 // ---------------------------------------------------------------------------
 template<typename Context>

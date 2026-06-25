@@ -49,6 +49,12 @@ real-world case study.
     (tokenization, tracing). Never fires for backtracked matches. Independent of
     the typed fold — a rule may have either, both, or neither.
   No value stack — the fold flows through owned returns.
+- **Match-time primitive (`g.matcher(fn)`)**: a weakened `lpeg.Cmt` for matches
+  that depend on runtime information — Lua long brackets/comments, balanced
+  delimiters, indentation-sensitive blocks. `fn(Context&, Span) ->
+  std::optional<Span>` reads the context read-only and returns the span it
+  consumed; `MatcherExpr` advances the position and builds a node. Void-result
+  (a recognizer); observe what it matched via `on_match` reading the node's span.
 - **Structured error reporting**: `ExpectedItem` set records what was expected
   at the furthest failure position. `Diagnostic::format()` produces
   `file:line:col: error: expected A or B` messages. A separate multi-diagnostic

@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added — `g.matcher(fn)` (match-time primitive, weakened `lpeg.Cmt`)
+
+A composable match-time primitive for matches that depend on runtime
+information not expressible as a static combinator tree — Lua long
+brackets/comments, balanced delimiters, indentation-sensitive blocks.
+
+```cpp
+g["long_bracket"] = g.matcher([](Context& c, Span) -> std::optional<Span> {
+    // Read c read-only (current/at/mark/ended/input_size); return the span
+    // consumed, or std::nullopt to reject. MatcherExpr advances the position
+    // to span.end and builds a node bracketing the match.
+    ...
+});
+g["long_bracket"].on_match([](Context& c, ParseTreeNodePtr n) {
+    // Observe the matched span via n->start_offset / n->end_offset.
+});
+```
+
+- `fn(Context&, Span) -> std::optional<Span>`: reads the context **read-only**
+  (must not call `next()`/`reset()` — `MatcherExpr` owns the single advance to
+  `span.end`). The incoming `Span` is `{start, start}`; the returned `Span.end`
+  is where consumption stopped.
+- `result_of<MatcherExpr>` is **void**: it is a recognizer (filtered from
+  sequence results, like `terminal`), not a value source. Observation of what
+  it matched flows through `on_match` reading the node's span.
+- `MatcherExpr` is the first void-result expression that **builds a node**
+  (so `on_match` can observe its span). This surfaced a fold-cursor seam: the
+  sequence fold previously assumed "void result = no node pushed". A new
+  `pushes_node<E>` trait makes the distinction explicit — the cursor now
+  advances past void-result children that push a node.
+
 ### Changed — Single value channel; `on_match` side-effect hook
 
 The untyped value channel is retired. A rule now has exactly one value

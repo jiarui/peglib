@@ -62,7 +62,8 @@ add_executable(peglib_test
     skipper_test.cpp
     to_dot_test.cpp
     recover_test.cpp
-    typed_action_test.cpp)
+    typed_action_test.cpp
+    matcher_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_test SYSTEM PRIVATE ${doctest_include_dir})

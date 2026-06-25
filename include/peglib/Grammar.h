@@ -164,6 +164,22 @@ public:
         return parsers::LexemeExpr<Context, Expr>(expr);
     }
 
+    // matcher(fn): a match-time primitive (weakened lpeg.Cmt). `fn` reads the
+    // context read-only and returns the span it consumed, or std::nullopt to
+    // reject; MatcherExpr advances the position to span.end and builds a node.
+    // Use it for matches that depend on runtime information not expressible as
+    // a static combinator tree (Lua long brackets/comments, balanced
+    // delimiters, indentation-sensitive blocks). The matcher's result is void
+    // — it is a recognizer; observation of what it matched flows through
+    // on_match reading the node's span. See MatcherExpr (Terminals.h) for the
+    // full fn contract.
+    template<typename Fn>
+        requires std::invocable<const Fn&, Context&, Span>
+    auto matcher(Fn fn) const
+    {
+        return parsers::MatcherExpr<Context, Fn>(std::move(fn));
+    }
+
     Grammar() = default;
     Grammar(const Grammar&) = delete;
     Grammar& operator=(const Grammar&) = delete;

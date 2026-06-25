@@ -4,7 +4,8 @@
 // ResultType: compile-time result-type derivation + post-parse typed fold for
 // typed semantic actions.
 //
-//   - peg::Span                       : the span handed to every typed action.
+//   - peg::Span                       : (defined in Context.h) the span handed
+//                                       to every typed action and matcher fn.
 //   - peg::parsers::result_of<E>      : compile-time result type of expression E.
 //   - peg::parsers::seq_result<Ts...> : filter-void + 1-tuple-unpack collapse.
 //   - peg::parsers::action_matches    : concept checking F is invocable as
@@ -14,6 +15,8 @@
 //
 // Terminal result model:
 //   - terminal/terminal-seq/empty/cut/And/Not → void (filtered from sequences).
+//   - MatcherExpr → void (a recognizer; what it matched is observable via
+//     on_match reading the node's span, not via the typed fold).
 //   - TokenExpr → value_type (the matched element, kept).
 //   - NonTerminal/Rule → node_type.
 // ===========================================================================
@@ -31,22 +34,7 @@
 
 namespace peg
 {
-// ---------------------------------------------------------------------------
-// Span: the match span handed to every typed action.
-//
-// `start`/`end` mirror `ParseTreeNode::start_offset`/`end_offset`, whose
-// semantics are determined by `Context::value_type`:
-//   - char-level Context<char, ...>      → byte/character offsets
-//   - token-level Context<Token, ...>    → token indices into the token stream
-// A token-level leaf action reads the token via `ctx.at(sp.start)` and then
-// recovers character offsets from `token.start`/`token.end`.
-// ---------------------------------------------------------------------------
-struct Span
-{
-    std::size_t start{};
-    std::size_t end{};
-};
-
+// peg::Span is defined in Context.h (available wherever ParseTreeNode is).
 namespace parsers
 {
 namespace detail
@@ -199,6 +187,16 @@ struct result_of<AndExpr<C, Ch>>
     using type = void;
 };
 
+// --- MatcherExpr (void — a recognizer, filtered from sequences) ----------
+// It builds a node so its span is observable via on_match, but it surfaces no
+// typed value to actions (what it matched is read off the node's offsets, not
+// recomputed by the fold — see the fold_expr_impl no-op below).
+template<typename C, typename Fn>
+struct result_of<MatcherExpr<C, Fn>>
+{
+    using type = void;
+};
+
 // --- Rules / non-terminals (node_type; dispatched via node->producer) ----
 template<typename C>
 struct result_of<NonTerminal<C>>
@@ -345,13 +343,29 @@ using result_of_t = typename result_of<E>::type;
 // ===========================================================================
 namespace detail
 {
-// Index into node->children, threaded by reference so void-contributors
-// (terminals/predicates/cut/empty, which push no child node) don't
-// desynchronise the positional correspondence.
+// Index into node->children, threaded by reference so contributors that push
+// no node (terminals/predicates/cut/empty) don't desynchronise the positional
+// correspondence.
 struct Cursor
 {
     std::size_t index = 0;
 };
+
+// pushes_node<E>: true when E's parse() builds a node on a successful match
+// (so the node IS present in the parent's children and the fold cursor must
+// advance past it). False for pure recognisers (terminal/empty/cut/predicates)
+// that contribute no node. Most void-result expressions push no node; the
+// exception is MatcherExpr, which is void-result yet builds a node (so on_match
+// can observe its span). The sequence fold consults this to decide whether a
+// void-result child still consumes a children slot.
+template<typename E>
+struct pushes_node : std::false_type
+{};
+template<typename C, typename Fn>
+struct pushes_node<MatcherExpr<C, Fn>> : std::true_type
+{};
+template<typename E>
+inline constexpr bool pushes_node_v = pushes_node<E>::value;
 
 template<typename E, typename Ctx, typename NodePtr>
 auto fold_expr(Ctx& ctx, const NodePtr& node, Cursor& cur) -> result_of_t<E>;
@@ -378,6 +392,11 @@ void fold_expr_impl(const NotExpr<C, Ch>*, Ctx&, const NodePtr&, Cursor&)
 {}
 template<typename C, typename Ch, typename Ctx, typename NodePtr>
 void fold_expr_impl(const AndExpr<C, Ch>*, Ctx&, const NodePtr&, Cursor&)
+{}
+// MatcherExpr: void recognizer. Its node is in the tree (so on_match and
+// parse_tree observe its span), but the typed fold contributes no value.
+template<typename C, typename Fn, typename Ctx, typename NodePtr>
+void fold_expr_impl(const MatcherExpr<C, Fn>*, Ctx&, const NodePtr&, Cursor&)
 {}
 
 // TokenExpr: one matched element, recovered from (ctx, span).
@@ -502,6 +521,12 @@ auto step(
     using Child = std::tuple_element_t<I, std::tuple<Children...>>;
     using R = result_of_t<Child>;
     if constexpr (std::is_void_v<R>) {
+        // Void-result child: contributes no typed value. But it may still
+        // push a node into children (MatcherExpr does, so on_match can read
+        // its span) — advance the cursor past it in that case, then recurse.
+        if constexpr (pushes_node_v<Child>) {
+            ++cur.index;
+        }
         if constexpr (I + 1 < sizeof...(Children)) {
             return step<NodePtr, Ctx, Children...>(
                 ctx, node, cur, std::move(acc), std::integral_constant<std::size_t, I + 1>{});
