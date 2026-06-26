@@ -561,6 +561,103 @@ TEST_CASE("left-recursion-arithmetic")
 }
 
 // ---------------------------------------------------------------------------
+// Indirect / mutual left-recursion (Warth seed-grow across rules).
+//
+// The tests above cover direct left-recursion (a rule's body begins with
+// itself) and the arithmetic grammar, whose cross-rule reference (num →
+// '(' add ')') is in a non-left position and so never exercises growth
+// propagating across rules. These tests target the genuinely hard case:
+// rules that call each other in LEFT position, where growth of one rule's
+// seed must be observable as growth of a partner rule's seed. Before the
+// fix, such grammars matched only the seed and never grew.
+//
+// The checkOk helpers below require FULL input consumption (context.ended())
+// because parse() / parse_string() report partial-match success, which would
+// otherwise mask a "matched only the seed" regression.
+// ---------------------------------------------------------------------------
+TEST_CASE("left-recursion-indirect-via-alias")
+{
+    // A delegates to B; B left-recurses through A. Mutual left-recursion
+    // through an alias. A → B, B → A 'b' | 'x'.
+    Grammar<> g;
+    g["A"] = g["B"];
+    g["B"] = (g["A"] >> 'b') | g.terminal('x');
+    g.set_start("A");
+
+    auto checkOk = [](const Grammar<>& gr, const std::string& input) {
+        Context context(input);
+        bool ok = gr.parse(context);
+        CHECK(ok);
+        CHECK(context.ended());
+    };
+    auto checkFail = [](const Grammar<>& gr, const std::string& input) {
+        Context context(input);
+        bool ok = gr.parse(context);
+        CHECK_FALSE(ok);
+        CHECK(context.mark() == 0);
+    };
+
+    checkOk(g, "x");
+    checkOk(g, "xb");
+    checkOk(g, "xbb");
+    checkOk(g, "xbbb");
+    checkFail(g, "");
+    checkFail(g, "b");
+}
+
+TEST_CASE("left-recursion-mutual")
+{
+    // L → M | 'x',  M → L 'm'. Two mutually left-recursive rules with no
+    // direct self-recursion on either.
+    Grammar<> g;
+    g["L"] = g["M"] | g.terminal('x');
+    g["M"] = g["L"] >> 'm';
+    g.set_start("L");
+
+    auto checkOk = [](const Grammar<>& gr, const std::string& input) {
+        Context context(input);
+        bool ok = gr.parse(context);
+        CHECK(ok);
+        CHECK(context.ended());
+    };
+    auto checkFail = [](const Grammar<>& gr, const std::string& input) {
+        Context context(input);
+        bool ok = gr.parse(context);
+        CHECK_FALSE(ok);
+    };
+
+    checkOk(g, "x");
+    checkOk(g, "xm");
+    checkOk(g, "xmm");
+    checkFail(g, "");
+    checkFail(g, "m");
+}
+
+TEST_CASE("left-recursion-indirect-via-base")
+{
+    // L → L M | 'x' (direct LR on L), M → 'm'. The left-recursive operand is
+    // itself a rule, so growth of L must re-drive M each iteration. This is
+    // the shape closest to the arithmetic grammar but with M purely a base.
+    Grammar<> g;
+    g["L"] = (g["L"] >> g["M"]) | g.terminal('x');
+    g["M"] = g.terminal('m');
+    g.set_start("L");
+
+    auto checkOk = [&g](const std::string& input) {
+        Context context(input);
+        bool ok = g.parse(context);
+        CHECK(ok);
+        CHECK(context.ended());
+    };
+
+    checkOk("x");
+    checkOk("xm");
+    checkOk("xmm");
+    checkOk("xmmm");
+}
+
+
+// ---------------------------------------------------------------------------
 // Local Rule variables inside a lambda must not dangle after the lambda
 // returns. Rule is a non-owning view (bare NonTerminal* + copied name); the
 // Grammar returned from the lambda owns the NonTerminal via shared_ptr, so

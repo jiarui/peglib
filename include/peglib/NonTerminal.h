@@ -109,13 +109,65 @@ public:
         auto [ok, rule_state] = context.rule_state(this, start_pos);
 
         if (!ok) {
-            // Memo hit: return the cached result (tree + action value).
+            // Memo entry exists at (start_pos, this). Three cases:
+
+            // (a) Left-recursive re-entry: `this` is already being evaluated
+            // at start_pos (it's on the LR stack) — its body recursed into
+            // itself before advancing. Mark this frame as the cycle's head so
+            // its grow-loop runs, and publish the active head. Return the
+            // CURRENT seed (read live, not the stale snapshot): during growth
+            // the loop republishes the grown seed each iteration, so a later
+            // recursive self-call must see the grown seed — only the first
+            // cycle-breaking call sees the failure seed.
+            if (context.lr_in_progress(this, start_pos)) {
+                for (auto* f = context.lr_top(); f != nullptr; f = f->next) {
+                    if (f->pos == start_pos && f->rule == this) {
+                        if (!f->is_head) {
+                            f->is_head = true;
+                            context.set_growing_head(start_pos, this);
+                        }
+                        break;
+                    }
+                }
+                auto seed = context.memo_get(this, start_pos);
+                context.reset(seed.m_last_pos);
+                return seed.m_cached_result;
+            }
+
+            // (b) Involved in an active head's growth: another rule is
+            // currently being grown at start_pos. Don't grow independently —
+            // return the current seed (live) and let that head's loop clear
+            // and re-drive this rule each iteration.
+            const auto* head = context.growing_head(start_pos);
+            if (head != nullptr && head != this) {
+                auto seed = context.memo_get(this, start_pos);
+                context.reset(seed.m_last_pos);
+                return seed.m_cached_result;
+            }
+
+            // (c) Ordinary memo hit: return the cached result at its end pos.
             context.reset(rule_state.m_last_pos);
             return rule_state.m_cached_result;
         }
 
-        // First-time parse: seed-grow loop to find the longest match.
-        auto inner = parseImpl(context, start_pos, rule_state);
+        // First-time parse: track this rule on the LR invocation stack while
+        // its body evaluates, so a left-recursive self-call can be detected
+        // (case a above). The frame is a stack local, popped on return.
+        typename Context::LRFrame frame{this, start_pos, false, context.lr_top()};
+        context.lr_push(&frame);
+
+        // Seed-grow loop to find the longest match. For a left-recursive
+        // head this also grows the seed; for an ordinary rule the first
+        // iteration matches and the second makes no progress (and breaks).
+        auto inner = parseImpl(context, start_pos, rule_state, frame);
+
+        context.lr_pop(&frame);
+
+        // If this rule turned out to be a left-recursion head, clear the
+        // active-head marker (growth is complete).
+        if (frame.is_head) {
+            context.clear_growing_head(start_pos);
+        }
 
         if (!inner.success) {
             if (!m_label.empty()) {
@@ -190,9 +242,21 @@ public:
     }
 
 protected:
+    // parseImpl: the seed-grow loop (Warth §3.2). Runs the body repeatedly,
+    // keeping the longest match, until an iteration makes no progress.
+    //
+    // For an ordinary (non-left-recursive) rule the first iteration matches
+    // and the second makes no progress (and breaks) — identical to the legacy
+    // behavior. For a left-recursive head (frame.is_head, set in parse() when
+    // the body recursed into `this` at start_pos), each growth iteration also
+    // clears the sibling memo entries at start_pos so that involved partner
+    // rules in an indirect/mutual cycle are re-driven against the grown seed
+    // instead of returning a frozen result — this replaces Warth's
+    // involvedSet/evalSet via the existing two-level memo map.
     ParseResult parseImpl(Context& context,
                           std::size_t start_pos,
-                          typename Context::RuleState& rule_state) const
+                          typename Context::RuleState& rule_state,
+                          typename Context::LRFrame& frame) const
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");
         auto current_pos = context.mark();
@@ -202,6 +266,12 @@ protected:
 
         while (true) {
             context.reset(current_pos);
+            // While growing a left-recursive head, clear sibling memo entries
+            // at this position each iteration so involved rules are re-driven.
+            // (Skipped before the first successful seed and for non-heads.)
+            if (frame.is_head && best.success) {
+                context.clear_siblings_at(start_pos, this);
+            }
             auto result = m_rule->parse(context);
             auto end_pos = context.mark();
             if (result.success) {

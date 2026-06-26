@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed — indirect / mutual left-recursion now grows correctly
+
+The seed-grow left-recursion support previously only handled **direct**
+left-recursion (a rule whose body begins with itself, e.g. `A → A '+' B | B`).
+Indirect and mutual left-recursion — rules that call each other in left
+position, such as `A → B`, `B → A 'b' | 'x'`, or `L → M | 'x'`,
+`M → L 'm'` — matched only the seed and never grew, leaving input
+unconsumed.
+
+This was a defect in an advertised feature (`TODO.md` already promised
+"direct/indirect/mutual"). The arithmetic-grammar test passed only because
+its cross-rule reference (`num → '(' add ')'`) sits in a non-left position
+and so never exercises growth propagating across rules.
+
+- **Root cause**: the grow-loop republished only the head rule's own memo
+  entry each iteration. A partner rule in the cycle (e.g. `B`) committed a
+  final result to the memo during the head's first iteration, and subsequent
+  growth iterations read back that frozen result — the head could not pull
+  the partner along.
+- **Fix** (Warth, *Packrat Parsers Can Support Left Recursion*, PEPM '08,
+  simplified): a transient LR invocation stack detects when a rule recurses
+  into itself before advancing (the left-recursion head). While a head grows,
+  each iteration clears the sibling memo entries at its position so involved
+  partner rules are re-driven against the grown seed. The two-level memo map
+  (`m_mem[pos][rule]`) makes this a single inner-map sweep, so Warth's
+  `involvedSet`/`evalSet` are unnecessary here.
+- **Memo unchanged**: `RuleState { m_last_pos, m_cached_result }` is
+  unmodified; all LR state is transient (a stack-local frame per in-flight
+  rule plus a pos→head index). Cut-driven eviction is unaffected (it erases
+  whole position rows, which can never dangle LR state keyed by value).
+- New regression tests in `rule_test.cpp`: `left-recursion-indirect-via-alias`,
+  `left-recursion-mutual`, `left-recursion-indirect-via-base`.
+
 ### Added — `g.matcher(fn)` (match-time primitive, weakened `lpeg.Cmt`)
 
 A composable match-time primitive for matches that depend on runtime

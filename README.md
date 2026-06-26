@@ -30,7 +30,7 @@ real-world case study.
   `NodeType`), so the operators compose and assign into rules without any explicit
   Context arguments.
 - **Packrat memoization** for linear-time parsing.
-- **Left-recursion** support via seed-grow.
+- **Left-recursion** support (direct, indirect, and mutual) via seed-grow.
 - **Cut operator** for Prolog-style committed choice. Cut-committed failures
   throw `peg::ParseError` (a hard error); regular failures are queryable via
   `Context::take_error()`.

@@ -11,6 +11,7 @@
 #include <stack>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -155,6 +156,25 @@ struct Context
         ParseResult m_cached_result;
     };
 
+    // LR invocation frame: transient left-recursion control state, one per
+    // NonTerminal currently on the call stack at a position. Linked into
+    // Context::m_lr_stack so a left-recursive re-entry (a memo hit on a rule
+    // that is itself mid-parse) can be detected and used to mark the rule as
+    // the head of a left-recursive cycle. Lifetime is the C++ call: pushed at
+    // first-time entry to a rule, popped on return — zero heap allocation.
+    //
+    // Stores NO parse answers (those live in the memo); it is pure control
+    // metadata. The two-level memo map (m_mem[pos][rule]) lets a head clear
+    // all sibling entries at its position per growth iteration, so Warth's
+    // involvedSet/evalSet are unnecessary here.
+    struct LRFrame
+    {
+        const NonTerminalType* rule;  // rule being evaluated by this frame
+        std::size_t pos;              // position at which it is being evaluated
+        bool is_head;                 // did this rule's body recurse into itself?
+        LRFrame* next;                // caller frame (links the stack)
+    };
+
     struct State
     {
         explicit State(std::size_t pos) : m_pos(pos) {}
@@ -251,6 +271,106 @@ struct Context
         // memo map after a successful first-time parse.
         memo->second = rule_state;
         return true;
+    }
+
+    // Read the CURRENT cached RuleState for (rule, pos) live from the memo
+    // map (not a stale snapshot). Used by left-recursive re-entry to return
+    // the freshly-grown seed (which the head's loop updates each iteration),
+    // rather than the snapshot captured at this call's entry. Returns a
+    // default {pos} state if no entry exists.
+    RuleState memo_get(const NonTerminalType* rule, std::size_t pos) const
+    {
+        auto memos = m_mem.find(pos);
+        if (memos == m_mem.end()) {
+            return RuleState{pos};
+        }
+        auto it = memos->second.find(rule);
+        if (it == memos->second.end()) {
+            return RuleState{pos};
+        }
+        return it->second;
+    }
+
+    // -----------------------------------------------------------------------
+    // Left-recursion invocation stack + active-head index (transient).
+    //
+    // Used by NonTerminal::parse to detect left-recursive cycles and grow the
+    // seed across indirectly/mutually-left-recursive rules. LRFrame objects
+    // are stack locals in NonTerminal::parse, linked here only while their
+    // call is on the C++ stack; m_growing_head entries are set/cleared around
+    // a head's growth loop. Neither stores parse answers (the memo does).
+    // -----------------------------------------------------------------------
+
+    LRFrame* lr_push(LRFrame* frame) noexcept
+    {
+        frame->next = m_lr_stack;
+        m_lr_stack = frame;
+        return frame;
+    }
+
+    [[nodiscard]] LRFrame* lr_top() noexcept { return m_lr_stack; }
+    [[nodiscard]] const LRFrame* lr_top() const noexcept { return m_lr_stack; }
+
+    void lr_pop(LRFrame* frame) noexcept
+    {
+        assert(m_lr_stack == frame && "lr_pop out of order");
+        m_lr_stack = frame->next;
+    }
+
+    // Is `rule` already being evaluated at `pos`? Scans the LR stack. True =>
+    // this application is (directly or indirectly) left-recursive — the rule
+    // recursed into itself before consuming input.
+    bool lr_in_progress(const NonTerminalType* rule, std::size_t pos) const noexcept
+    {
+        for (const LRFrame* f = m_lr_stack; f != nullptr; f = f->next) {
+            if (f->pos == pos && f->rule == rule) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The head rule currently being grown at `pos`, or nullptr if no growth is
+    // in progress there. Involved rules query this to decide whether to defer
+    // (return their current seed) rather than growing independently.
+    [[nodiscard]] const NonTerminalType* growing_head(std::size_t pos) const noexcept
+    {
+        auto it = m_growing_head.find(pos);
+        return it == m_growing_head.end() ? nullptr : it->second;
+    }
+
+    void set_growing_head(std::size_t pos, const NonTerminalType* rule)
+    {
+        m_growing_head[pos] = rule;
+    }
+
+    void clear_growing_head(std::size_t pos) noexcept { m_growing_head.erase(pos); }
+
+    // Clear every memo entry at `pos` except `keep` AND except any rule
+    // currently on the LR stack at `pos`. Called by a head's growth loop at
+    // the start of each growth iteration so sibling (involved) rules are
+    // re-evaluated against the head's freshly-grown seed instead of returning
+    // a frozen result.
+    //
+    // The stack-resident exclusion is essential: a rule mid-evaluation up the
+    // call chain must NOT have its memo dropped — it would re-enter through
+    // the first-time path and corrupt cycle detection. Only completed sibling
+    // results get cleared. The two-level memo map makes this a single
+    // inner-map sweep — it replaces Warth's involvedSet/evalSet.
+    void clear_siblings_at(std::size_t pos, const NonTerminalType* keep)
+    {
+        auto memos = m_mem.find(pos);
+        if (memos == m_mem.end()) {
+            return;
+        }
+        for (auto it = memos->second.begin(); it != memos->second.end();) {
+            const NonTerminalType* rule = it->first;
+            if (rule == keep || lr_in_progress(rule, pos)) {
+                ++it;
+            } else {
+                it = memos->second.erase(it);
+            }
+        }
     }
 
     struct CutRecord
@@ -422,6 +542,16 @@ protected:
     std::size_t m_input_size = 0;
     std::map<std::size_t, std::map<const NonTerminalType*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
+
+    // Left-recursion state (transient; parse answers live only in m_mem):
+    //   m_lr_stack     — LR invocation stack head; frames are stack locals in
+    //                    NonTerminal::parse, linked here only while on the
+    //                    C++ call stack. nullptr when no rule is mid-parse.
+    //   m_growing_head — pos → head rule currently in its growth loop at that
+    //                    pos. Absent ⇒ no growth in progress there. Entries
+    //                    are set on growth-loop entry and cleared on exit.
+    LRFrame* m_lr_stack = nullptr;
+    std::unordered_map<std::size_t, const NonTerminalType*> m_growing_head;
 
     // Error tracking state
     std::size_t m_furthest_failure_pos = 0;
