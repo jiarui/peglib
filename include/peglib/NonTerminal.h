@@ -153,7 +153,7 @@ public:
         // First-time parse: track this rule on the LR invocation stack while
         // its body evaluates, so a left-recursive self-call can be detected
         // (case a above). The frame is a stack local, popped on return.
-        typename Context::LRFrame frame{this, start_pos, false, context.lr_top()};
+        typename Context::LRFrame frame{this, start_pos, start_pos, false, context.lr_top()};
         context.lr_push(&frame);
 
         // Seed-grow loop to find the longest match. For a left-recursive
@@ -259,34 +259,46 @@ protected:
                           typename Context::LRFrame& frame) const
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");
-        auto current_pos = context.mark();
+        // Plant the failure seed: a left-recursive self-call during the body
+        // parse must fail (not recurse forever), so the body falls to its
+        // non-left-recursive alternative. The seed's end pos is start_pos (a
+        // failure consumes nothing). frame.last_pos is the grow-progress
+        // marker, starting at the seed position.
+        frame.last_pos = start_pos;
+        rule_state.m_cached_result = ParseResult{};
+        rule_state.m_last_pos = start_pos;
         context.update_rule_state(this, start_pos, rule_state);
 
         ParseResult best{false, nullptr};
 
         while (true) {
-            context.reset(current_pos);
+            context.reset(start_pos);
             // While growing a left-recursive head, clear sibling memo entries
-            // at this position each iteration so involved rules are re-driven.
-            // (Skipped before the first successful seed and for non-heads.)
+            // at this position each iteration so involved rules are re-driven
+            // against the grown seed. (Skipped before the first successful seed
+            // and for non-heads, so ordinary rules see no churn.)
             if (frame.is_head && best.success) {
                 context.clear_siblings_at(start_pos, this);
             }
             auto result = m_rule->parse(context);
             auto end_pos = context.mark();
             if (result.success) {
-                if (end_pos > rule_state.m_last_pos) {
-                    rule_state.m_last_pos = end_pos;
+                if (end_pos > frame.last_pos) {
+                    // Growth: adopt the extended match. Track progress on the
+                    // (transient) frame; publish the grown seed to the memo so
+                    // a recursive self-call sees it.
+                    frame.last_pos = end_pos;
                     best = result;
-                    // Cache intermediate result so recursive memo hits
-                    // during seed-grow see the latest successful match.
                     rule_state.m_cached_result = result;
+                    rule_state.m_last_pos = end_pos;
                     if (!context.update_rule_state(this, start_pos, rule_state)) {
                         break;
                     }
                 } else {
+                    // No progress: fixed point. Keep this result and stop.
                     best = std::move(result);
                     rule_state.m_cached_result = best;
+                    rule_state.m_last_pos = end_pos;
                     context.update_rule_state(this, start_pos, rule_state);
                     break;
                 }
@@ -294,7 +306,7 @@ protected:
                 break;
             }
         }
-        context.reset(rule_state.m_last_pos);
+        context.reset(frame.last_pos);
         return best;
     }
 

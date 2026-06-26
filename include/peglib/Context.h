@@ -144,11 +144,17 @@ struct Context
 
     struct RuleState
     {
-        explicit RuleState(std::size_t pos) : m_last_pos{pos} {}
+        RuleState() = default;
         RuleState(const RuleState&) = default;
         RuleState& operator=(const RuleState&) = default;
-        std::size_t m_last_pos;
-        // Cached ParseResult from the first successful parse at this
+        // Where this cached result ended. This is part of the cached ANSWER
+        // (not transient grow-control state, which lives in LRFrame::last_pos
+        // during the loop): it is needed on a memo hit to reset the context to
+        // the result's end position. It is also the one field that cannot be
+        // derived from m_cached_result, because a recovered/null-tree result
+        // ends at an arbitrary resync position, not at start_pos.
+        std::size_t m_last_pos = 0;
+        // Cached ParseResult from the (first successful) parse at this
         // (position, rule) pair. On a memo hit, the caller receives this
         // cached result — including the tree and action value — without
         // re-executing the action. This is what makes packrat memoization
@@ -163,14 +169,18 @@ struct Context
     // the head of a left-recursive cycle. Lifetime is the C++ call: pushed at
     // first-time entry to a rule, popped on return — zero heap allocation.
     //
-    // Stores NO parse answers (those live in the memo); it is pure control
-    // metadata. The two-level memo map (m_mem[pos][rule]) lets a head clear
-    // all sibling entries at its position per growth iteration, so Warth's
-    // involvedSet/evalSet are unnecessary here.
+    // Stores NO parse answers (those live in the memo). `last_pos` is the
+    // grow-loop progress marker: the furthest position reached so far across
+    // growth iterations. It lives here (transient) rather than in RuleState
+    // so the memo is not churned every growth iteration — the memo's own
+    // m_last_pos is written once, at commit. The two-level memo map
+    // (m_mem[pos][rule]) lets a head clear all sibling entries at its position
+    // per growth iteration, so Warth's involvedSet/evalSet are unnecessary.
     struct LRFrame
     {
         const NonTerminalType* rule;  // rule being evaluated by this frame
         std::size_t pos;              // position at which it is being evaluated
+        std::size_t last_pos;         // grow-loop progress: furthest pos so far
         bool is_head;                 // did this rule's body recurse into itself?
         LRFrame* next;                // caller frame (links the stack)
     };
@@ -250,7 +260,7 @@ struct Context
     {
         auto [iter_records, ins] =
             m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
-        auto [iter, ok] = iter_records->second.emplace(rule, RuleState{pos});
+        auto [iter, ok] = iter_records->second.emplace(rule, RuleState{});
         return std::tuple<bool, RuleState>{ok, iter->second};
     }
 
@@ -277,16 +287,16 @@ struct Context
     // map (not a stale snapshot). Used by left-recursive re-entry to return
     // the freshly-grown seed (which the head's loop updates each iteration),
     // rather than the snapshot captured at this call's entry. Returns a
-    // default {pos} state if no entry exists.
+    // default state if no entry exists.
     RuleState memo_get(const NonTerminalType* rule, std::size_t pos) const
     {
         auto memos = m_mem.find(pos);
         if (memos == m_mem.end()) {
-            return RuleState{pos};
+            return RuleState{};
         }
         auto it = memos->second.find(rule);
         if (it == memos->second.end()) {
-            return RuleState{pos};
+            return RuleState{};
         }
         return it->second;
     }

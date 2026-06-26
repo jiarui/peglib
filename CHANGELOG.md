@@ -32,10 +32,14 @@ and so never exercises growth propagating across rules.
   partner rules are re-driven against the grown seed. The two-level memo map
   (`m_mem[pos][rule]`) makes this a single inner-map sweep, so Warth's
   `involvedSet`/`evalSet` are unnecessary here.
-- **Memo unchanged**: `RuleState { m_last_pos, m_cached_result }` is
-  unmodified; all LR state is transient (a stack-local frame per in-flight
-  rule plus a pos→head index). Cut-driven eviction is unaffected (it erases
-  whole position rows, which can never dangle LR state keyed by value).
+- **Memo unchanged in shape**: `RuleState { m_last_pos, m_cached_result }`
+  keeps both fields (the end position is genuinely part of the cached answer
+  — a recovered/null-tree result ends at an arbitrary resync position, not
+  derivable from the tree). The grow-loop *progress marker*, however, moved
+  off the memo onto the transient `LRFrame::last_pos`, so the memo is written
+  only when publishing the seed, not churned every growth iteration. Cut-driven
+  eviction is unaffected (it erases whole position rows, which can never
+  dangle LR state keyed by value).
 - New regression tests in `rule_test.cpp`: `left-recursion-indirect-via-alias`,
   `left-recursion-mutual`, `left-recursion-indirect-via-base`.
 
