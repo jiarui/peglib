@@ -295,10 +295,35 @@ protected:
                         break;
                     }
                 } else {
-                    // No progress: fixed point. Keep this result and stop.
-                    best = std::move(result);
+                    // No progress: fixed point. Two sub-cases:
+                    //
+                    // (1) `best` is still empty (no successful iteration yet).
+                    //     This is the FIRST iteration and it matched without
+                    //     advancing — a legitimate zero-width match (empty
+                    //     expression, lookahead, or a rule whose body produces
+                    //     no input consumption at this position). Adopt it as
+                    //     the seed.
+                    //
+                    // (2) `best` already holds a successful (possibly grown)
+                    //     match. This iteration matched no further than the
+                    //     longest so far (end_pos <= frame.last_pos, which
+                    //     tracks the grown best's end), so it CANNOT improve on
+                    //     `best`. Keep the longest result. The current
+                    //     iteration's result may be a REGRESSED parse (shorter
+                    //     than `best`) — common in indirect/mutual left
+                    //     recursion, where the body's ordered alternatives
+                    //     re-select a base case against the unchanged position
+                    //     once a sibling memo is cleared. Overwriting `best`
+                    //     with that regressed result was the root cause of the
+                    //     grown suffix being silently dropped: an inner head
+                    //     (e.g. prefixexp) grew to the suffix production in one
+                    //     iteration, the next iteration's non-growing parse
+                    //     regressed to the seed, and `best` was clobbered.
+                    if (!best.success) {
+                        best = std::move(result);
+                    }
                     rule_state.m_cached_result = best;
-                    rule_state.m_last_pos = end_pos;
+                    rule_state.m_last_pos = frame.last_pos;
                     context.update_rule_state(this, start_pos, rule_state);
                     break;
                 }
