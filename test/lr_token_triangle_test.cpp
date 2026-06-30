@@ -50,7 +50,9 @@ namespace
 // `Name` matches any ASCII letter, so `a.b`, `a.b.c` are genuinely valid.
 auto name_pred()
 {
-    return [](char c) { return std::isalpha(static_cast<unsigned char>(c)) != 0; };
+    return [](char c) {
+        return std::isalpha(static_cast<unsigned char>(c)) != 0;
+    };
 }
 
 bool ok_char(const Grammar<>& g, std::string input)
@@ -64,28 +66,33 @@ using RuleRef = decltype(std::declval<Grammar<>>()["x"]);
 void build_factored_triangle(Grammar<>& g, int perm)
 {
     static const int perms[6][3] = {
-        {0, 1, 2}, {0, 2, 1}, {1, 0, 2},
-        {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
+        {0, 1, 2},
+        {0, 2, 1},
+        {1, 0, 2},
+        {1, 2, 0},
+        {2, 0, 1},
+        {2, 1, 0},
     };
     const int* p = perms[perm];
 
     g["Name"] = g.terminal(name_pred());
     g["args"] = g.terminal('(') >> g.terminal(')');
 
-    g["var_name"]  = g["Name"];
+    g["var_name"] = g["Name"];
     g["var_field"] = g["prefixexp"] >> g.terminal('.') >> g["Name"];
     g["var_index"] = g["prefixexp"] >> g.terminal('[') >> g["exp"] >> g.terminal(']');
 
-    g["call_plain"]  = g["prefixexp"] >> g["args"];
+    g["call_plain"] = g["prefixexp"] >> g["args"];
     g["call_method"] = g["prefixexp"] >> g.terminal(':') >> g["Name"] >> g["args"];
 
     g["functioncall"] = g["call_method"] | g["call_plain"];
     // functioncall BEFORE var (see ordering note): otherwise a bare Name seed
     // short-circuits before a call suffix can extend it.
-    g["prefixexp"] = g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
+    g["prefixexp"] =
+        g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
     g["exp"] = g["prefixexp"] | g.terminal('0', '9');
 
-    RuleRef parts[3] = { g["var_name"], g["var_index"], g["var_field"] };
+    RuleRef parts[3] = {g["var_name"], g["var_index"], g["var_field"]};
     g["var"] = parts[p[0]] | parts[p[1]] | parts[p[2]];
 
     g["chunk"] = g["exp"];
@@ -131,8 +138,19 @@ struct Tok
     bool operator==(const Tok&) const = default;
 };
 
-enum : int { T_NAME = 1, T_DOT, T_LBRACK, T_RBRACK, T_LPAREN, T_RPAREN,
-             T_COLON, T_DIGIT, T_COMMA, T_EOF };
+enum : int
+{
+    T_NAME = 1,
+    T_DOT,
+    T_LBRACK,
+    T_RBRACK,
+    T_LPAREN,
+    T_RPAREN,
+    T_COLON,
+    T_DIGIT,
+    T_COMMA,
+    T_EOF
+};
 
 using TokCtx = Context<Tok>;
 using TokGrammar = Grammar<Tok>;
@@ -162,11 +180,11 @@ void build_token_triangle(TokGrammar& g, int order)
     g["args"] = tok(g, T_LPAREN) >> -g["explist"] >> tok(g, T_RPAREN);
     g["explist"] = g["exp"] >> *(tok(g, T_COMMA) >> g["exp"]);
 
-    g["var_name"]  = g["Name"];
+    g["var_name"] = g["Name"];
     g["var_field"] = g["prefixexp"] >> tok(g, T_DOT) >> g["Name"];
     g["var_index"] = g["prefixexp"] >> tok(g, T_LBRACK) >> g["exp"] >> tok(g, T_RBRACK);
 
-    g["call_plain"]  = g["prefixexp"] >> g["args"];
+    g["call_plain"] = g["prefixexp"] >> g["args"];
     g["call_method"] = g["prefixexp"] >> tok(g, T_COLON) >> g["Name"] >> g["args"];
     g["call_method_tail"] = tok(g, T_COLON) >> g["Name"] >> g["args"];
 
@@ -175,15 +193,16 @@ void build_token_triangle(TokGrammar& g, int order)
 
     // functioncall BEFORE var (ordering note): otherwise var's bare Name seed
     // short-circuits prefixexp before a call suffix can extend it.
-    g["prefixexp"] = g["functioncall"] | g["var"] | (tok(g, T_LPAREN) >> g["exp"] >> tok(g, T_RPAREN));
+    g["prefixexp"] =
+        g["functioncall"] | g["var"] | (tok(g, T_LPAREN) >> g["exp"] >> tok(g, T_RPAREN));
     g["exp"] = g["prefixexp"] | g["digit"];
 
     if (order == 0)
-        g["var"] = g["var_name"] | g["var_index"] | g["var_field"];  // base-first: BROKEN
+        g["var"] = g["var_name"] | g["var_index"] | g["var_field"]; // base-first: BROKEN
     else
-        g["var"] = g["var_field"] | g["var_index"] | g["var_name"];  // suffix-first: CORRECT
+        g["var"] = g["var_field"] | g["var_index"] | g["var_name"]; // suffix-first: CORRECT
 
-    g["Name"]  = g.terminal([](const Tok& t) { return t.id == T_NAME; });
+    g["Name"] = g.terminal([](const Tok& t) { return t.id == T_NAME; });
     g["digit"] = g.terminal([](const Tok& t) { return t.id == T_DIGIT; });
 
     g["chunk"] = g["exp"];
@@ -196,16 +215,18 @@ TEST_CASE("lr-token-triangle: token-level yueshi-shape matrix (baseline data)")
     auto mk = [](int id, std::string t = "") {
         return Tok{id, std::move(t)};
     };
-    struct Input { const char* label; std::vector<Tok> toks; };
+    struct Input
+    {
+        const char* label;
+        std::vector<Tok> toks;
+    };
     std::vector<Input> inputs = {
-        {"a",        {mk(T_NAME, "a")}},
-        {"a.b",      {mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b")}},
-        {"a.b.c",    {mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b"),
-                      mk(T_DOT), mk(T_NAME, "c")}},
-        {"a[1]",     {mk(T_NAME, "a"), mk(T_LBRACK), mk(T_DIGIT, "1"), mk(T_RBRACK)}},
-        {"a()",      {mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN)}},
-        {"a()()",    {mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN),
-                      mk(T_LPAREN), mk(T_RPAREN)}},
+        {"a", {mk(T_NAME, "a")}},
+        {"a.b", {mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b")}},
+        {"a.b.c", {mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b"), mk(T_DOT), mk(T_NAME, "c")}},
+        {"a[1]", {mk(T_NAME, "a"), mk(T_LBRACK), mk(T_DIGIT, "1"), mk(T_RBRACK)}},
+        {"a()", {mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN)}},
+        {"a()()", {mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN), mk(T_LPAREN), mk(T_RPAREN)}},
     };
 
     for (int order = 0; order < 2; ++order) {
@@ -217,9 +238,10 @@ TEST_CASE("lr-token-triangle: token-level yueshi-shape matrix (baseline data)")
             stream.push_back(mk(T_EOF));
             row += ok_tok(g, stream) ? "Y " : "N ";
         }
-        MESSAGE("token order=" << order
-                               << (order == 1 ? " (suffix-first, CORRECT)" : " (base-first, BROKEN)")
-                               << "  " << row);
+        MESSAGE(
+            "token order=" << order
+                           << (order == 1 ? " (suffix-first, CORRECT)" : " (base-first, BROKEN)")
+                           << "  " << row);
     }
 }
 
@@ -232,7 +254,9 @@ TEST_CASE("lr-token-triangle: suffix-first grows all suffix forms")
 {
     TokGrammar g;
     build_token_triangle(g, /*suffix-first*/ 1);
-    auto mk = [](int id, std::string t = "") { return Tok{id, std::move(t)}; };
+    auto mk = [](int id, std::string t = "") {
+        return Tok{id, std::move(t)};
+    };
 
     auto run = [&](std::vector<Tok> toks) {
         toks.push_back(mk(T_EOF));
@@ -241,11 +265,11 @@ TEST_CASE("lr-token-triangle: suffix-first grows all suffix forms")
 
     CHECK_MESSAGE(run({mk(T_NAME, "a")}), "base case a — seed must at least plant");
     CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b")}), "a.b — one field suffix");
-    CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b"),
-                       mk(T_DOT), mk(T_NAME, "c")}), "a.b.c — two field suffixes");
+    CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_DOT), mk(T_NAME, "b"), mk(T_DOT), mk(T_NAME, "c")}),
+                  "a.b.c — two field suffixes");
     CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_LBRACK), mk(T_DIGIT, "1"), mk(T_RBRACK)}),
                   "a[1] — index suffix");
     CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN)}), "a() — call suffix");
-    CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN),
-                       mk(T_LPAREN), mk(T_RPAREN)}), "a()() — chained-call suffix");
+    CHECK_MESSAGE(run({mk(T_NAME, "a"), mk(T_LPAREN), mk(T_RPAREN), mk(T_LPAREN), mk(T_RPAREN)}),
+                  "a()() — chained-call suffix");
 }

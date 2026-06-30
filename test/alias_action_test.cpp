@@ -94,7 +94,7 @@ TEST_CASE("alias-action: alias with set_action fires its own action")
     Ctx ctx(in);
     auto ast = g.parse_ast("wrap", ctx);
     REQUIRE(ast);
-    CHECK(ast->tag == 2);   // alias action fired
+    CHECK(ast->tag == 2); // alias action fired
     CHECK(ast->value == 100);
 }
 
@@ -202,7 +202,7 @@ TEST_CASE("alias-action: alias on_match — inner hook (KNOWN LIMITATION)")
     // Ideal: inner_hits==1 && wrap_hits==1. Actual (limitation): wrap fires
     // (it is the start rule), inner does not.
     MESSAGE("alias-on_match: inner_hits=" << inner_hits << " wrap_hits=" << wrap_hits
-           << " (ideal: inner=1 wrap=1; limitation drops inner)");
+                                          << " (ideal: inner=1 wrap=1; limitation drops inner)");
     CHECK(wrap_hits == 1); // the alias's own (start) hook does fire
 }
 

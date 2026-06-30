@@ -656,7 +656,6 @@ TEST_CASE("left-recursion-indirect-via-base")
     checkOk("xmmm");
 }
 
-
 // ---------------------------------------------------------------------------
 // Local Rule variables inside a lambda must not dangle after the lambda
 // returns. Rule is a non-owning view (bare NonTerminal* + copied name); the

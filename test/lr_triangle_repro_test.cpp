@@ -35,7 +35,12 @@ using namespace peg;
 namespace
 {
 // `Name` matches any ASCII letter, so `a.b`, `a.b.c`, etc. are valid inputs.
-auto name_pred() { return [](char c) { return std::isalpha(static_cast<unsigned char>(c)) != 0; }; }
+auto name_pred()
+{
+    return [](char c) {
+        return std::isalpha(static_cast<unsigned char>(c)) != 0;
+    };
+}
 
 // Parse `input` from the grammar's start rule; succeed only on full
 // consumption (a partial match would mask a "grew only the seed" failure).
@@ -57,13 +62,13 @@ TEST_CASE("LR-triangle: inline suffix in var alternation (baseline)")
     g["Name"] = g.terminal(name_pred());
     g["args"] = g.terminal('(') >> g.terminal(')');
     // Suffix productions FIRST in var; the base Name is the LAST alternative.
-    g["var"] = (g["prefixexp"] >> g.terminal('.') >> g["Name"])
-             | (g["prefixexp"] >> g.terminal('[') >> g["exp"] >> g.terminal(']'))
-             | g["Name"];
-    g["functioncall"] = (g["prefixexp"] >> g["args"])
-                      | (g["prefixexp"] >> g.terminal(':') >> g["Name"] >> g["args"]);
+    g["var"] = (g["prefixexp"] >> g.terminal('.') >> g["Name"]) |
+               (g["prefixexp"] >> g.terminal('[') >> g["exp"] >> g.terminal(']')) | g["Name"];
+    g["functioncall"] = (g["prefixexp"] >> g["args"]) |
+                        (g["prefixexp"] >> g.terminal(':') >> g["Name"] >> g["args"]);
     // functioncall BEFORE var so a call suffix can extend past a bare Name.
-    g["prefixexp"] = g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
+    g["prefixexp"] =
+        g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
     g["exp"] = g["prefixexp"] | g.terminal('0', '9');
     g["chunk"] = g["exp"];
     g.set_start("chunk");
@@ -89,20 +94,21 @@ TEST_CASE("LR-triangle: factored suffix sub-rules (typed-fold shape)")
     g["Name"] = g.terminal(name_pred());
     g["args"] = g.terminal('(') >> g.terminal(')');
 
-    g["var_name"]  = g["Name"];
+    g["var_name"] = g["Name"];
     g["var_field"] = g["prefixexp"] >> g.terminal('.') >> g["Name"];
     g["var_index"] = g["prefixexp"] >> g.terminal('[') >> g["exp"] >> g.terminal(']');
 
-    g["call_plain"]  = g["prefixexp"] >> g["args"];
+    g["call_plain"] = g["prefixexp"] >> g["args"];
     g["call_method"] = g["prefixexp"] >> g.terminal(':') >> g["Name"] >> g["args"];
 
     // Suffix productions FIRST; base Name LAST.
-    g["var"]          = g["var_field"] | g["var_index"] | g["var_name"];
+    g["var"] = g["var_field"] | g["var_index"] | g["var_name"];
     g["functioncall"] = g["call_method"] | g["call_plain"];
     // functioncall BEFORE var (see ordering note at top of file).
-    g["prefixexp"]    = g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
-    g["exp"]          = g["prefixexp"] | g.terminal('0', '9');
-    g["chunk"]        = g["exp"];
+    g["prefixexp"] =
+        g["functioncall"] | g["var"] | (g.terminal('(') >> g["exp"] >> g.terminal(')'));
+    g["exp"] = g["prefixexp"] | g.terminal('0', '9');
+    g["chunk"] = g["exp"];
     g.set_start("chunk");
 
     CHECK_MESSAGE(ok(g, "a"), "base case still works (seed = Name)");
@@ -121,13 +127,13 @@ TEST_CASE("LR-triangle: minimal factored 2-rule reduction grows")
 {
     Grammar<> g;
     g["Name"] = g.terminal(name_pred());
-    g["var_name"]  = g["Name"];
+    g["var_name"] = g["Name"];
     g["var_field"] = g["prefixexp"] >> g.terminal('.') >> g["Name"];
     // Suffix FIRST.
-    g["var"]       = g["var_field"] | g["var_name"];
+    g["var"] = g["var_field"] | g["var_name"];
     g["prefixexp"] = g["var"];
-    g["exp"]       = g["prefixexp"];
-    g["chunk"]     = g["exp"];
+    g["exp"] = g["prefixexp"];
+    g["chunk"] = g["exp"];
     g.set_start("chunk");
 
     CHECK_MESSAGE(ok(g, "a"), "base case");
