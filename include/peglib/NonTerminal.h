@@ -1,3 +1,16 @@
+// NonTerminal: internal grammar-tree node with stable identity. Supports
+// packrat memoization and left-recursion (seed-grow). NonTerminal is
+// non-copyable — identity (the `this` pointer) is the memo key and seed-grow
+// anchor. Users interact via Rule (a bare-pointer, non-owning handle), never
+// directly with NonTerminal.
+//
+// Value/side-effect model (both run post-parse, in the fold, via parse_ast):
+//   - parse() returns ParseResult { success, tree }: pure structure. Cached
+//     in RuleState::m_cached_result; memo hits replay without re-parsing.
+//   - m_typed_fold: value computation, set via RuleHandle::set_action.
+//   - m_on_match: side-effect hook, set via Rule::on_match. Fires once per
+//     committed-tree node.
+//   Neither runs during parse, so backtracked matches never trigger them.
 #pragma once
 #include "peglib/ParserFwd.h"
 #include "peglib/Recover.h"
@@ -12,24 +25,6 @@ namespace peg
 namespace parsers
 {
 
-// ---------------------------------------------------------------------------
-// NonTerminal: internal grammar-tree node with stable identity.
-//
-// Supports packrat memoization and left-recursion (seed-grow algorithm).
-// NonTerminal is non-copyable — identity (the `this` pointer) is the memo
-// key and seed-grow anchor. Users interact via Rule (a bare-pointer,
-// non-owning handle), never directly with NonTerminal.
-//
-// Value/side-effect model (both run post-parse, in the fold, via parse_ast):
-//   - parse() returns ParseResult { success, tree }: pure structure. The
-//     complete ParseResult is cached in RuleState::m_cached_result; memo
-//     hits replay the cached tree without re-parsing.
-//   - A typed fold (m_typed_fold, set via RuleHandle::set_action) computes
-//     the rule's value bottom-up, owning child values as locals.
-//   - A side-effect hook (m_on_match, set via Rule::on_match) fires once per
-//     committed-tree node for observational actions.
-//   Neither runs during parse, so backtracked matches never trigger them.
-// ---------------------------------------------------------------------------
 template<typename Context>
 struct NonTerminal : ParsingExpr<Context, NonTerminal<Context>>
 {
@@ -38,18 +33,10 @@ public:
     using ParseTreeNodePtr = typename ParsingExpr<Context, NonTerminal<Context>>::ParseTreeNodePtr;
     using NodeType = typename Context::node_type;
 
-    // Typed fold: the post-parse value builder registered by
-    // RuleHandle::set_action<F>. Invoked by the fold driver (ResultType.h
-    // fold_rule / fold_start) on each node whose producer points here.
     using TypedFold = std::function<NodeType(Context&, const ParseTreeNodePtr&)>;
     void set_typed_fold(TypedFold f) { m_typed_fold = std::move(f); }
     [[nodiscard]] const TypedFold& typed_fold() const noexcept { return m_typed_fold; }
 
-    // Side-effect hook: a void callback fired once per committed-tree node
-    // during the post-parse fold (parse_ast only). Use it for actions that
-    // observe a match without producing a value (tokenization, tracing,
-    // symbol-table population). Never fires for backtracked matches — the
-    // fold visits only the accepted tree.
     using OnMatch = std::function<void(Context&, const ParseTreeNodePtr&)>;
     void set_on_match(OnMatch f) { m_on_match = std::move(f); }
     [[nodiscard]] const OnMatch& on_match() const noexcept { return m_on_match; }
@@ -64,10 +51,6 @@ public:
     NonTerminal(const NonTerminal&) = delete;
     NonTerminal& operator=(const NonTerminal&) = delete;
 
-    // Assign a body expression. The typed fold is registered separately by
-    // RuleHandle::set_action (which captures the body's static ExprType). A
-    // rule with no typed fold is transparent: the fold follows node->producer
-    // to an action-bearing rule, or yields a default-constructed NodeType.
     template<typename ExprType>
     NonTerminal& operator=(const ParsingExpr<Context, ExprType>& rhs)
     {
@@ -81,26 +64,22 @@ public:
     void set_label(std::string label) { m_label = std::move(label); }
     [[nodiscard]] const std::string& label() const noexcept { return m_label; }
 
-    // Configure recovery for this rule. When the body fails AND no cut is
-    // committed at the failure site, the rule scans forward to the next
-    // sync token (per spec.is_sync_token), records a diagnostic at the
-    // original failure position, consumes the sync token, and reports
-    // success with a transparent null tree. Parsing then continues from
-    // the sync point.
+    // Configure recovery. On body failure (with no cut committed at the
+    // failure site), the rule scans forward to the next sync token, records a
+    // diagnostic at the original failure position, consumes the sync token,
+    // reports success with a transparent null tree, and continues from there.
     void set_recovery(RecoverSpec<typename Context::value_type> spec)
     {
         m_recover = std::move(spec);
     }
 
     [[nodiscard]] bool has_recovery() const noexcept { return m_recover.configured(); }
-
     [[nodiscard]] bool is_defined() const noexcept { return m_rule != nullptr; }
 
-    // Debug-only lifetime aid: ~Grammar() calls this on every NonTerminal
-    // before releasing its owning shared_ptr. Clearing the body makes any
-    // dangling Rule handle (one that outlived its Grammar) trip the
-    // `assert(m_rule && ...)` in parseImpl instead of silently calling into
-    // freed memory. No-op in release builds (NDEBUG defined).
+    // Debug-only lifetime aid: ~Grammar() poisons each NonTerminal's body
+    // before releasing its owning shared_ptr. A dangling Rule handle (one
+    // that outlived its Grammar) trips the assert in parseImpl instead of
+    // silently using freed memory.
     void clear_body_for_debug() noexcept { m_rule.reset(); }
 
     ParseResult parse(Context& context) const override
@@ -109,16 +88,9 @@ public:
         auto [ok, rule_state] = context.rule_state(this, start_pos);
 
         if (!ok) {
-            // Memo entry exists at (start_pos, this). Three cases:
-
-            // (a) Left-recursive re-entry: `this` is already being evaluated
-            // at start_pos (it's on the LR stack) — its body recursed into
-            // itself before advancing. Mark this frame as the cycle's head so
-            // its grow-loop runs, and publish the active head. Return the
-            // CURRENT seed (read live, not the stale snapshot): during growth
-            // the loop republishes the grown seed each iteration, so a later
-            // recursive self-call must see the grown seed — only the first
-            // cycle-breaking call sees the failure seed.
+            // (a) Left-recursive re-entry: `this` is on the LR stack at
+            // start_pos. Mark this frame as the cycle's head, return the
+            // CURRENT seed (live, not the stale snapshot).
             if (context.lr_in_progress(this, start_pos)) {
                 for (auto* f = context.lr_top(); f != nullptr; f = f->next) {
                     if (f->pos == start_pos && f->rule == this) {
@@ -134,10 +106,8 @@ public:
                 return seed.m_cached_result;
             }
 
-            // (b) Involved in an active head's growth: another rule is
-            // currently being grown at start_pos. Don't grow independently —
-            // return the current seed (live) and let that head's loop clear
-            // and re-drive this rule each iteration.
+            // (b) Involved in an active head's growth: don't grow
+            // independently — return the current seed (live).
             const auto* head = context.growing_head(start_pos);
             if (head != nullptr && head != this) {
                 auto seed = context.memo_get(this, start_pos);
@@ -145,26 +115,20 @@ public:
                 return seed.m_cached_result;
             }
 
-            // (c) Ordinary memo hit: return the cached result at its end pos.
+            // (c) Ordinary memo hit.
             context.reset(rule_state.m_last_pos);
             return rule_state.m_cached_result;
         }
 
         // First-time parse: track this rule on the LR invocation stack while
-        // its body evaluates, so a left-recursive self-call can be detected
-        // (case a above). The frame is a stack local, popped on return.
+        // its body evaluates, so a left-recursive self-call can be detected.
         typename Context::LRFrame frame{this, start_pos, start_pos, false, context.lr_top()};
         context.lr_push(&frame);
 
-        // Seed-grow loop to find the longest match. For a left-recursive
-        // head this also grows the seed; for an ordinary rule the first
-        // iteration matches and the second makes no progress (and breaks).
         auto inner = parseImpl(context, start_pos, rule_state, frame);
 
         context.lr_pop(&frame);
 
-        // If this rule turned out to be a left-recursion head, clear the
-        // active-head marker (growth is complete).
         if (frame.is_head) {
             context.clear_growing_head(start_pos);
         }
@@ -177,18 +141,12 @@ public:
                 context.record_failure(
                     start_pos, ExpectedItem{.kind = ExpectedKind::RuleName, .text = m_name});
             }
-            // Recovery: if a RecoverSpec is configured and no cut is
-            // committed at this site, resync to the next sync token and
-            // report success with a transparent null tree. Cut-committed
-            // failures are NOT recovered — cut is an explicit programmer
-            // commitment that this branch must succeed.
+            // Recovery: cut-committed failures are NOT recovered.
             if (m_recover.configured() && !context.cut()) {
                 std::size_t scan = start_pos;
                 while (scan < context.input_size() && !m_recover.is_sync_token(context.at(scan))) {
                     ++scan;
                 }
-                // Position past the sync token if one was found; at EOF
-                // otherwise (recover_eof reaches here with scan == size).
                 std::size_t resume_at =
                     (scan < context.input_size()) ? scan + 1 : context.input_size();
                 context.reset(resume_at);
@@ -208,26 +166,12 @@ public:
             return fail;
         }
 
-        // Build this rule's tree node. Two cases:
-        //
-        // (1) This rule has its own typed action (m_typed_fold): it must OWN a
-        //     distinct tree layer so the post-parse fold can dispatch on IT —
-        //     not only on the innermost producer. Wrap the body node as this
-        //     rule's single child; the body node keeps its own producer, and
-        //     this layer carries `this` as producer. This is what makes a
-        //     chain (root = middle = inner) or a non-start alias reachable
-        //     from a parent: each action-bearing rule is now a distinct node
-        //     the fold can find, instead of collapsing onto the innermost
-        //     producer and having its action silently skipped. The fold
-        //     driver (fold_and_invoke) knows to fold the body from
-        //     node->children[0].
-        //
-        // (2) Transparent rule (no typed action): adopt the body node at zero
-        //     cost. producer is stamped only-if-none so it sticks at the
-        //     innermost action-bearing rule, and the fold flows that value
-        //     straight through. This preserves zero-cost passthrough aliases
-        //     (typed_action cases 7 & 12) and keeps the tree flat for
-        //     action-free grammars.
+        // Build this rule's tree node. If this rule has its own typed action,
+        // wrap the body node as this rule's single child so the fold can
+        // dispatch on THIS rule (not collapse onto the innermost producer).
+        // Otherwise adopt the body node at zero cost (transparent passthrough
+        // alias); producer is stamped only-if-none so it sticks at the
+        // innermost action-bearing rule.
         ParseTreeNodePtr node;
         if (m_typed_fold) {
             node = std::make_shared<typename Context::ParseTreeNode>();
@@ -248,11 +192,7 @@ public:
             node->end_offset = context.mark();
         }
 
-        // parse() is pure structure: it builds and caches the tree. Value
-        // computation (m_typed_fold) and side-effect hooks (m_on_match) run
-        // later, in the post-parse fold (parse_ast → fold_start/fold_rule).
         ParseResult result{true, node};
-
         rule_state.m_cached_result = result;
         context.update_rule_state(this, start_pos, rule_state);
         return result;
@@ -265,17 +205,11 @@ public:
     }
 
 protected:
-    // parseImpl: the seed-grow loop (Warth §3.2). Runs the body repeatedly,
-    // keeping the longest match, until an iteration makes no progress.
-    //
-    // For an ordinary (non-left-recursive) rule the first iteration matches
-    // and the second makes no progress (and breaks) — identical to the legacy
-    // behavior. For a left-recursive head (frame.is_head, set in parse() when
-    // the body recursed into `this` at start_pos), each growth iteration also
-    // clears the sibling memo entries at start_pos so that involved partner
-    // rules in an indirect/mutual cycle are re-driven against the grown seed
-    // instead of returning a frozen result — this replaces Warth's
-    // involvedSet/evalSet via the existing two-level memo map.
+    // Seed-grow loop (Warth §3.2). For an ordinary rule the first iteration
+    // matches and the second makes no progress (and breaks). For a
+    // left-recursive head (frame.is_head), each growth iteration also clears
+    // the sibling memo entries at start_pos so involved partner rules in an
+    // indirect/mutual cycle are re-driven against the grown seed.
     ParseResult parseImpl(Context& context,
                           std::size_t start_pos,
                           typename Context::RuleState& rule_state,
@@ -283,10 +217,7 @@ protected:
     {
         assert(m_rule && "NonTerminal::parse called on an unassigned rule");
         // Plant the failure seed: a left-recursive self-call during the body
-        // parse must fail (not recurse forever), so the body falls to its
-        // non-left-recursive alternative. The seed's end pos is start_pos (a
-        // failure consumes nothing). frame.last_pos is the grow-progress
-        // marker, starting at the seed position.
+        // parse must fail (not recurse forever).
         frame.last_pos = start_pos;
         rule_state.m_cached_result = ParseResult{};
         rule_state.m_last_pos = start_pos;
@@ -296,10 +227,6 @@ protected:
 
         while (true) {
             context.reset(start_pos);
-            // While growing a left-recursive head, clear sibling memo entries
-            // at this position each iteration so involved rules are re-driven
-            // against the grown seed. (Skipped before the first successful seed
-            // and for non-heads, so ordinary rules see no churn.)
             if (frame.is_head && best.success) {
                 context.clear_siblings_at(start_pos, this);
             }
@@ -307,9 +234,6 @@ protected:
             auto end_pos = context.mark();
             if (result.success) {
                 if (end_pos > frame.last_pos) {
-                    // Growth: adopt the extended match. Track progress on the
-                    // (transient) frame; publish the grown seed to the memo so
-                    // a recursive self-call sees it.
                     frame.last_pos = end_pos;
                     best = result;
                     rule_state.m_cached_result = result;
@@ -318,30 +242,13 @@ protected:
                         break;
                     }
                 } else {
-                    // No progress: fixed point. Two sub-cases:
-                    //
-                    // (1) `best` is still empty (no successful iteration yet).
-                    //     This is the FIRST iteration and it matched without
-                    //     advancing — a legitimate zero-width match (empty
-                    //     expression, lookahead, or a rule whose body produces
-                    //     no input consumption at this position). Adopt it as
-                    //     the seed.
-                    //
-                    // (2) `best` already holds a successful (possibly grown)
-                    //     match. This iteration matched no further than the
-                    //     longest so far (end_pos <= frame.last_pos, which
-                    //     tracks the grown best's end), so it CANNOT improve on
-                    //     `best`. Keep the longest result. The current
-                    //     iteration's result may be a REGRESSED parse (shorter
-                    //     than `best`) — common in indirect/mutual left
-                    //     recursion, where the body's ordered alternatives
-                    //     re-select a base case against the unchanged position
-                    //     once a sibling memo is cleared. Overwriting `best`
-                    //     with that regressed result was the root cause of the
-                    //     grown suffix being silently dropped: an inner head
-                    //     (e.g. prefixexp) grew to the suffix production in one
-                    //     iteration, the next iteration's non-growing parse
-                    //     regressed to the seed, and `best` was clobbered.
+                    // Fixed point. Adopt `result` only when `best` is still
+                    // empty (first iteration matched zero-width — empty,
+                    // lookahead, or any body that consumes nothing here).
+                    // Otherwise keep `best`: a no-progress iteration cannot
+                    // improve on the longest match, and may be a REGRESSED
+                    // parse (shorter than `best`) — overwriting `best` with
+                    // it silently drops the grown suffix.
                     if (!best.success) {
                         best = std::move(result);
                     }
@@ -363,45 +270,31 @@ protected:
     std::string m_name;
     std::string m_label;
     RecoverSpec<typename Context::value_type> m_recover;
-    TypedFold m_typed_fold; // value computation; set via RuleHandle::set_action
-    OnMatch m_on_match;     // side-effect hook; set via Rule::on_match
+    TypedFold m_typed_fold;
+    OnMatch m_on_match;
 };
 
-// Forward declaration: Rule::operator= returns RuleHandle (defined after Rule).
 template<typename Context, typename ExprType>
 struct RuleHandle;
 
-// ---------------------------------------------------------------------------
 // Rule: non-owning handle to a NonTerminal, returned by Grammar::operator[].
+// Stores a bare NonTerminal* (Grammar is the sole owner) plus a copied rule
+// name. ~16 bytes on libstdc++: 8-byte pointer + SSO string.
 //
-// Stores a bare NonTerminal* (Grammar is the sole owner via shared_ptr) plus
-// a copied rule name (std::string). Copy is shallow — multiple Rule copies
-// can point to the same NonTerminal. Expression trees (SequenceExpr,
-// AlternationExpr, Repetition, etc.) store Rule copies by value (~40 bytes on
-// libstdc++: 8-byte pointer + SSO string).
-//
-// **Design constraint**: a Rule cannot outlive its Grammar. This is
-// intentional — it eliminates shared_ptr cycles at the source (recursive
-// grammars no longer form reference cycles, so ~Grammar needs no special
-// handling).
-//
-// **Lifetime of handles**:
-//   - After `~Grammar()`, any outstanding Rule handle dangles. In debug
-//     builds `~Grammar()` poisons each NonTerminal's body, so a dangling
-//     Rule's next parse() hits `assert(m_rule && ...)` in parseImpl; under
-//     ASan the same misuse is caught as a use-after-free.
-//   - After `Grammar` move (`Grammar g2 = std::move(g1)`), Rule handles
-//     obtained from `g1` *remain valid*: `shared_ptr` move leaves the source
-//     map empty but the owned NonTerminal objects stay alive (re-homed in
-//     `g2`) at the same addresses, so the bare pointers in existing Rule
-//     handles still resolve correctly.
+// **Lifetime constraint**: a Rule cannot outlive its Grammar. After
+// ~Grammar(), any outstanding Rule handle dangles (in debug builds the body
+// is poisoned, so the next parse() hits the assert in parseImpl; under ASan
+// the same misuse is caught as use-after-free). After Grammar move
+// (Grammar g2 = std::move(g1)), Rule handles from g1 stay valid: shared_ptr
+// move leaves the source map empty but the owned NonTerminal objects stay
+// alive at the same addresses.
 //
 // Two assignment semantics:
-//   - operator=(ParsingExpr<...>) : assign a body to the underlying
-//     NonTerminal (auto-names from m_name).
-//   - operator=(Rule rhs)         : alias — make this rule's body delegate to
-//     rhs's NonTerminal (g["A"] = g["B"] makes A an alias for B).
-// ---------------------------------------------------------------------------
+//   operator=(ParsingExpr<...>) : assign a body to the underlying NonTerminal
+//                                 (auto-names from m_name).
+//   operator=(Rule rhs)         : alias — A's body delegates to rhs's
+//                                 NonTerminal. Lazy: if rhs is reassigned
+//                                 later, parsing A sees the update.
 template<typename Context>
 struct Rule : ParsingExpr<Context, Rule<Context>>
 {
@@ -413,44 +306,27 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
 
     Rule(const Rule&) = default;
     Rule(Rule&&) = default;
-    // NOTE: copy/move *assignment* have alias semantics (see below), not
-    // the usual shallow rebind. This is because Rule handles are views
-    // returned by Grammar::operator[]; assigning one view to another
-    // mutates the underlying NonTerminal, not the view itself. Expression
-    // trees only copy-construct Rule (via std::make_tuple), never
-    // copy-assign, so this is safe.
+    // Copy/move *assignment* have alias semantics (see below), not the usual
+    // shallow rebind. Expression trees only copy-construct Rule (via
+    // std::make_tuple), never copy-assign.
 
-    // Assign a body expression to the underlying NonTerminal. Auto-names
-    // the rule from m_name. Returns a RuleHandle carrying the body's static
-    // type — its set_action<F> does compile-time type checking against the
-    // body's result type and bridges into the type-erased storage.
+    // Assign a body expression. Returns a typed RuleHandle whose set_action
+    // does compile-time type checking against the body's result type.
     template<typename ExprType>
         requires(!std::same_as<std::remove_cvref_t<ExprType>, Rule<Context>>)
     auto operator=(const ParsingExpr<Context, ExprType>& rhs) -> RuleHandle<Context, ExprType>;
 
-    // Alias assignment: make this rule's body delegate to rhs's NonTerminal.
-    // The body becomes a Rule copy pointing at rhs's NonTerminal. This is
-    // **lazy**: if rhs's body is later reassigned, parsing this rule sees
-    // the update (because parsing delegates to rhs's NonTerminal, not a
-    // snapshot of its body).
-    // Example: g["A"] = g["B"];  // A delegates to B
+    // Alias assignment: make this rule delegate to rhs's NonTerminal.
     // NOTE: std::addressof is required because peglib overloads unary
-    // operator& as the and-predicate combinator (Rule.h), so &rhs would
-    // build an AndExpr rather than yielding a Rule*.
+    // operator& as the and-predicate combinator.
     auto operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Context>>;
-    // Not noexcept: NonTerminal::template operator= does make_shared (can
-    // throw bad_alloc), and set_name does a std::string assign. Same throwing
-    // nature as the legacy Rule copy/move assignment (documented & accepted).
     // NOLINTNEXTLINE(performance-noexcept-move-constructor)
     auto operator=(Rule&& rhs) -> RuleHandle<Context, Rule<Context>>;
 
-    // Side-effect hook: register a void callback fired once per committed-
-    // tree node during the post-parse fold (parse_ast only). For actions
-    // that observe a match without producing a value (tokenization,
-    // tracing). The typed value-computation API lives on RuleHandle (the
-    // return value of operator=):
-    //   auto h = (g["r"] = body);  h.set_action([](Context&, Span, ...){...});
-    // Clear the hook by passing nullptr (e.g. for teardown).
+    // Side-effect hook: void callback fired once per committed-tree node
+    // during the post-parse fold (parse_ast only). For actions that observe
+    // a match without producing a value (tokenization, tracing). Clear by
+    // passing nullptr.
     Rule& on_match(OnMatch hook)
     {
         m_impl->set_on_match(std::move(hook));
@@ -463,7 +339,6 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
         return *this;
     }
 
-    // Configure recovery on the underlying NonTerminal.
     Rule& set_recovery(RecoverSpec<typename Context::value_type> spec)
     {
         m_impl->set_recovery(std::move(spec));
@@ -480,8 +355,6 @@ struct Rule : ParsingExpr<Context, Rule<Context>>
     [[nodiscard]] const std::string& label() const noexcept { return m_impl->label(); }
     [[nodiscard]] bool is_defined() const noexcept { return m_impl->is_defined(); }
 
-    // Direct access to the underlying NonTerminal (for Grammar internals).
-    // Non-owning.
     [[nodiscard]] const Impl* impl() const noexcept { return m_impl; }
     [[nodiscard]] Impl* impl() noexcept { return m_impl; }
 
@@ -490,26 +363,18 @@ protected:
     std::string m_name;
 };
 
-// ---------------------------------------------------------------------------
-// RuleHandle<Context, ExprType>: the typed handle returned by `g["r"] = body`.
-//
-// Carries the body's static ExprType at the type level (no runtime storage),
-// so its set_action<F> can compile-time-check the action's parameter list
-// against the body's derived result type and generate a bridge into the
-// type-erased TypedFold stored on NonTerminal::m_typed_fold.
+// RuleHandle<Context, ExprType>: the typed handle returned by
+// `g["r"] = body`. Carries the body's static ExprType at the type level (no
+// runtime storage), so set_action<F> can compile-time-check the action's
+// parameter list against the body's derived result type and generate a bridge
+// into the type-erased TypedFold stored on NonTerminal.
 //
 // Usage (the ONLY way to attach a typed value-computation):
 //   auto h = (g["add"] = mul >> g.token('+') >> mul);
 //   h.set_action([](Context& c, Span sp, AstNode l, AstNode r) { ... });
 //
-// Contrast with Rule (returned by g["r"]): Rule::on_match attaches a void
-// side-effect hook (NonTerminal::m_on_match), not a value computation. The
-// two slots are independent: a rule may have either, both, or neither.
-//
-// RuleHandle is a view: it does not own the NonTerminal (Grammar does). It
-// implicitly converts to Rule so all Rule's introspection/recovery methods
-// remain available on a handle.
-// ---------------------------------------------------------------------------
+// Contrast with Rule::on_match (a void side-effect hook, not value). The two
+// slots are independent: a rule may have either, both, or neither.
 template<typename Context, typename ExprType>
 struct RuleHandle
 {
@@ -518,24 +383,14 @@ struct RuleHandle
 
     RuleHandle(Impl* impl, std::string name) : m_impl(impl), m_name(std::move(name)) {}
 
-    // Implicit conversion to the Rule view (for introspection, aliasing,
-    // recovery, re-reference in another rule's body, etc.).
     operator Rule<Context>() const { return Rule<Context>{m_impl, m_name}; }
 
-    // Typed value-computation attachment (the primary API).
-    //
-    // Compile-time checks F is invocable as (Context&, Span, Args...) where
-    // Args is the body's filtered result type, positionally unpacked:
-    //   - void body     : F(Context&, Span)
-    //   - single-result : F(Context&, Span, T)
-    //   - multi-result  : F(Context&, Span, T0, T1, ...)
-    //
-    // Registers the typed fold on the underlying NonTerminal. It does NOT run
-    // during parse; it runs in the post-parse fold (Grammar::parse_ast →
-    // fold_start → this fold), where child values are owned locals moved up
-    // once — unconditionally move-safe. Consumers retrieve results via
-    // parse_ast. (For side-effects without a value, use Rule::on_match.)
-    // Parse/memo/cut/recovery are unchanged.
+    // Typed value-computation attachment (the primary API). Compile-time
+    // checks F is invocable as (Context&, Span, Args...) where Args is the
+    // body's filtered result type, positionally unpacked:
+    //   void body     → F(Context&, Span)
+    //   single-result → F(Context&, Span, T)
+    //   multi-result  → F(Context&, Span, T0, T1, ...)
     template<typename F>
     RuleHandle& set_action(F f)
     {
@@ -578,9 +433,6 @@ protected:
     std::string m_name;
 };
 
-// ---------------------------------------------------------------------------
-// Rule::operator= definitions (declared inside Rule; return RuleHandle).
-// ---------------------------------------------------------------------------
 template<typename Context>
 template<typename ExprType>
     requires(!std::same_as<std::remove_cvref_t<ExprType>, Rule<Context>>)
@@ -596,10 +448,9 @@ template<typename Context>
 auto Rule<Context>::operator=(const Rule& rhs) -> RuleHandle<Context, Rule<Context>>
 {
     if (this == std::addressof(rhs)) {
-        // self-alias would create a cycle; just return a handle to self.
         return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
     }
-    *m_impl = rhs; // NonTerminal template operator= stores a Rule body
+    *m_impl = rhs;
     m_impl->set_name(m_name);
     return RuleHandle<Context, Rule<Context>>{m_impl, m_name};
 }

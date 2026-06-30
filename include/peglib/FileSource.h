@@ -1,58 +1,38 @@
+// Streaming, double-buffered file-backed input source.
+//
+// PageSize is a compile-time constant: each of the two buffers is a
+// fixed-size std::array<value_type, PageSize> (no per-page heap allocation),
+// making FileSource suitable for embedded/freestanding use.
+//
+// All internal sizes are in ITEMS (number of value_type elements), not bytes.
+//
+// Thread safety: NOT thread-safe — buffer cache is mutable and mutated by
+// const-looking accessors (re-fill on cache miss); concurrent reads race.
+//
+// Large files: fseek uses a `long` offset, which on platforms where `long`
+// is 32-bit cannot address files larger than ~2 GiB. Not a concern on LP64.
 #pragma once
 #include <array>
 #include <cassert>
 #include <cstdio>
 #include <filesystem>
-#include <optional>
 #include <string>
 namespace peg
 {
-// Streaming, double-buffered file-backed input source.
-//
-// PageSize is a compile-time constant: each of the two buffers is a
-// fixed-size std::array<CharT, PageSize>. This drops the per-page heap
-// allocation that the old std::vector buffer incurred (vector resize on
-// every read), making FileSource suitable for embedded/freestanding use
-// and improving cache locality (the buffer data lives inline in the
-// FileSource struct rather than behind a heap pointer).
-//
-// Unit convention:
-//   - All internal sizes (PageSize, m_filesize) are in ITEMS
-//     (i.e. number of `value_type` elements), not bytes.
-//
-// Iterator validity:
-//   - Comparing iterators from different FileSource instances is undefined.
-//   - Dereferencing the end iterator (or any iterator >= end()) is undefined.
-//
-// Thread safety: NOT thread-safe. The buffer cache is mutable and mutated
-// by const-looking accessors (begin/end/get re-fill buffers on cache miss),
-// so concurrent reads — even through a const FileSource — race on the cache.
-// PEG parsing is inherently sequential; share one FileSource across parse
-// steps in the same thread only.
-//
-// Large files: buffer positioning uses fseek with a `long` offset, which on
-// platforms where `long` is 32-bit (e.g. 32-bit Linux) cannot address files
-// larger than ~2 GiB. On LP64 platforms (64-bit Linux/macOS) `long` is
-// 64-bit and this is not a concern.
+
 template<typename value_type_, std::size_t PageSize>
 struct FileSource
 {
     static_assert(PageSize > 0, "FileSource PageSize must be positive");
 
-    // Construct from a file path. Each of the two internal buffers is a
-    // fixed-size std::array<value_type, PageSize> — no runtime buffer-size
-    // parameter, no per-page heap allocation.
+    // Binary mode is mandatory on Windows (text mode translates CRLF -> LF,
+    // breaking buffer offset accounting).
     explicit FileSource(const std::string& path) : m_current_buf{0}
     {
-        // Binary mode is mandatory on Windows: text mode ("r") translates
-        // CRLF -> LF on read, so fread() returns fewer bytes than
-        // file_size() reports and buffer offsets become inconsistent.
         m_fp = std::fopen(path.c_str(), "rb");
         if (m_fp == nullptr) {
             throw std::runtime_error("FileSource: failed to open '" + path + "'");
         }
-        // From here on, ensure m_fp is closed if any subsequent step throws
-        // (the destructor won't run on a partially-constructed object).
         try {
             const size_t file_bytes = std::filesystem::file_size(path);
             m_filesize = file_bytes / sizeof(value_type);
@@ -94,7 +74,7 @@ struct FileSource
 
     struct iterator;
 
-    // Returns the item at position `i`. Calling with `i >= end()` is undefined.
+    // Item at position `i`. Calling with `i >= end()` is undefined.
     value_type get(iterator i) const
     {
         assert(i.m_pos < m_filesize && "FileSource::get: position out of range");
@@ -106,7 +86,6 @@ struct FileSource
             m_current_buf = other;
             return m_bufs[m_current_buf].get_unchecked(i);
         }
-        // Cache miss: read the page containing i into m_bufs[0].
         if (!read_to(i.m_pos, 0)) {
             assert(false && "FileSource::get: read_to failed for in-range position");
         }
@@ -114,12 +93,10 @@ struct FileSource
         return m_bufs[m_current_buf].get_unchecked(i);
     }
 
-    // Release buffer content strictly before `pos`. Called by Context on cut.
-    // After release, any iterator with position < pos must not be dereferenced.
+    // Release buffer content strictly before `pos`. After release, any
+    // iterator with position < pos must not be dereferenced.
     void release_before(iterator pos) { release_before(pos.m_pos); }
 
-    // Offset-based overload. Context tracks positions as std::size_t offsets,
-    // so this is the primary entry point; the iterator overload delegates here.
     void release_before(std::size_t pos)
     {
         for (auto& buf : m_bufs) {
@@ -176,34 +153,24 @@ struct FileSource
 
         typename FileSource::value_type operator*() const { return m_freader->get(*this); }
 
-        // Byte position (item index for value_type == char).
         std::size_t position() const { return m_pos; }
 
         friend FileSource;
 
     protected:
         iterator(const FileSource* f, size_t pos) : m_pos{pos}, m_freader{f} {}
-        size_t m_pos; // in item index
+        size_t m_pos;
         const FileSource* m_freader;
     };
 
     iterator end() const { return {this, m_filesize}; }
     iterator begin() const { return {this, 0}; }
-
-    // Public factory: construct an iterator at byte position `pos`.
-    // Equivalent to begin() + pos, but O(1) (no increment chain).
     iterator seek(size_t pos) const { return {this, pos}; }
 
-    // Value at byte position `pos` (range-checked via assert).
     value_type at(size_t pos) const { return get(seek(pos)); }
-
-    // Total number of items (== byte count for value_type == char).
     size_t size() const { return m_filesize; }
 
 protected:
-    // Fixed-size buffer page. The storage is a std::array<value_type, PageSize>
-    // (no heap allocation); m_valid_count tracks how many items are actually
-    // live (the final page of a file may be short).
     struct buffer
     {
         buffer() = default;
@@ -212,8 +179,6 @@ protected:
         buffer& operator=(const buffer&) = delete;
         buffer& operator=(buffer&&) = default;
 
-        // Reads up to `n_items` items from `fp` into this buffer.
-        // Returns the number of items actually read. n_items must be <= PageSize.
         size_t read(FILE* fp, size_t n_items)
         {
             assert(n_items <= PageSize && "buffer::read: n_items exceeds PageSize");
@@ -237,12 +202,12 @@ protected:
         value_type get_unchecked(iterator i) const { return m_buf[i.m_pos - m_buf_from]; }
 
         std::array<value_type, PageSize> m_buf;
-        size_t m_valid_count = 0; // items actually live in m_buf (<= PageSize)
+        size_t m_valid_count = 0;
         size_t m_buf_from = 0;
         size_t m_buf_to = 0;
     };
 
-    size_t m_filesize = 0; // in items
+    size_t m_filesize = 0;
     mutable buffer m_bufs[2];
     mutable int m_current_buf = 0;
     FILE* m_fp = nullptr;

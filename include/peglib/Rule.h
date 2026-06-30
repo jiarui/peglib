@@ -1,5 +1,14 @@
+// Operator DSL for building expression trees: >>, |, *, +, -, !, &, n*e.
+// All parsing-expression types (Terminals, Combinators, Rule) derive from
+// ParsingExpr<Context, Derived>, so the operators handle every operand
+// uniformly via static_cast to the CRTP derived type.
+//
+// Rule (Grammar::operator[]) is a non-owning handle and is itself a
+// ParsingExpr, so it participates naturally. Recursive grammars never form
+// shared_ptr cycles because Rule stores a bare NonTerminal*.
 #pragma once
 #include <concepts>
+#include <cstddef>
 
 #include "Concepts.h"
 #include "Parser.h"
@@ -20,20 +29,6 @@ using parsers::TerminalExpr;
 using parsers::TerminalSeqExpr;
 using parsers::TokenExpr;
 using parsers::ZeroOrMoreExpr;
-
-// ---------------------------------------------------------------------------
-// Operator overloads for building expression trees.
-//
-// All parsing expression types (Terminals, Combinators, and Rule) derive
-// from ParsingExpr<Context, Derived>, so the operators below handle every
-// operand uniformly via static_cast to the CRTP derived type.
-//
-// Rule (returned by Grammar::operator[]) is a non-owning handle and is
-// itself a ParsingExpr, so it participates in operators naturally.
-// Expression trees store Rule copies by value (~40 bytes each: a bare
-// NonTerminal* + a copied std::string name). Since Rule is non-owning,
-// recursive grammars never form shared_ptr cycles.
-// ---------------------------------------------------------------------------
 
 template<typename Context, typename ParsingExprType1, typename ParsingExprType2>
 auto operator>>(const ParsingExpr<Context, ParsingExprType1>& expr1,
@@ -187,6 +182,8 @@ auto operator!(const NotExpr<Context, ParsingExprType>& n)
     return n.child();
 }
 
+// NB: peglib overloads unary operator& as the and-predicate combinator. Use
+// std::addressof to obtain a Rule*.
 template<typename Context, typename ParsingExprType>
 auto operator&(const ParsingExpr<Context, ParsingExprType>& expr)
 {

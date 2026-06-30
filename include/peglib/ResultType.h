@@ -1,25 +1,18 @@
-#pragma once
-
-// ===========================================================================
-// ResultType: compile-time result-type derivation + post-parse typed fold for
-// typed semantic actions.
+// Compile-time result-type derivation + post-parse typed fold for typed
+// semantic actions.
 //
-//   - peg::Span                       : (defined in Context.h) the span handed
-//                                       to every typed action and matcher fn.
-//   - peg::parsers::result_of<E>      : compile-time result type of expression E.
-//   - peg::parsers::seq_result<Ts...> : filter-void + 1-tuple-unpack collapse.
-//   - peg::parsers::action_matches    : concept checking F is invocable as
-//                                       (C&, Span, Args...) with Args derived
-//                                       positionally from E's result type.
-//   - peg::parsers::fold<E>(ctx,node) : post-parse typed value builder (below).
+//   result_of<E>           : compile-time result type of expression E.
+//   fold<E>(ctx, node)     : post-parse typed value builder.
+//   action_matches<F,C,A>  : concept checking F is invocable as
+//                            (C&, Span, A...) with A derived positionally
+//                            from E's result type.
 //
 // Terminal result model:
-//   - terminal/terminal-seq/empty/cut/And/Not → void (filtered from sequences).
-//   - MatcherExpr → void (a recognizer; what it matched is observable via
-//     on_match reading the node's span, not via the typed fold).
-//   - TokenExpr → value_type (the matched element, kept).
+//   - terminal/terminal-seq/empty/cut/And/Not → void (filtered).
+//   - MatcherExpr → void (recognizer; observe via on_match).
+//   - TokenExpr   → value_type (the matched element, kept).
 //   - NonTerminal/Rule → node_type.
-// ===========================================================================
+#pragma once
 
 #include "peglib/Combinators.h"
 #include "peglib/NonTerminal.h"
@@ -34,22 +27,16 @@
 
 namespace peg
 {
-// peg::Span is defined in Context.h (available wherever ParseTreeNode is).
 namespace parsers
 {
 namespace detail
 {
-// -------------------------------------------------------------------------
-// typelist: the lightweight compile-time list used by the metaprogramming
-// below. We keep values out of it — it is a pure type container.
-// -------------------------------------------------------------------------
 template<typename... Ts>
 struct typelist
 {
     static constexpr std::size_t size = sizeof...(Ts);
 };
 
-// Concatenate two typelists.
 template<typename L, typename R>
 struct concat;
 template<typename... As, typename... Bs>
@@ -60,7 +47,7 @@ struct concat<typelist<As...>, typelist<Bs...>>
 template<typename L, typename R>
 using concat_t = typename concat<L, R>::type;
 
-// Filter `void` out of a typelist.
+// Filter void out of a typelist.
 template<typename List>
 struct filter_void;
 template<>
@@ -80,9 +67,7 @@ template<typename List>
 using filter_void_t = typename filter_void<List>::type;
 
 // Collapse a filtered typelist into the "sequence result" shape:
-//   0 elements → void
-//   1 element  → T          (unwrap; e.g. `*(term >> rule)` iteration yields T)
-//   ≥2 elements→ std::tuple<T...>
+//   0 → void, 1 → T, ≥2 → std::tuple<T...>.
 template<typename List>
 struct collapse;
 template<>
@@ -103,7 +88,6 @@ struct collapse<typelist<T0, T1, Rest...>>
 template<typename List>
 using collapse_t = typename collapse<List>::type;
 
-// Are all types in a typelist identical?
 template<typename List>
 struct all_same;
 template<>
@@ -122,7 +106,6 @@ struct all_same<typelist<T0, T1, Rest...>>
     static constexpr bool value = std::is_same_v<T0, T1> && all_same<typelist<T1, Rest...>>::value;
 };
 
-// First type of a typelist (for picking the common type).
 template<typename List>
 struct head;
 template<typename T, typename... Ts>
@@ -132,18 +115,10 @@ struct head<typelist<T, Ts...>>
 };
 } // namespace detail
 
-// ---------------------------------------------------------------------------
-// result_of<E>: the result type of parsing expression E.
-//
-// Specialised per expression type (see the table in the design plan §2.1).
-// The primary template is deliberately left undefined — using result_of on an
-// unsupported expression is a compile error, which surfaces missing support
-// immediately rather than degrading silently to void.
-// ---------------------------------------------------------------------------
+// Primary template undefined: used on an unsupported expression = hard error.
 template<typename E>
-struct result_of; // primary: undefined → used on unsupported types = hard error
+struct result_of;
 
-// --- Terminal family (void — filtered) -----------------------------------
 template<typename C, typename V>
 struct result_of<TerminalExpr<C, V>>
 {
@@ -155,17 +130,14 @@ struct result_of<TerminalSeqExpr<C, S>>
     using type = void;
 };
 
-// --- TokenExpr (value_type — kept) ---------------------------------------
-// TokenExpr (Terminals.h) mirrors TerminalExpr's match behaviour but keeps the
-// matched element (recovered by the fold from ctx.at(span.start)), so its
-// result type is value_type, not void.
+// TokenExpr keeps the matched element (recovered by the fold via
+// ctx.at(span.start)).
 template<typename C, typename V>
 struct result_of<TokenExpr<C, V>>
 {
     using type = typename C::value_type;
 };
 
-// --- Leaves that never produce a tree ------------------------------------
 template<typename C>
 struct result_of<EmptyExpr<C>>
 {
@@ -187,17 +159,14 @@ struct result_of<AndExpr<C, Ch>>
     using type = void;
 };
 
-// --- MatcherExpr (void — a recognizer, filtered from sequences) ----------
-// It builds a node so its span is observable via on_match, but it surfaces no
-// typed value to actions (what it matched is read off the node's offsets, not
-// recomputed by the fold — see the fold_expr_impl no-op below).
+// MatcherExpr builds a node (on_match observes its span) but contributes no
+// typed value to actions.
 template<typename C, typename Fn>
 struct result_of<MatcherExpr<C, Fn>>
 {
     using type = void;
 };
 
-// --- Rules / non-terminals (node_type; dispatched via node->producer) ----
 template<typename C>
 struct result_of<NonTerminal<C>>
 {
@@ -209,14 +178,12 @@ struct result_of<Rule<C>>
     using type = typename C::node_type;
 };
 
-// --- Lexeme: forwards its child's result ---------------------------------
 template<typename C, typename Ch>
 struct result_of<LexemeExpr<C, Ch>>
 {
     using type = typename result_of<Ch>::type;
 };
 
-// --- Sequence: filter void, then collapse (0→void, 1→T, ≥2→tuple) --------
 template<typename C, typename... Children>
 struct result_of<SequenceExpr<C, Children...>>
 {
@@ -228,7 +195,7 @@ public:
     using type = detail::collapse_t<filtered>;
 };
 
-// --- Alternation: all branches must share a result type ------------------
+// Alternation: all branches must share a result type.
 template<typename C, typename... Children>
 struct result_of<AlternationExpr<C, Children...>>
 {
@@ -242,18 +209,8 @@ public:
     using type = typename detail::head<raw>::type;
 };
 
-// --- Repetition family ----------------------------------------------------
-// Repetition / ZeroOrMore / OneOrMore / NTimes → std::vector<child result>.
-// OptionalExpr → std::optional<child result>.
-//
-// All four repetition forms (the Repetition base and its three Self-hooked
-// subclasses) share one result type and one fold body. `repetition_child<E>`
-// exposes the child type for any of them and is absent otherwise, so a single
-// result_of specialization and a single fold_expr_impl overload cover the lot.
-//
-// void-collapse: a repetition/optional of a void-result child is itself void
-// (e.g. `*terminal` / `?cut()` produce no values). `vector<void>` and
-// `optional<void>` are ill-formed, so we map void→void here via rep_of/opt_of.
+// Repetition → std::vector<child result>; Optional → std::optional<child>;
+// void child → void (vector<void>/optional<void> are ill-formed).
 namespace detail
 {
 template<typename T>
@@ -281,12 +238,11 @@ using rep_of_t = typename rep_of<T>::type;
 template<typename T>
 using opt_of_t = typename opt_of<T>::type;
 
-// repetition_child<E>: the child expression type of any Repetition-family
-// expression (Repetition base, ZeroOrMoreExpr, OneOrMoreExpr, NTimesExpr).
-// Absent for everything else. Lets one result_of specialization + one
-// fold_expr_impl overload cover all four forms.
+// Child type of any Repetition-family expression (Repetition base +
+// ZeroOrMore / OneOrMore / NTimes). Absent for everything else: one
+// result_of specialization + one fold_expr_impl overload cover all four forms.
 template<typename E>
-struct repetition_child; // undefined
+struct repetition_child;
 template<typename C, typename Child, typename Self>
 struct repetition_child<Repetition<C, Child, Self>>
 {
@@ -312,8 +268,6 @@ template<typename E>
 using repetition_child_t = typename repetition_child<E>::type;
 } // namespace detail
 
-// One specialization for every repetition form: the child's result wrapped in
-// rep_of_t (vector<T>, or void if the child is void-result).
 template<typename E>
     requires requires { typename detail::repetition_child_t<E>; }
 struct result_of<E>
@@ -331,33 +285,23 @@ template<typename E>
 using result_of_t = typename result_of<E>::type;
 
 // ===========================================================================
-// Fold: post-parse typed value builder.
-//
-// fold<E>(ctx, node) walks a ParseTreeNode and reconstructs E's typed result,
-// owning each child value as a local and moving it up once. Because no value
-// is stored on the shared tree, a move-only NodeType composes freely. The
-// fold runs once, after parse, on the final (acyclic) tree.
-//
-// Each fold_expr_impl overload below mirrors a tree-construction rule in
-// Combinators.h.
+// Fold: post-parse typed value builder. Walks a ParseTreeNode and
+// reconstructs E's typed result, owning each child value as a local and
+// moving it up once. Because no value is stored on the shared tree, a
+// move-only NodeType composes freely. Runs once, after parse, on the final
+// (acyclic) tree.
 // ===========================================================================
 namespace detail
 {
-// Index into node->children, threaded by reference so contributors that push
-// no node (terminals/predicates/cut/empty) don't desynchronise the positional
-// correspondence.
 struct Cursor
 {
     std::size_t index = 0;
 };
 
-// pushes_node<E>: true when E's parse() builds a node on a successful match
-// (so the node IS present in the parent's children and the fold cursor must
-// advance past it). False for pure recognisers (terminal/empty/cut/predicates)
-// that contribute no node. Most void-result expressions push no node; the
-// exception is MatcherExpr, which is void-result yet builds a node (so on_match
-// can observe its span). The sequence fold consults this to decide whether a
-// void-result child still consumes a children slot.
+// True when E's parse() builds a node on a successful match (so the fold
+// cursor must advance past it). Most void-result expressions push no node;
+// MatcherExpr is the exception (void-result yet builds a node so on_match
+// can observe its span).
 template<typename E>
 struct pushes_node : std::false_type
 {};
@@ -369,10 +313,6 @@ inline constexpr bool pushes_node_v = pushes_node<E>::value;
 
 template<typename E, typename Ctx, typename NodePtr>
 auto fold_expr(Ctx& ctx, const NodePtr& node, Cursor& cur) -> result_of_t<E>;
-
-// CONTRACT: fold_expr_impl<E>(ctx, node, cur) operates on `node` as E's OWN
-// result node. Container cases walk node->children; each child fold receives
-// a fresh child_cur. The null tag pointer is a compile-time type carrier.
 
 // terminal/terminal-seq/empty/cut/Not/And: produce no node, contribute nothing.
 template<typename C, typename V, typename Ctx, typename NodePtr>
@@ -393,8 +333,6 @@ void fold_expr_impl(const NotExpr<C, Ch>*, Ctx&, const NodePtr&, Cursor&)
 template<typename C, typename Ch, typename Ctx, typename NodePtr>
 void fold_expr_impl(const AndExpr<C, Ch>*, Ctx&, const NodePtr&, Cursor&)
 {}
-// MatcherExpr: void recognizer. Its node is in the tree (so on_match and
-// parse_tree observe its span), but the typed fold contributes no value.
 template<typename C, typename Fn, typename Ctx, typename NodePtr>
 void fold_expr_impl(const MatcherExpr<C, Fn>*, Ctx&, const NodePtr&, Cursor&)
 {}
@@ -406,26 +344,19 @@ auto fold_expr_impl(const TokenExpr<C, V>*, Ctx& ctx, const NodePtr& node, Curso
     return ctx.at(node->start_offset);
 }
 
-// LexemeExpr: forwards (no tree-shape change).
 template<typename C, typename Ch, typename Ctx, typename NodePtr>
 auto fold_expr_impl(const LexemeExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, Cursor& cur)
 {
     return fold_expr<Ch>(ctx, node, cur);
 }
 
-// AlternationExpr: the winner's node IS the rule's node (Combinators.h:109),
-// passed through. The fold cannot statically know which branch won, so
-// parseAlt stamps node->alt_winner with the winning index and we dispatch over
-// the branch types via a runtime jump table. All branches share a result type
-// (enforced by result_of<AlternationExpr>'s all_same static_assert), so each
-// branch's fold yields the right type.
+// Alternation: parseAlt stamps node->alt_winner with the winning index; the
+// fold dispatches over branch types via a runtime jump table. All branches
+// share a result type (enforced by result_of<AlternationExpr>).
 namespace altimpl
 {
 template<std::size_t I, typename Ctx, typename NodePtr, typename Cursor, typename... Children>
 struct dispatch;
-// Single remaining branch: it must be the winner (alt_winner == I). No base
-// case for the empty pack — this avoids instantiating a default-constructed
-// result for move-only / void result types.
 template<std::size_t I, typename Ctx, typename NodePtr, typename Cursor, typename Head>
 struct dispatch<I, Ctx, NodePtr, Cursor, Head>
 {
@@ -458,20 +389,19 @@ auto fold_expr_impl(const AlternationExpr<C, Children...>*,
                     Cursor& cur)
 {
     if constexpr (sizeof...(Children) == 0) {
-        return; // void (empty alternation — never matches)
+        return;
     } else {
         return altimpl::dispatch<0, Ctx, NodePtr, Cursor, Children...>::run(ctx, node, cur);
     }
 }
 
-// Repetition: one child per iteration → vector<child result>; void→void.
 template<typename Child, typename Ctx, typename NodePtr>
 auto fold_rep(Ctx& ctx, const NodePtr& node, Cursor& cur)
 {
     using R = result_of_t<Child>;
     if constexpr (std::is_void_v<R>) {
         cur.index = node->children.size();
-        return; // void
+        return;
     } else {
         std::vector<R> out;
         while (cur.index < node->children.size()) {
@@ -483,8 +413,6 @@ auto fold_rep(Ctx& ctx, const NodePtr& node, Cursor& cur)
         return out;
     }
 }
-// One overload for every repetition form (Repetition base + the three
-// Self-hooked subclasses). Dispatches via repetition_child_t<E>.
 template<typename E, typename Ctx, typename NodePtr>
     requires requires { typename repetition_child_t<E>; }
 auto fold_expr_impl(const E*, Ctx& ctx, const NodePtr& node, Cursor& cur)
@@ -500,7 +428,7 @@ auto fold_expr_impl(const OptionalExpr<C, Ch>*, Ctx& ctx, const NodePtr& node, C
     if constexpr (std::is_void_v<R>) {
         if (cur.index < node->children.size())
             ++cur.index;
-        return; // void
+        return;
     } else {
         if (cur.index >= node->children.size() || !node->children[cur.index])
             return std::optional<R>{std::nullopt};
@@ -521,9 +449,8 @@ auto step(
     using Child = std::tuple_element_t<I, std::tuple<Children...>>;
     using R = result_of_t<Child>;
     if constexpr (std::is_void_v<R>) {
-        // Void-result child: contributes no typed value. But it may still
-        // push a node into children (MatcherExpr does, so on_match can read
-        // its span) — advance the cursor past it in that case, then recurse.
+        // Void-result child contributes no value, but may still push a node
+        // (MatcherExpr does) — advance past it in that case.
         if constexpr (pushes_node_v<Child>) {
             ++cur.index;
         }
@@ -556,7 +483,7 @@ auto fold_expr_impl(const SequenceExpr<C, Children...>*, Ctx& ctx, const NodePtr
     if constexpr (sizeof...(Children) == 0 || std::is_void_v<R>) {
         seqimpl::step<NodePtr, Ctx, Children...>(
             ctx, node, cur, std::make_tuple(), std::integral_constant<std::size_t, 0>{});
-        return; // void
+        return;
     } else {
         auto acc = seqimpl::step<NodePtr, Ctx, Children...>(
             ctx, node, cur, std::make_tuple(), std::integral_constant<std::size_t, 0>{});
@@ -568,8 +495,7 @@ auto fold_expr_impl(const SequenceExpr<C, Children...>*, Ctx& ctx, const NodePtr
     }
 }
 
-// NonTerminal/Rule: pointer dispatch via fold_rule (defined out-of-line after
-// NonTerminal.h exposes the typed-fold field).
+// NonTerminal/Rule: dispatch via fold_rule (defined after NonTerminal.h).
 template<typename C, typename Ctx, typename NodePtr>
 auto fold_expr_impl(const NonTerminal<C>*, Ctx& ctx, const NodePtr& node, Cursor&) ->
     typename C::node_type;
@@ -582,15 +508,15 @@ auto fold_expr(Ctx& ctx, const NodePtr& node, Cursor& cur) -> result_of_t<E>
 {
     if constexpr (std::is_void_v<result_of_t<E>>) {
         fold_expr_impl(static_cast<const E*>(nullptr), ctx, node, cur);
-        return; // void
+        return;
     } else {
         return fold_expr_impl(static_cast<const E*>(nullptr), ctx, node, cur);
     }
 }
 } // namespace detail
 
-// fold<E>(ctx, node): public entry. Used by the typed-action bridge (registered
-// on the producing NonTerminal) and by Grammar::parse_ast.
+// fold<E>(ctx, node): public entry. Used by the typed-action bridge and by
+// Grammar::parse_ast.
 template<typename E, typename Ctx, typename NodePtr>
 auto fold(Ctx& ctx, const NodePtr& node) -> result_of_t<E>
 {
@@ -600,9 +526,8 @@ auto fold(Ctx& ctx, const NodePtr& node) -> result_of_t<E>
 
 // fold_rule: the Rule/NonTerminal case for Rule references INSIDE a body.
 // Dispatches on node->producer's typed fold (the innermost rule that built
-// the node — producer is preserved, not overwritten, so alias/alternation-
-// passthrough keeps the right target). Pure value computation; side-effect
-// hooks fire in a separate walk (fire_on_match below).
+// the node — producer is preserved, not overwritten, so alias/alternation
+// passthrough keeps the right target).
 template<typename Ctx, typename NodePtr>
 auto fold_rule(Ctx& ctx, const NodePtr& node) -> typename Ctx::node_type
 {
@@ -625,13 +550,9 @@ auto fold_start(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start) ->
     return fold_rule<Ctx, NodePtr>(ctx, node);
 }
 
-// fire_on_match: the side-effect walk. Visits every node in the (committed,
-// acyclic) tree in pre-order and fires the producer's on_match hook where one
-// is registered. Independent of the typed fold: a rule with only an on_match
-// (no typed fold) still has its hook fire, because this walk is structural —
-// it recurses through node->children regardless of whether any value
-// computation is registered. Dispatch order mirrors the value fold: the
-// START rule's hook is tried first, then node->producer.
+// fire_on_match: side-effect walk. Visits every node in pre-order and fires
+// the producer's on_match hook. Independent of the typed fold: a rule with
+// only on_match (no typed fold) still has its hook fire.
 template<typename Ctx, typename NodePtr, typename NonTerminalPtr>
 void fire_on_match(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start)
 {
@@ -643,8 +564,6 @@ void fire_on_match(Ctx& ctx, const NodePtr& node, const NonTerminalPtr& start)
         node->producer->on_match()(ctx, node);
     }
     for (const auto& child : node->children) {
-        // Children carry their own producer (inner rules); pass nullptr as
-        // the start so each child dispatches on its own producer.
         fire_on_match<Ctx, NodePtr, NonTerminalPtr>(ctx, child, nullptr);
     }
 }
@@ -662,21 +581,18 @@ auto detail::fold_expr_impl(const Rule<C>*, Ctx& ctx, const NodePtr& node, Curso
     return fold_rule<Ctx, NodePtr>(ctx, node);
 }
 
-// ---------------------------------------------------------------------------
-// flat_args_t<R>: expand a collapsed result type R back into the flat
-// per-argument typelist a typed action must accept (excluding Context&/Span):
-//   - void          → typelist<>       → F(Context&, Span)
-//   - scalar T      → typelist<T>      → F(Context&, Span, T)
-//   - tuple<T...>   → typelist<T...>   → F(Context&, Span, T0, T1, ...)
-// This is the inverse of seq_result's collapse: used by RuleHandle::set_action
-// to derive the action's expected argument list from result_of_t<ExprType>.
-// ---------------------------------------------------------------------------
+// flat_args_t<R>: inverse of seq_result's collapse. Used by
+// RuleHandle::set_action to derive the action's expected argument list from
+// result_of_t<ExprType>.
+//   void        → typelist<>       → F(Context&, Span)
+//   scalar T    → typelist<T>      → F(Context&, Span, T)
+//   tuple<T...> → typelist<T...>   → F(Context&, Span, T0, T1, ...)
 namespace detail
 {
 template<typename R>
 struct flat_args
 {
-    using type = typelist<R>; // scalar default
+    using type = typelist<R>;
 };
 template<typename... Ts>
 struct flat_args<std::tuple<Ts...>>
@@ -692,12 +608,9 @@ struct flat_args<void>
 template<typename R>
 using flat_args_t = typename detail::flat_args<R>::type;
 
-// ---------------------------------------------------------------------------
 // fold_and_invoke<F, E>(f, ctx, node): the typed-action bridge. Folds E's
 // result from `node`, then calls f(ctx, span, <args>) unpacked per the
-// seq_result collapse (void → f(ctx,sp); T → f(ctx,sp,T); tuple → apply).
-// Registered by RuleHandle::set_action as the NonTerminal's typed fold.
-// ---------------------------------------------------------------------------
+// seq_result collapse. Registered by RuleHandle::set_action.
 namespace detail
 {
 template<typename T>
@@ -719,14 +632,9 @@ auto fold_and_invoke(const F& f, C& ctx, const NodePtr& node) -> decltype(auto)
         return f(ctx, sp);
     } else {
         // An action-bearing rule WRAPS its body node as node->children[0]
-        // (NonTerminal::parse wrap-if-typed-fold branch), so that each rule in
-        // a chain (root = middle = inner) is a distinct dispatchable node
-        // instead of collapsing onto the innermost producer. Fold the body
-        // from that child — folding from `node` itself would re-dispatch on
+        // (NonTerminal::parse wrap-if-typed-fold branch). Fold the body from
+        // that child — folding from `node` itself would re-dispatch on
         // node->producer == this rule's own typed_fold and recurse forever.
-        // children empty (a void-only body that built no node) → fold from
-        // `node` as the historical fallback. Span is read from the wrapper
-        // (the rule's full match span) in either case.
         const NodePtr& body_node = node->children.empty() ? node : node->children[0];
         auto value = fold<E>(ctx, body_node);
         if constexpr (detail::is_std_tuple_v<R>) {
@@ -739,33 +647,17 @@ auto fold_and_invoke(const F& f, C& ctx, const NodePtr& node) -> decltype(auto)
     }
 }
 
-// ---------------------------------------------------------------------------
-// seq_result / seq_arglist: the filtered argument shape derived from a
-// sequence of per-child result types. Used both to compute the user-visible
-// type (void / T / tuple) and the flat argument list for arity checks.
-// ---------------------------------------------------------------------------
-
-// User-visible shape (what the action receives as a single aggregate, after
-// tuple-unwrapping for the 1-element case).
 template<typename... Ts>
 using seq_result_t = detail::collapse_t<detail::filter_void_t<detail::typelist<Ts...>>>;
 
-// Flat argument list (one entry per non-void child result) — for arity/type
-// checks against the action's parameter list.
 template<typename... Ts>
 using seq_arglist_t = detail::filter_void_t<detail::typelist<Ts...>>;
 
-// ---------------------------------------------------------------------------
 // action_applyable<F, C, ArgList>: is F invocable as (C&, Span, ArgList...)?
-//
-// ArgList is a detail::typelist<...>. The specialisations below split on the
-// argument count so a 0-arg (void) sequence matches `F(C&, Span)` and a
-// multi-arg sequence matches `F(C&, Span, T0, T1, ...)`.
-// ---------------------------------------------------------------------------
 namespace detail
 {
 template<typename F, typename C, typename ArgList>
-struct action_applyable; // primary: undefined
+struct action_applyable;
 
 template<typename F, typename C>
 struct action_applyable<F, C, typelist<>>
@@ -786,8 +678,6 @@ struct action_applyable<F, C, typelist<T0, T1, Rest...>>
 };
 } // namespace detail
 
-// Convenience concept: does the action F match an expression whose filtered
-// result argument list is ArgList?
 template<typename F, typename C, typename ArgList>
 concept action_matches = detail::action_applyable<std::remove_cvref_t<F>, C, ArgList>::value;
 

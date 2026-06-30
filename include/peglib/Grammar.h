@@ -1,3 +1,18 @@
+// Grammar: user-facing container of named rules. Sole owner of all
+// NonTerminals (held via shared_ptr).
+//
+//   Grammar<> g;
+//   g["number"] = +g.terminal('0', '9');
+//   g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
+//   g.set_start("expr");
+//   g.parse_string("1+2+3");  // convenience: creates a Context internally
+//
+// Rules are lazily created on first access via operator[]. The same Grammar
+// can parse many inputs — each parse gets a fresh Context.
+//
+// **Lifetime constraint**: Rule (the handle returned by operator[]) stores a
+// bare NonTerminal*, not a shared_ptr. This eliminates shared_ptr cycles in
+// recursive grammars at the source. A Rule cannot outlive its Grammar.
 #pragma once
 #include "peglib/Combinators.h"
 #include "peglib/Concepts.h"
@@ -17,25 +32,6 @@
 namespace peg
 {
 
-// ---------------------------------------------------------------------------
-// Grammar: user-facing container of named rules. Sole owner of all
-// NonTerminals (held via shared_ptr).
-//
-//   Grammar<> g;
-//   g["number"] = +g.terminal('0', '9');
-//   g["expr"]   = g["number"] | g["expr"] >> '+' >> g["number"];
-//   g.set_start("expr");
-//   g.parse_string("1+2+3");  // convenience: creates a Context internally
-//
-// Rules are lazily created on first access via operator[]. Assignment
-// auto-names the rule from the map key. The same Grammar can parse many
-// inputs — each parse gets a fresh Context (fresh memo cache, position).
-//
-// **Design**: Rule (the handle returned by operator[]) stores a bare
-// NonTerminal*, not a shared_ptr. This eliminates shared_ptr cycles in
-// recursive grammars at the source — ~Grammar() needs no special handling.
-// The constraint is that Rule cannot outlive its Grammar (intentional).
-// ---------------------------------------------------------------------------
 template<typename CharT = char, typename NodeType = std::monostate>
     requires PegContext<Context<CharT, NodeType>>
 class Grammar
@@ -46,40 +42,14 @@ public:
     using NonTerminalType = parsers::NonTerminal<Context>;
 
     // -----------------------------------------------------------------------
-    // Expression factories.
-    //
-    // peglib's parsing-expression types are parameterised on a full Context
-    // (which carries NodeType), and the combining operators (>>, |, *, ...)
-    // require every operand to share one Context type. A free terminal(elem)
-    // factory can only see the element type, so it would hardcode
-    // Context<elem> (NodeType = std::monostate) and could never produce an
-    // expression assignable to a Rule<Context<CharT, MyNode>>.
-    //
-    // These member factories close over the Grammar's own Context type, so
-    // every expression they build carries the correct NodeType automatically
-    // and composes freely with g[...] rule handles. They are pure
-    // compile-time typed factories: const, no runtime state, callable on a
-    // static Grammar.
-    //
-    // The free peg::terminal / terminalSeq / empty / cut / lexeme helpers
-    // were removed in favour of these; the combining operators remain free
-    // functions and deduce Context from their operands' context_type.
+    // Expression factories. These close over this Grammar's Context type, so
+    // every expression they build carries the correct NodeType and composes
+    // freely with g[...] rule handles.
     // -----------------------------------------------------------------------
 
-    // -----------------------------------------------------------------------
-    // terminal(...) / token(...) — the single-element matchers.
-    //
-    // The two families share identical match behaviour and overload set
-    // (predicate / value / set / range); they differ only in the expression
-    // class: `terminal` → TerminalExpr (void result, filtered out of sequence
-    // results — for structural tokens that must never reach an action), `token`
-    // → TokenExpr (value_type result, kept — for tokens whose identity the
-    // action needs). The shared `make_matcher<ExprT>` helper below carries the
-    // overload set once; each public name delegates.
-    // -----------------------------------------------------------------------
 private:
-    // The single overload set for both terminal and token. ExprT is either
-    // TerminalExpr or TokenExpr.
+    // Shared overload set for terminal(...) and token(...). ExprT is either
+    // TerminalExpr (void result) or TokenExpr (value_type result).
     template<template<typename, typename> class ExprT, typename Pred>
         requires std::predicate<Pred, CharT>
     auto make_matcher(const Pred& f) const
@@ -104,32 +74,31 @@ private:
     }
 
 public:
-    // terminal(...): void-result matcher (filtered from sequence results).
+    // terminal(...): void-result matcher (filtered from sequence results) —
+    // for structural tokens (parens, keywords) that must never reach actions.
     template<typename T>
     auto terminal(T&& v) const -> decltype(make_matcher<parsers::TerminalExpr>(std::forward<T>(v)))
     {
         return make_matcher<parsers::TerminalExpr>(std::forward<T>(v));
     }
-    // terminal(lo, hi): range shorthand.
     auto terminal(const CharT& value_min, const CharT& value_max) const
     {
         return terminal(std::array<CharT, 2>{value_min, value_max});
     }
 
-    // token(...): value_type-result matcher (kept; surfaced to typed actions).
+    // token(...): value_type-result matcher (kept; surfaced to typed actions)
+    // — for tokens whose identity the action needs.
     template<typename T>
     auto token(T&& v) const -> decltype(make_matcher<parsers::TokenExpr>(std::forward<T>(v)))
     {
         return make_matcher<parsers::TokenExpr>(std::forward<T>(v));
     }
-    // token(lo, hi): range shorthand.
     auto token(const CharT& value_min, const CharT& value_max) const
     {
         return token(std::array<CharT, 2>{value_min, value_max});
     }
 
-    // terminalSeq(range): match a contiguous run of elements equal to the
-    // elements of `valueSeq`.
+    // terminalSeq(range): match a contiguous run of elements.
     template<typename SeqType>
         requires PegValueSeq<SeqType> && std::same_as<typename SeqType::value_type, CharT>
     auto terminalSeq(const SeqType& valueSeq) const
@@ -137,25 +106,22 @@ public:
         return parsers::TerminalSeqExpr<Context, SeqType>(valueSeq);
     }
 
-    // terminalSeq(literal): match a contiguous run of CharT. Only well-formed
-    // when CharT is a character type with a char_traits specialisation (so a
-    // basic_string<CharT> can be built from the literal); for token-level
-    // grammars use the range overload above with a container of tokens.
+    // terminalSeq(literal): well-formed when CharT has a char_traits
+    // specialisation; for token-level grammars use the range overload above.
     auto terminalSeq(const CharT* str) const
     {
         return parsers::TerminalSeqExpr<Context, std::basic_string<CharT>>(
             std::basic_string<CharT>{str});
     }
 
-    // empty(): always succeed, consume nothing.
     auto empty() const { return parsers::EmptyExpr<Context>(); }
 
-    // cut(): commit the current alternative/repetition scope.
+    // Commit the current alternative/repetition scope.
     auto cut() const { return parsers::CutExpr<Context>(); }
 
-    // lexeme(expr): disable auto-skip within `expr`'s subtree. The operand
-    // must already carry this Grammar's Context (so it composes with the
-    // other member-built expressions); the constraint checks context_type.
+    // Disable auto-skip within `expr`'s subtree. Token bodies (numbers,
+    // identifiers) whose characters must stay contiguous are wrapped in
+    // lexeme(...).
     template<typename Expr>
         requires requires { typename std::remove_cvref_t<Expr>::context_type; } &&
                  std::same_as<typename std::remove_cvref_t<Expr>::context_type, Context>
@@ -164,15 +130,12 @@ public:
         return parsers::LexemeExpr<Context, Expr>(expr);
     }
 
-    // matcher(fn): a match-time primitive (weakened lpeg.Cmt). `fn` reads the
-    // context read-only and returns the span it consumed, or std::nullopt to
-    // reject; MatcherExpr advances the position to span.end and builds a node.
-    // Use it for matches that depend on runtime information not expressible as
-    // a static combinator tree (Lua long brackets/comments, balanced
-    // delimiters, indentation-sensitive blocks). The matcher's result is void
-    // — it is a recognizer; observation of what it matched flows through
-    // on_match reading the node's span. See MatcherExpr (Terminals.h) for the
-    // full fn contract.
+    // Match-time primitive (weakened lpeg.Cmt). `fn` reads the context
+    // READ-ONLY and returns the span it consumed, or std::nullopt to reject;
+    // MatcherExpr advances the position to span.end. Result is void (a
+    // recognizer); observe what it matched via on_match reading the node's
+    // span. Use it for matches that depend on runtime information (Lua long
+    // brackets, balanced delimiters, indentation-sensitive blocks).
     template<typename Fn>
         requires std::invocable<const Fn&, Context&, Span>
     auto matcher(Fn fn) const
@@ -189,26 +152,19 @@ public:
     {
 #ifndef NDEBUG
         // Debug lifetime aid: poison every NonTerminal's body before the
-        // shared_ptr map releases them. If a Rule handle escapes its
-        // Grammar's lifetime, its next parse() trips the
-        // `assert(m_rule && ...)` in NonTerminal::parseImpl instead of
-        // silently using freed memory. (Under ASan, the same misuse is
-        // additionally caught as a use-after-free.) No-op in release builds.
+        // shared_ptr map releases them. A dangling Rule handle (one that
+        // outlived its Grammar) trips the assert in parseImpl instead of
+        // silently using freed memory. Under ASan, the same misuse is caught
+        // as use-after-free.
         for (auto& [_, nt] : m_rules) {
             nt->clear_body_for_debug();
         }
 #endif
     }
 
-    // Access a rule by name. This is **get-or-create**: if the rule does
-    // not yet exist it is lazily inserted as a forward declaration (an
-    // undefined NonTerminal). Returns a non-owning Rule handle for
-    // assignment / chaining / introspection.
-    //
-    // Caveat: because operator[] inserts on miss, using it for an existence
-    // check pollutes undefined_rules() — `if (g["typo"].is_defined())` creates
-    // the rule "typo". For read-only existence queries that must NOT insert,
-    // use find() or has_rule() instead.
+    // Get-or-create rule access. **Caveat**: this inserts on miss — using it
+    // for an existence check pollutes undefined_rules(). For read-only
+    // existence queries use find() or has_rule().
     Rule operator[](const std::string& name)
     {
         auto [it, inserted] = m_rules.try_emplace(name);
@@ -218,10 +174,6 @@ public:
         return Rule{it->second.get(), it->first};
     }
 
-    // Read-only rule lookup. Returns std::nullopt if the rule does not
-    // exist — and, unlike operator[], does NOT insert it. Use this (or
-    // has_rule) when you need to inspect a rule's existence/body without
-    // side-effecting the grammar.
     [[nodiscard]] std::optional<Rule> find(std::string_view name) const
     {
         auto it = m_rules.find(std::string{name});
@@ -245,33 +197,23 @@ public:
         return names;
     }
 
-    // Start rule management
     void set_start(std::string name) { m_start = std::move(name); }
     [[nodiscard]] const std::string& start_rule() const noexcept { return m_start; }
 
     // -----------------------------------------------------------------------
-    // Auto-skip.
-    //
-    // Set a transparent "skipper" rule that is invoked automatically
+    // Auto-skip. Set a transparent skipper rule that fires automatically
     //   - between adjacent children of a Sequence (static and Dyn),
-    //   - between iterations of a repetition (* + n* ?),
-    // and nowhere else (not before the first child, not after the last,
-    // not inside Alternatives, predicates, or terminal-sequence literals).
-    //
-    // The rule is typically *e matching whitespace/comments:
-    //   g["ws"] = *g.terminal([](char c){ return c==' '||c=='\t'||c=='\n'||c=='\r'; });
+    //   - between iterations of a repetition,
+    // and nowhere else. Typically:
+    //   g["ws"] = *g.terminal([](char c){ return c==' '||c=='\t'||...});
     //   g.set_skipper(g["ws"]);
-    // After this, sequences no longer need to thread `>> g["ws"] >>`
-    // manually between every pair of terminals.
+    // After this, sequences no longer need `>> g["ws"] >>` threading. To
+    // disable for a sub-expression, wrap it in lexeme(...). To disable
+    // globally, clear_skipper() (or never call set_skipper).
     //
-    // To disable auto-skip for a single sub-expression, wrap it in
-    // lexeme(...). To disable globally, call clear_skipper() (or never
-    // call set_skipper at all — that is the default).
-    //
-    // The argument must be a *defined* rule of this Grammar. Grammar
-    // stores a non-owning pointer to the rule's NonTerminal (the rule
-    // body lives in m_rules for the Grammar's whole lifetime, so the
-    // pointer is valid as long as the Grammar is).
+    // Argument must be a *defined* rule of this Grammar. Grammar stores a
+    // non-owning pointer (the body lives in m_rules for the Grammar's whole
+    // lifetime).
     // -----------------------------------------------------------------------
     void set_skipper(Rule r)
     {
@@ -282,14 +224,14 @@ public:
     }
 
     void clear_skipper() noexcept { m_skipper = nullptr; }
-
     [[nodiscard]] bool has_skipper() const noexcept { return m_skipper != nullptr; }
 
     // Parse using the start rule. Returns true on success, false on any
-    // failure (including cut-committed failures). On failure, the Context
-    // holds the diagnostic — retrieve it with `ctx.take_error()`. This method
-    // does not throw for parse failures; it only throws `std::logic_error` if
-    // no start rule is set.
+    // failure (regular or cut-committed). Cut-committed failures (thrown
+    // internally as peg::ParseError from the Alternation/Repetition that owned
+    // the cut scope) are caught and surfaced as a normal failure: retrieve
+    // the diagnostic via ctx.take_error(). Throws std::logic_error if no
+    // start rule is set; std::out_of_range if `rule` is not defined.
     bool parse(Context& ctx) const
     {
         if (m_start.empty()) {
@@ -298,45 +240,27 @@ public:
         return parse(m_start, ctx);
     }
 
-    // Parse using an explicit rule name. Returns true on success, false on
-    // any failure (regular or cut-committed). Cut-committed failures (which
-    // manifest internally as a thrown peg::ParseError from the
-    // Alternation/Repetition that owned the cut scope) are caught here and
-    // surfaced as a normal failure: the Context's furthest-failure state —
-    // already populated by record_failure() calls made before the throw — is
-    // queryable via ctx.take_error(). Throws std::out_of_range if `rule`
-    // is not defined.
     bool parse(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
         if (it == m_rules.end()) {
             throw std::out_of_range{"Grammar::parse: rule '" + std::string{rule} + "' not found"};
         }
-        // Stamp the Grammar-owned skipper onto the Context for the duration
-        // of this parse. No-op (sets nullptr) when the user never called
-        // set_skipper, in which case run_skipper() is a zero-cost no-op.
         ctx.internal_set_skipper(m_skipper);
-        // Pest-style leading whitespace: consume at the grammar boundary
-        // so users don't have to prefix `g["ws"] >>` to their start rule.
-        // Trailing whitespace is intentionally NOT consumed here —
-        // parse_string does partial-match, and users who need full-input
-        // consumption append `>> !.` (EndOfFile) to their start rule.
+        // Pest-style leading whitespace: consume at the grammar boundary so
+        // users don't need `g["ws"] >>` prefix. Trailing whitespace is
+        // intentionally NOT consumed (partial-match); for full-input
+        // consumption append `>> !.` (EndOfFile) to the start rule.
         ctx.run_skipper();
         try {
             return it->second->parse(ctx).success;
         } catch (const ParseError&) {
-            // The Context's error state was already updated by record_failure
-            // calls along the failing path before the cut committed. Nothing
-            // to do here but report failure.
             return false;
         }
     }
 
-    // Parse and return the parse tree (nullptr on failure). Pure structure
-    // for introspection/tooling (offsets, children, names) — no value slot,
-    // no hooks fire. Catches cut-committed failures and returns nullptr;
-    // retrieve the diagnostic via ctx.take_error(). Throws std::out_of_range
-    // if `rule` is not defined.
+    // Parse and return the tree (nullptr on failure). Pure structure for
+    // introspection (offsets, children, names) — no value slot, no hooks fire.
     typename Context::ParseTreeNodePtr parse_tree(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -345,7 +269,7 @@ public:
                                     "' not found"};
         }
         ctx.internal_set_skipper(m_skipper);
-        ctx.run_skipper(); // leading whitespace (pest-style; see parse() above)
+        ctx.run_skipper();
         try {
             return it->second->parse(ctx).tree;
         } catch (const ParseError&) {
@@ -357,10 +281,9 @@ public:
     // model). parse_tree() builds the tree (pure structure); fold_start walks
     // it once via the START rule's typed fold, owning child values as locals
     // and moving them up. Unconditionally move-safe — no value is stored at a
-    // shared location. This is also the ONLY entry point that fires on_match
+    // shared location. Also the ONLY entry point that fires on_match
     // side-effect hooks (once per committed-tree node, in tree order).
-    // Returns std::nullopt on parse failure or a null tree. Throws
-    // std::out_of_range if `rule` is not defined.
+    // Returns std::nullopt on parse failure or a null tree.
     std::optional<NodeType> parse_ast(std::string_view rule, Context& ctx) const
     {
         auto it = m_rules.find(std::string{rule});
@@ -371,20 +294,16 @@ public:
         auto tree = parse_tree(rule, ctx);
         if (!tree)
             return std::nullopt;
-        // Fire side-effect hooks first (pre-order tree walk), then compute
-        // values. The two are independent — on_match reads only structure.
         parsers::fire_on_match<Context, typename Context::ParseTreeNodePtr>(ctx, tree, it->second);
         return parsers::fold_start<Context, typename Context::ParseTreeNodePtr>(
             ctx, tree, it->second);
     }
 
-    // Convenience: parse a string input using the start rule.
-    //
-    // Partial-match semantics: returns true if the start rule matches at the
-    // beginning of `input`, EVEN IF input remains unconsumed. To require the
-    // whole input be consumed, append a end-of-input anchor (!. / EndOfFile)
-    // to the start rule in the grammar. (parse_string makes its own copy of
-    // the input, so temporaries are safe to pass.)
+    // Convenience: parse a string input using the start rule. Partial-match
+    // semantics: returns true if the start rule matches at the beginning of
+    // `input`, EVEN IF input remains unconsumed. To require the whole input
+    // be consumed, append `!.` (EndOfFile) to the start rule. Makes its own
+    // copy of the input, so temporaries are safe to pass.
     bool parse_string(std::string_view input) const
     {
         std::string s{input};
@@ -396,9 +315,7 @@ public:
     // Validation helpers
     // -----------------------------------------------------------------------
 
-    // Returns names of rules that were accessed via operator[] but never
-    // assigned a definition (still empty NonTerminal). These would silently
-    // fail to match at parse time.
+    // Rules accessed via operator[] but never assigned (would silently fail).
     [[nodiscard]] std::vector<std::string> undefined_rules() const
     {
         std::vector<std::string> result;
@@ -410,9 +327,7 @@ public:
         return result;
     }
 
-    // Returns names of rules that are defined but not reachable from the
-    // start rule. These are dead code — they can be removed without
-    // changing the grammar's behaviour.
+    // Rules defined but not reachable from the start rule (dead code).
     [[nodiscard]] std::vector<std::string> unreachable_rules() const
     {
         if (m_start.empty())
@@ -421,12 +336,9 @@ public:
         if (start_it == m_rules.end())
             return {};
 
-        // Collect all rule names transitively referenced from the start
-        // rule's body.
         std::set<std::string> reachable;
         reachable.insert(m_start);
 
-        // DFS: for each reachable rule, collect its body's direct references.
         std::vector<std::string> queue{m_start};
         while (!queue.empty()) {
             auto name = queue.back();
@@ -444,7 +356,6 @@ public:
             }
         }
 
-        // Unreachable = all defined rules minus reachable.
         std::vector<std::string> result;
         for (const auto& [name, nt] : m_rules) {
             if (nt->is_defined() && reachable.find(name) == reachable.end()) {
@@ -455,21 +366,12 @@ public:
     }
 
     // -----------------------------------------------------------------------
-    // to_dot: Graphviz DOT digraph of rule dependencies.
-    //
-    // Emits every defined rule as a node (the start rule gets a double
-    // border via peripheries=2), and every rule-reference (collected via
-    // collect_rule_refs) as a directed edge. Undefined references appear
-    // as dangling edge targets — useful for spotting typos. The output
-    // is suitable for piping through `dot -Tsvg` / `dot -Tpng`:
-    //
+    // to_dot: Graphviz DOT digraph of rule dependencies. Every defined rule
+    // is a node (start rule gets peripheries=2); every rule-reference is a
+    // directed edge. Undefined references appear as dangling edge targets —
+    // useful for spotting typos. Suitable for piping through `dot -Tsvg`:
     //   std::cout << g.to_dot();
     //   // then:  ./my_parser | dot -Tsvg > grammar.svg
-    //
-    // Implementation reuses the same collect_rule_refs traversal that
-    // unreachable_rules() does (every expression type overrides it), so
-    // no new virtual is needed. Traversal is DFS over (rule -> direct
-    // refs); the visited set bounds work at O(rules + edges).
     // -----------------------------------------------------------------------
     [[nodiscard]] std::string to_dot() const
     {
@@ -479,7 +381,6 @@ public:
         out += "  node [shape=box];\n";
         out += "  rankdir=LR;\n";
 
-        // Defined-rule nodes (start rule highlighted with a double border).
         for (const auto& [name, nt] : m_rules) {
             if (!nt->is_defined())
                 continue;
@@ -492,10 +393,7 @@ public:
             out += ";\n";
         }
 
-        // Edges via collect_rule_refs. Visit every defined rule (not just
-        // those reachable from start) so dead-code branches still render
-        // for inspection. The visited set prevents re-emitting a rule's
-        // edges when it appears multiple times in the queue.
+        // Visit every defined rule (dead-code branches render too).
         std::set<std::string> visited;
         std::vector<std::string> queue;
         for (const auto& [name, nt] : m_rules) {
@@ -520,7 +418,6 @@ public:
                 out += "\" -> \"";
                 out += dot_escape(ref);
                 out += "\";\n";
-                // Chase the reference (defined refs add their own edges).
                 if (m_rules.count(ref)) {
                     queue.push_back(ref);
                 }
@@ -531,21 +428,11 @@ public:
     }
 
 protected:
-    // Grammar is the sole owner of all NonTerminals. Rule handles (returned
-    // by operator[]) hold bare NonTerminal* — no shared_ptr cycle possible.
     std::map<std::string, std::shared_ptr<NonTerminalType>> m_rules;
     std::string m_start;
-
-    // Auto-skip rule. Non-owning pointer into m_rules; set by
-    // set_skipper, cleared by clear_skipper. nullptr = no auto-skip.
-    // Stamped onto each Context at parse()/parse_tree() entry so that
-    // Sequence / Repetition expressions can call ctx.run_skipper() with
-    // zero per-parse setup.
     NonTerminalType* m_skipper = nullptr;
 
-    // Escape a rule name for safe embedding inside a DOT string literal.
-    // DOT recognises \" \\ and \n inside "..."; everything else passes
-    // through. Used only by to_dot().
+    // Escape a rule name for DOT string literal.
     static std::string dot_escape(std::string_view s)
     {
         std::string out;

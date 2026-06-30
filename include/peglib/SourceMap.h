@@ -1,12 +1,13 @@
+// SourceMap: byte offset <-> (line, column) mapping.
+// Construction is O(n) prescan; locate() / offset_of() are O(log L).
+// Line endings: \n terminates a line; a preceding \r is part of the
+// terminator. Lone \r is not a line ending.
 #pragma once
 #include "peglib/FileSource.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstring>
-#include <filesystem>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,15 +15,11 @@
 namespace peg
 {
 
-// ---------------------------------------------------------------------------
-// Source location / range types
-// ---------------------------------------------------------------------------
-
 struct SourceLocation
 {
-    std::size_t offset = 0; // byte offset from start of file, 0-based
+    std::size_t offset = 0;
     std::size_t line = 1;   // 1-based
-    std::size_t column = 1; // 1-based, counts bytes (not codepoints)
+    std::size_t column = 1; // 1-based, counts bytes
 };
 
 struct SourceRange
@@ -31,41 +28,14 @@ struct SourceRange
     SourceLocation end;
 };
 
-// ---------------------------------------------------------------------------
-// SourceMap: byte offset <-> (line, column) mapping
-//
-// Construction is O(n): a single pass scans the source to record the byte
-// offset at the start of each line. After construction, locate() and
-// offset_of() are O(log L) where L is the number of lines (binary search).
-//
-// Two constructors are provided:
-//   - string_view / span-backed: O(1) line_view via slicing the view.
-//   - FileSource-backed: line_content re-reads the line from disk on demand.
-//
-// Line-ending convention: \n terminates a line. A preceding \r (i.e. \r\n)
-// is treated as part of the terminator and is NOT included in the line
-// content returned by line_view / line_content. A lone \r (old Mac) is
-// NOT treated as a line ending — only \n starts a new line.
-//
-// Edge cases:
-//   - Empty source: num_lines() == 1 (one empty line).
-//   - Source ending in \n: the trailing empty line counts (num_lines
-//     includes it), consistent with POSIX wc -l semantics for unterminated
-//     final lines.
-// ---------------------------------------------------------------------------
-
 class SourceMap
 {
 public:
-    // Construct from a contiguous source (string_view, std::span<const char>, etc.)
-    // Prescan is O(n). The SourceMap does NOT take ownership; caller must keep
-    // `source` alive while line_view() is used.
+    // Non-owning: caller must keep `source` alive while line_view() is used.
     explicit SourceMap(std::string_view source) : m_contiguous{source} { prescan(); }
 
-    // Construct from a FileSource<char, PageSize>. Reads through the FileSource
-    // once to populate line_starts; the FileSource must outlive this SourceMap.
-    // PageSize is deduced from the argument; the source is held type-erased so
-    // SourceMap itself stays non-templated.
+    // The FileSource must outlive this SourceMap. PageSize is deduced; the
+    // source is held type-erased so SourceMap stays non-templated.
     template<std::size_t PageSize>
     explicit SourceMap(const FileSource<char, PageSize>& source)
         : m_file_source{&source}, m_file_size{&SourceMap::impl_size<FileSource<char, PageSize>>},
@@ -79,22 +49,19 @@ public:
     SourceMap& operator=(const SourceMap&) = default;
     SourceMap& operator=(SourceMap&&) noexcept = default;
 
-    // Byte offset -> SourceLocation. Offsets beyond EOF clamp to the last
-    // valid location (end of file).
+    // Offsets past EOF stay on the last line; column reflects the raw
+    // (unclamped) offset.
     [[nodiscard]] SourceLocation locate(std::size_t offset) const noexcept
     {
-        // Binary-search for the line containing `offset`.
-        // m_line_starts[i] is the byte offset of the start of line (i+1).
         auto it = std::upper_bound(m_line_starts.begin(), m_line_starts.end(), offset);
         std::size_t line_idx = static_cast<std::size_t>(it - m_line_starts.begin()) - 1;
         std::size_t line_start = m_line_starts[line_idx];
-        std::size_t col = offset - line_start + 1; // 1-based
-        std::size_t line = line_idx + 1;           // 1-based
+        std::size_t col = offset - line_start + 1;
+        std::size_t line = line_idx + 1;
         return SourceLocation{.offset = offset, .line = line, .column = col};
     }
 
-    // (line, column) -> byte offset. Returns npos if line is out of range.
-    // `line` is 1-based, `column` is 1-based.
+    // Returns npos if line is out of range. Both args are 1-based.
     [[nodiscard]] std::size_t offset_of(std::size_t line, std::size_t column) const noexcept
     {
         if (line == 0 || line > m_line_starts.size()) {
@@ -104,8 +71,7 @@ public:
         return line_start + (column - 1);
     }
 
-    // 1-based line number -> line content WITHOUT the line terminator.
-    // Only valid for contiguous (string_view-backed) SourceMaps.
+    // Contiguous-source only.
     [[nodiscard]] std::string_view line_view(std::size_t line) const
     {
         assert(m_file_source == nullptr && "line_view requires a contiguous SourceMap");
@@ -113,17 +79,14 @@ public:
             return {};
         }
         std::size_t start = m_line_starts[line - 1];
-        // End is the start of the next line (or end of source for last line),
-        // minus any trailing \r\n or \n.
         std::size_t end;
         if (line < m_line_starts.size()) {
-            end = m_line_starts[line] - 1; // skip the \n
+            end = m_line_starts[line] - 1; // skip \n
             if (end > start && m_contiguous[end - 1] == '\r') {
-                --end; // skip the \r in \r\n
+                --end; // skip \r in \r\n
             }
         } else {
             end = m_contiguous.size();
-            // Trim trailing \r if present (lone \r at EOF without \n — unusual but handled)
             if (end > start && m_contiguous[end - 1] == '\r') {
                 --end;
             }
@@ -131,9 +94,8 @@ public:
         return m_contiguous.substr(start, end - start);
     }
 
-    // 1-based line number -> line content WITHOUT the line terminator.
-    // Works for both contiguous and FileSource-backed maps. For FileSource,
-    // this re-reads the line from disk (O(line_length)).
+    // Works for both contiguous and FileSource-backed maps (latter re-reads
+    // the line from disk).
     [[nodiscard]] std::string line_content(std::size_t line) const
     {
         if (line == 0 || line > m_line_starts.size()) {
@@ -142,24 +104,18 @@ public:
         if (m_file_source == nullptr) {
             return std::string{line_view(line)};
         }
-        // FileSource path: compute byte range, re-read from disk.
         std::size_t start = m_line_starts[line - 1];
         std::size_t end;
         std::size_t source_size = m_file_size(m_file_source);
         if (line < m_line_starts.size()) {
-            end = m_line_starts[line] - 1; // skip \n
-            if (end > start) {
-                // Peek at the byte before \n to check for \r.
-                if (m_file_at(m_file_source, end - 1) == '\r') {
-                    --end;
-                }
+            end = m_line_starts[line] - 1;
+            if (end > start && m_file_at(m_file_source, end - 1) == '\r') {
+                --end;
             }
         } else {
             end = source_size;
-            if (end > start) {
-                if (m_file_at(m_file_source, end - 1) == '\r') {
-                    --end;
-                }
+            if (end > start && m_file_at(m_file_source, end - 1) == '\r') {
+                --end;
             }
         }
         std::string result;
@@ -171,7 +127,6 @@ public:
     }
 
     [[nodiscard]] std::size_t num_lines() const noexcept { return m_line_starts.size(); }
-
     [[nodiscard]] std::string_view source_view() const noexcept { return m_contiguous; }
 
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
@@ -180,7 +135,7 @@ private:
     void prescan()
     {
         m_line_starts.clear();
-        m_line_starts.push_back(0); // line 1 starts at offset 0
+        m_line_starts.push_back(0);
         for (std::size_t i = 0; i < m_contiguous.size(); ++i) {
             if (m_contiguous[i] == '\n') {
                 m_line_starts.push_back(i + 1);
@@ -201,9 +156,7 @@ private:
         }
     }
 
-    // Type-erased FileSource accessors. The concrete FileSource<char, PageSize>
-    // type varies by PageSize; these function pointers bridge to it without
-    // making SourceMap itself a template.
+    // Type-erased FileSource accessors (PageSize varies; SourceMap is non-templated).
     template<typename Fs>
     static std::size_t impl_size(const void* p)
     {
@@ -219,10 +172,10 @@ private:
     using at_fn_t = char (*)(const void*, std::size_t);
 
     std::vector<std::size_t> m_line_starts;
-    std::string_view m_contiguous; // empty for FileSource-backed maps
-    const void* m_file_source{};   // nullptr for contiguous maps
-    size_fn_t m_file_size{};       // valid iff m_file_source != nullptr
-    at_fn_t m_file_at{};           // valid iff m_file_source != nullptr
+    std::string_view m_contiguous;
+    const void* m_file_source{};
+    size_fn_t m_file_size{};
+    at_fn_t m_file_at{};
 };
 
 } // namespace peg

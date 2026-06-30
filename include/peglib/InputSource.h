@@ -1,3 +1,11 @@
+// InputSourceBase: type-erased input interface. Context holds a
+// unique_ptr<InputSourceBase<CharT>> so a single Context<CharT, NodeType>
+// can drive either a contiguous in-memory buffer (SpanSource) or a paged
+// file reader (FileSourceSource).
+//
+// SpanSource exposes a raw pointer that Context caches (m_fast_data); when
+// non-null, the per-character hot path (Context::current / Context::at)
+// indexes it with zero virtual dispatch. FileSourceSource leaves it null.
 #pragma once
 
 #include <cstddef>
@@ -10,21 +18,6 @@
 namespace peg
 {
 
-// ---------------------------------------------------------------------------
-// InputSourceBase: type-erased interface to the parsed input.
-//
-// Context holds a unique_ptr<InputSourceBase<CharT>> so that the same
-// Context<CharT, NodeType> can drive either a contiguous in-memory buffer
-// (SpanSource) or a paged file reader (FileSourceSource) without the Context
-// template itself depending on the storage strategy.
-//
-// Performance note: SpanSource also exposes a raw `data()` pointer that
-// Context caches (m_fast_data). When that cache is non-null, the parser's
-// per-character hot path (Context::current / Context::at) indexes into the
-// raw pointer with zero virtual dispatch. FileSourceSource leaves the cache
-// null, so its per-character access goes through the virtual `at()` — which
-// is acceptable because FileSource is I/O-bound anyway.
-// ---------------------------------------------------------------------------
 template<typename CharT>
 struct InputSourceBase
 {
@@ -32,16 +25,13 @@ struct InputSourceBase
     virtual CharT at(std::size_t offset) const = 0;
     virtual std::size_t size() const = 0;
 
-    // Cut-driven buffer eviction. Default is a no-op (contiguous sources have
-    // nothing to evict). FileSourceSource overrides to drop pages strictly
-    // before `offset`, reclaiming memory once the parser commits a cut.
+    // Default no-op (contiguous sources have nothing to evict); FileSourceSource
+    // overrides to drop pages strictly before `offset` on cut commitment.
     virtual void release_before(std::size_t /*offset*/) {}
 
-    // Slice [offset, offset+count) as an owned std::basic_string<CharT>.
-    // Non-virtual and constrained to integral CharT: basic_string<CharT> is
-    // ill-formed for a non-trivially-copyable CharT (libstdc++ asserts), so
-    // for token-level grammars this member simply does not exist — token
-    // actions read payloads via ctx.at(off), not via slicing.
+    // Slice [offset, offset+count). Constrained to integral CharT:
+    // basic_string<CharT> is ill-formed for non-trivially-copyable CharT, so
+    // token-level grammars have no slicing API (read payloads via ctx.at).
     std::basic_string<CharT> slice(std::size_t offset, std::size_t count) const
         requires std::is_integral_v<CharT>
     {
@@ -56,25 +46,15 @@ struct InputSourceBase
         return out;
     }
 
-    // Non-virtual fast-path accessor: returns a raw pointer to contiguous
-    // storage, or nullptr if the source is not contiguous. Context caches
-    // this once at construction so the per-character hot path avoids a
-    // virtual call entirely for span-backed inputs.
+    // Raw pointer to contiguous storage, or nullptr if the source is paged.
     const CharT* contiguous_data() const noexcept { return m_contiguous_data; }
 
 protected:
-    // Null for paged sources (FileSource); set by SpanSource to its internal
-    // buffer pointer. Stored on the base so Context can read it without a
-    // virtual call or a downcast.
     const CharT* m_contiguous_data = nullptr;
 };
 
-// ---------------------------------------------------------------------------
-// SpanSource: adapter for contiguous in-memory ranges (std::string,
-// std::vector, std::span). Non-owning — the caller must keep the original
-// range alive for the source's lifetime, exactly as the old span-backed
-// Context required.
-// ---------------------------------------------------------------------------
+// Adapter for contiguous in-memory ranges (std::string, std::vector, span).
+// Non-owning: caller must keep the original range alive.
 template<typename CharT>
 struct SpanSource : InputSourceBase<CharT>
 {
@@ -83,47 +63,27 @@ struct SpanSource : InputSourceBase<CharT>
         this->m_contiguous_data = data;
     }
 
-    CharT at(std::size_t offset) const override
-    {
-        // Mirrors the old span operator[]: caller (Context::current) is
-        // responsible for range-checking via assert before calling.
-        return m_data[offset];
-    }
-
+    CharT at(std::size_t offset) const override { return m_data[offset]; }
     std::size_t size() const override { return m_size; }
-
-    // No substr override: the contiguous fast path in InputSourceBase::substr
-    // uses m_contiguous_data (set in the constructor above) directly.
 
 private:
     const CharT* m_data;
     std::size_t m_size;
 };
 
-// ---------------------------------------------------------------------------
-// FileSourceSource: adapter for FileSource. Owns the FileSource by move,
-// forwarding offset-based access. Overrides release_before to drive the
-// cut-eviction that FileSource supports natively.
-//
-// PageSize is forwarded to FileSource (FixSizeBuffer: each page is a
-// fixed-size std::array, no per-page heap allocation).
-// ---------------------------------------------------------------------------
+// Adapter for FileSource. Owns the FileSource by move; forwards cut-driven
+// eviction via release_before.
 template<typename CharT, std::size_t PageSize>
 struct FileSourceSource : InputSourceBase<CharT>
 {
     explicit FileSourceSource(FileSource<CharT, PageSize>&& fs) : m_fs{std::move(fs)} {}
 
     CharT at(std::size_t offset) const override { return m_fs.at(offset); }
-
     std::size_t size() const override { return m_fs.size(); }
-
-    // No substr override: InputSourceBase::substr's paged path fetches via
-    // the virtual at(), which forwards to m_fs.at() here.
 
     void release_before(std::size_t offset) override { m_fs.release_before(offset); }
 
-    // Expose the underlying FileSource for SourceMap, which walks the file
-    // directly (prescanning line offsets) rather than through the parser.
+    // Exposed for SourceMap, which walks the file directly.
     const FileSource<CharT, PageSize>& file_source() const noexcept { return m_fs; }
 
 private:

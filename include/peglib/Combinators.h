@@ -1,13 +1,14 @@
+// Combinator expression types: SequenceExpr, AlternationExpr, the
+// Repetition family (* + n* ?), predicates (! &), CutExpr, LexemeExpr.
+// All derive from ParsingExpr<Context, Derived> (ParserFwd.h).
 #pragma once
 #include "peglib/ParserFwd.h"
 
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <set>
 #include <stdexcept>
-#include <string>
 #include <tuple>
 
 namespace peg
@@ -15,11 +16,8 @@ namespace peg
 namespace parsers
 {
 
-// ---------------------------------------------------------------------------
-// SequenceExpr: matches child expressions in order; all must succeed.
-// On success, returns an anonymous grouping node whose children are the
-// non-null trees produced by each child expression.
-// ---------------------------------------------------------------------------
+// Matches child expressions in order; all must succeed. Auto-skip fires
+// between adjacent children (Index > 0); see Context::run_skipper.
 template<typename Context, typename... Children>
 struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
 {
@@ -55,10 +53,6 @@ protected:
     bool parseSeq(Context& context, ParseTreeNodePtr& node) const
     {
         if constexpr (Index < sizeof...(Children)) {
-            // Auto-skip between adjacent sequence children (not before the
-            // first: leading whitespace, if desired, must be matched
-            // explicitly in the start rule — pest/yhirose share this
-            // convention). No-op when no skipper is configured.
             if constexpr (Index > 0) {
                 context.run_skipper();
             }
@@ -75,11 +69,9 @@ protected:
     std::tuple<Children...> m_children;
 };
 
-// ---------------------------------------------------------------------------
-// AlternationExpr: tries each alternative in order; first success wins.
-// Returns the successful branch's ParseResult directly (including its tree).
-// Cut-committed failure throws peg::ParseError (hard error).
-// ---------------------------------------------------------------------------
+// Tries each alternative in order; first success wins. Cut-committed failure
+// throws peg::ParseError. The winning branch index is stamped on the node
+// (alt_winner) so the typed fold can dispatch on the winning branch's type.
 template<typename Context, typename... Children>
 struct AlternationExpr : ParsingExpr<Context, AlternationExpr<Context, Children...>>
 {
@@ -108,8 +100,6 @@ protected:
         if constexpr (Index < sizeof...(Children)) {
             auto result = std::get<Index>(m_children).parse(context);
             if (result.success) {
-                // Stamp the winning branch index so the typed fold can dispatch
-                // on the winner's static type at runtime.
                 if (result.tree)
                     result.tree->alt_winner = Index;
                 return result;
@@ -124,15 +114,12 @@ protected:
     std::tuple<Children...> m_children;
 };
 
-// ---------------------------------------------------------------------------
-// repeat_parse_impl: the seed-grow loop behind every Repetition subclass.
-// `parse_child` is any callable returning ParseResult for one child match.
+// Seed-grow loop behind every Repetition subclass.
 //
-// Cut escalation is asymmetric: unbounded (`*`/`+`, max_rep < 0) rethrows a
-// cut-committed child failure as peg::ParseError; bounded (`?`/`n*e`) stops
-// the loop on failure and returns the iterations matched so far, since a
-// bounded repetition legitimately admits fewer matches.
-// ---------------------------------------------------------------------------
+// Cut escalation is asymmetric: unbounded (* +, max_rep < 0) rethrows a
+// cut-committed child failure as peg::ParseError; bounded (? n*e) stops on
+// failure and returns the iterations matched so far, since a bounded
+// repetition legitimately admits fewer matches.
 template<typename Context, typename ChildOp>
     requires std::invocable<ChildOp&, Context&>
 typename Context::ParseResult
@@ -149,12 +136,6 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     typename Context::State lastSuccessState = initState;
 
     while (true) {
-        // Auto-skip between iterations (not before the first). No-op when
-        // no skipper is configured. NB: the zero-width termination guard
-        // below (startState == state()) is unaffected because a skipper
-        // written as *e always succeeds and may legitimately consume
-        // zero input — the child's own advancement is what the guard
-        // measures, and that happens after this skip.
         if (loopCount > 0) {
             context.run_skipper();
         }
@@ -173,7 +154,6 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
         if ((max_rep > 0) && (loopCount >= static_cast<std::size_t>(max_rep))) {
             break;
         }
-        // Not advancing, stop
         if (context.state() == startState) {
             break;
         }
@@ -185,13 +165,9 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     }
     if (exited_via_failure) {
         context.state(lastSuccessState);
-        // Trim children to only the successful iterations.
         node->children.resize(loopCount);
     }
     if (max_rep < 0) {
-        // Unbounded repetition: a cut-committed child failure escalates
-        // to ParseError. Bounded repetitions (max_rep >= 0) deliberately
-        // do NOT escalate — see the cut-semantics note above.
         if (exited_via_failure && context.cut()) {
             throw ParseError{context.furthest_failure_pos(), context.expected()};
         }
@@ -200,21 +176,9 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     return {true, node};
 }
 
-// ---------------------------------------------------------------------------
-// Repetition: matches a child expression between min_rep and max_rep times.
-// Delegates its parse loop to repeat_parse_impl.
-//
-// CRTP self-hook: `Self` is the concrete subclass type (passed by the four
-// subclasses below). This gives each subclass a DISTINCT CRTP identity while
-// inheriting parse(), collect_rule_refs(), and the child/min/max members from
-// this single base — no duplicated logic, no duplicated member declarations.
-// The distinct identity is required by the typed-action model: result_of<E>
-// and the fold dispatch on E's static type, so `*e`, `+e`, `n*e`, `-e` must
-// be distinguishable.
-//
-// `Self` has no default: Repetition is never instantiated bare. The four
-// subclasses always pass their own type.
-// ---------------------------------------------------------------------------
+// Matches a child between min_rep and max_rep times. The four subclasses below
+// fix min/max and carry their own CRTP identity (Self) so result_of<E> and the
+// fold dispatch on E's static type can distinguish *e / +e / n*e / -e.
 template<typename Context, typename Child, typename Self>
 struct Repetition : ParsingExpr<Context, Self>
 {
@@ -252,13 +216,6 @@ protected:
     std::int64_t max_rep;
 };
 
-// ---------------------------------------------------------------------------
-// Repetition subclasses: each fixes min/max and carries its own CRTP identity
-// via the Self hook above. One line of construction each; everything else is
-// inherited from Repetition. Distinct static types → distinct result_of/extract.
-// ---------------------------------------------------------------------------
-
-// ZeroOrMoreExpr: `*e` — min=0, max=unbounded.
 template<typename Context, typename Child>
 struct ZeroOrMoreExpr : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child>>
 {
@@ -267,7 +224,6 @@ struct ZeroOrMoreExpr : Repetition<Context, Child, ZeroOrMoreExpr<Context, Child
     {}
 };
 
-// OneOrMoreExpr: `+e` — min=1, max=unbounded.
 template<typename Context, typename Child>
 struct OneOrMoreExpr : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>
 {
@@ -276,7 +232,6 @@ struct OneOrMoreExpr : Repetition<Context, Child, OneOrMoreExpr<Context, Child>>
     {}
 };
 
-// NTimesExpr: `n*e` — min=max=n (exactly n matches).
 template<typename Context, typename Child>
 struct NTimesExpr : Repetition<Context, Child, NTimesExpr<Context, Child>>
 {
@@ -286,7 +241,6 @@ struct NTimesExpr : Repetition<Context, Child, NTimesExpr<Context, Child>>
     {}
 };
 
-// OptionalExpr: `-e` / `e?` — min=0, max=1.
 template<typename Context, typename Child>
 struct OptionalExpr : Repetition<Context, Child, OptionalExpr<Context, Child>>
 {
@@ -295,16 +249,9 @@ struct OptionalExpr : Repetition<Context, Child, OptionalExpr<Context, Child>>
     {}
 };
 
-// ---------------------------------------------------------------------------
-// predicate_parse_impl: shared body for the lookahead (`&e`) and negation
-// (`!e`) predicates. `parse_child` is any callable returning ParseResult for
-// the operand expression.
-//
-// The operand is executed speculatively and its consumed input rewound; the
-// result tree is always discarded.
-//   - negate == false (& / AndExpr): success follows the operand's success.
-//   - negate == true  (! / NotExpr): success is the operand's failure.
-// ---------------------------------------------------------------------------
+// Shared body for lookahead (&) and negation (!) predicates. The operand is
+// executed speculatively and its consumed input rewound; the result tree is
+// always discarded.
 template<typename Context, typename ChildOp>
     requires std::invocable<ChildOp&, Context&>
 typename Context::ParseResult
@@ -313,13 +260,9 @@ predicate_parse_impl(Context& context, ChildOp parse_child, bool negate)
     auto initState = context.state();
     auto result = parse_child(context);
     context.state(initState);
-    // Predicate: no tree, no consumed input.
     return {negate ? !result.success : result.success, nullptr};
 }
 
-// ---------------------------------------------------------------------------
-// NotExpr: negation predicate — succeeds if child fails, consumes nothing.
-// ---------------------------------------------------------------------------
 template<typename Context, typename Child>
 struct NotExpr : ParsingExpr<Context, NotExpr<Context, Child>>
 {
@@ -339,9 +282,6 @@ protected:
     Child m_child;
 };
 
-// ---------------------------------------------------------------------------
-// AndExpr: lookahead predicate — succeeds if child succeeds, consumes nothing.
-// ---------------------------------------------------------------------------
 template<typename Context, typename Child>
 struct AndExpr : ParsingExpr<Context, AndExpr<Context, Child>>
 {
@@ -362,10 +302,8 @@ protected:
     Child m_child;
 };
 
-// ---------------------------------------------------------------------------
-// CutExpr: commits the current alternative/repetition scope.
-// On subsequent failure in the same scope, peg::ParseError is thrown.
-// ---------------------------------------------------------------------------
+// Commits the current alternative/repetition scope. Subsequent failure in the
+// same scope throws peg::ParseError.
 template<typename Context>
 struct CutExpr : ParsingExpr<Context, CutExpr<Context>>
 {
@@ -376,24 +314,8 @@ struct CutExpr : ParsingExpr<Context, CutExpr<Context>>
     }
 };
 
-// ---------------------------------------------------------------------------
-// LexemeExpr: disable auto-skip for a sub-expression's subtree.
-//
-// When a skipper is configured (Grammar::set_skipper), auto-skip fires
-// between adjacent sequence children and between repetition iterations.
-// For tokens whose characters must be contiguous (numbers, identifiers,
-// string literals), wrap the token body in lexeme(...) to suppress
-// auto-skip within it:
-//
-//   g["number"]  = g.lexeme(+g.terminal('0', '9'));   // "12 34" -> matches "12"
-//   g["ident"]   = g.lexeme(g.terminal('a','z') >> *g.terminal('a','z'));
-//
-// Implemented as a save/restore of Context::skip_enabled via ScopeGuard,
-// so lexeme nests safely (lexeme inside lexeme is a no-op-on-the-flag).
-// Even if the wrapped expression throws peg::ParseError, the ScopeGuard
-// destructor restores the prior skip_enabled before stack unwinding
-// continues.
-// ---------------------------------------------------------------------------
+// Disables auto-skip for a sub-expression's subtree. Save/restore of
+// skip_enabled via ScopeGuard makes lexeme(...) nest safely and exception-safe.
 template<typename Context, typename Child>
 struct LexemeExpr : ParsingExpr<Context, LexemeExpr<Context, Child>>
 {

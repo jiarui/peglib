@@ -1,8 +1,18 @@
+// Context: the parse state carried through every expression's parse() call.
+//
+// Three orthogonal axes are cleanly separated:
+//   - CharT   : element type (char, char32_t, ...).
+//   - NodeType: semantic-action product type stored on ParseTreeNode. Default
+//               std::monostate; value type for lightweight products; move-only
+//               type for recursive ASTs; shared_ptr<T> for polymorphic ASTs.
+//   - Source  : input storage strategy. Erased behind InputSourceBase;
+//               SpanSource (contiguous, zero-virtual-call hot path) or
+//               FileSourceSource (paged, cut-evictable). Selected at
+//               construction, invisible to the template signature.
 #pragma once
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -10,7 +20,6 @@
 #include <span>
 #include <stack>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -19,12 +28,10 @@
 #include "ParseError.h"
 namespace peg
 {
-// ---------------------------------------------------------------------------
-// Span: an offset pair describing a match. `start`/`end` mirror
-// ParseTreeNode::start_offset/end_offset; their semantics are set by
-// Context::value_type (byte offsets for char-level, token indices for
-// token-level). Handed to typed actions and match-time matchers.
-// ---------------------------------------------------------------------------
+
+// Span: offset pair describing a match. start/end mirror
+// ParseTreeNode::start_offset/end_offset; semantics set by Context::value_type
+// (byte offsets for char-level, token indices for token-level).
 struct Span
 {
     std::size_t start{};
@@ -41,26 +48,6 @@ template<typename Context>
 struct Rule;
 } // namespace parsers
 
-// ===========================================================================
-// Context: the parse state carried through every expression's parse() call.
-//
-// Three orthogonal axes are now cleanly separated:
-//   - CharT   : the character type (char, char32_t, ...). Determines matching
-//               semantics and the terminal literal types.
-//   - NodeType: the semantic-action product type stored on ParseTreeNode.
-//               std::monostate (default) = pure recognizer; a value type =
-//               lightweight product; std::shared_ptr<T> = polymorphic shared
-//               AST. The library does not force a storage policy on NodeType.
-//   - Source  : the input storage strategy. Erased behind InputSourceBase;
-//               SpanSource (contiguous, zero-virtual-call hot path) or
-//               FileSourceSource (paged, cut-evictable). Selected at
-//               construction, invisible to the template signature.
-//
-// The source is type-erased so that a single Context<CharT, NodeType> can
-// drive either storage strategy. SpanSource fills a raw-pointer cache
-// (m_fast_data) that the per-character hot path indexes directly — zero
-// virtual dispatch for the common in-memory case.
-// ===========================================================================
 template<typename CharT, typename NodeType = std::monostate>
 struct Context
 {
@@ -69,16 +56,15 @@ struct Context
     using char_type = CharT;
 
     // -----------------------------------------------------------------------
-    // Construction.
+    // Lifetime.
     //
-    // (1) From a contiguous range (std::string, std::vector, ...): the
-    //     Context stores a non-owning SpanSource pointing into `t`. The
-    //     caller must keep the input alive for the Context's lifetime.
-    //     Passing a temporary here dangles silently. For a self-contained
-    //     copy, use Grammar::parse_string (which makes its own string).
+    // (1) From a contiguous range: stores a non-owning SpanSource pointing
+    //     into `t`. Caller must keep the input alive for the Context's
+    //     lifetime. **Passing a temporary here dangles silently.** For a
+    //     self-contained copy, use Grammar::parse_string.
     //
-    // (2) From a FileSource rvalue: the Context takes ownership (moved into
-    //     a FileSourceSource adapter). No lifetime obligation on the caller.
+    // (2) From a FileSource rvalue: takes ownership (moved into a
+    //     FileSourceSource adapter). No lifetime obligation on the caller.
     // -----------------------------------------------------------------------
     template<typename Range>
     Context(const Range& t)
@@ -93,11 +79,9 @@ struct Context
           m_fast_data{nullptr}, m_input_size{m_input->size()}
     {}
 
-    // A Context owns a memo table, cut stack, and (for FileSource) paged
-    // buffers — all expensive or unsafe to duplicate. It is meant for a
-    // single parse; copying one mid-parse would duplicate memo entries
-    // keyed by raw NonTerminal* and silently corrupt furthest-error state.
-    // Move is allowed (e.g. from from_file); copy is not.
+    // Move is allowed (e.g. from from_file); copy is not — copying mid-parse
+    // would duplicate memo entries keyed by raw NonTerminal* and silently
+    // corrupt furthest-error state.
     Context(const Context&) = delete;
     Context& operator=(const Context&) = delete;
     Context(Context&&) noexcept = default;
@@ -105,36 +89,29 @@ struct Context
 
     using NonTerminalType = peg::parsers::NonTerminal<Context<CharT, NodeType>>;
 
-    // -------------------------------------------------------------------
-    // ParseTreeNode: immutable record of a successful match.
-    //
-    // Pure structure: name, offsets, children, and dispatch metadata. No
-    // value slot — the typed fold (parse_ast) owns computed values as locals
-    // and moves them up, which is what makes a move-only NodeType safe.
-    // -------------------------------------------------------------------
+    // Immutable record of a successful match. Pure structure: name, offsets,
+    // children, dispatch metadata. No value slot — the typed fold (parse_ast)
+    // owns computed values as locals and moves them up, which is what makes a
+    // move-only NodeType safe.
     struct ParseTreeNode
     {
-        std::string name;             // rule name (empty for anonymous)
-        std::size_t start_offset = 0; // byte offset of match start
-        std::size_t end_offset = 0;   // byte offset past match end
+        std::string name;
+        std::size_t start_offset = 0;
+        std::size_t end_offset = 0;
         std::vector<std::shared_ptr<ParseTreeNode>> children;
-        // Producer rule (typed-fold dispatch). Stamped by NonTerminal::parse so
-        // the post-parse typed fold can find each node's registered fold via
-        // pointer identity (no name/string lookup). Null for anonymous
-        // combinator nodes and for transparent rules with no typed fold.
+        // Producer rule (typed-fold dispatch). Stamped by NonTerminal::parse
+        // so the post-parse typed fold can find each node's registered fold
+        // via pointer identity. Null for anonymous combinator nodes and for
+        // transparent rules with no typed fold.
         const NonTerminalType* producer = nullptr;
         // Winning-branch index for an AlternationExpr's node (the node IS the
-        // winner's node, passed through). Stamped by parseAlt so the typed fold
-        // can dispatch on the actual winning branch's static type at runtime
-        // (the fold knows the branch TYPES but not which won). SIZE_MAX = not
-        // an alternation winner / not stamped.
+        // winner's node, passed through). Stamped by parseAlt so the typed
+        // fold can dispatch on the actual winning branch's static type at
+        // runtime. SIZE_MAX = not an alternation winner.
         std::size_t alt_winner = static_cast<std::size_t>(-1);
     };
     using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
 
-    // Result of every parse() call: success flag + optional tree node.
-    // On failure, tree is nullptr. On success, tree may still be nullptr
-    // for leaf expressions (terminals, predicates) that build no node.
     struct ParseResult
     {
         bool success = false;
@@ -147,72 +124,46 @@ struct Context
         RuleState() = default;
         RuleState(const RuleState&) = default;
         RuleState& operator=(const RuleState&) = default;
-        // Where this cached result ended. This is part of the cached ANSWER
-        // (not transient grow-control state, which lives in LRFrame::last_pos
-        // during the loop): it is needed on a memo hit to reset the context to
-        // the result's end position. It is also the one field that cannot be
-        // derived from m_cached_result, because a recovered/null-tree result
-        // ends at an arbitrary resync position, not at start_pos.
+        // End position of the cached result (genuinely part of the cached
+        // ANSWER: a recovered/null-tree result ends at an arbitrary resync
+        // position, not derivable from the tree).
         std::size_t m_last_pos = 0;
-        // Cached ParseResult from the (first successful) parse at this
-        // (position, rule) pair. On a memo hit, the caller receives this
-        // cached result — including the tree and action value — without
-        // re-executing the action. This is what makes packrat memoization
-        // safe with semantic actions.
         ParseResult m_cached_result;
     };
 
-    // LR invocation frame: transient left-recursion control state, one per
-    // NonTerminal currently on the call stack at a position. Linked into
-    // Context::m_lr_stack so a left-recursive re-entry (a memo hit on a rule
-    // that is itself mid-parse) can be detected and used to mark the rule as
-    // the head of a left-recursive cycle. Lifetime is the C++ call: pushed at
-    // first-time entry to a rule, popped on return — zero heap allocation.
-    //
-    // Stores NO parse answers (those live in the memo). `last_pos` is the
-    // grow-loop progress marker: the furthest position reached so far across
-    // growth iterations. It lives here (transient) rather than in RuleState
-    // so the memo is not churned every growth iteration — the memo's own
-    // m_last_pos is written once, at commit. The two-level memo map
-    // (m_mem[pos][rule]) lets a head clear all sibling entries at its position
-    // per growth iteration, so Warth's involvedSet/evalSet are unnecessary.
+    // Transient left-recursion control state, one per NonTerminal currently on
+    // the call stack at a position. Stores NO parse answers (those live in the
+    // memo); `last_pos` is the grow-loop progress marker, kept here (transient)
+    // rather than in RuleState so the memo is not churned every growth
+    // iteration. Lifetime is the C++ call — pushed at first-time entry, popped
+    // on return; zero heap allocation.
     struct LRFrame
     {
-        const NonTerminalType* rule;  // rule being evaluated by this frame
-        std::size_t pos;              // position at which it is being evaluated
-        std::size_t last_pos;         // grow-loop progress: furthest pos so far
-        bool is_head;                 // did this rule's body recurse into itself?
-        LRFrame* next;                // caller frame (links the stack)
+        const NonTerminalType* rule;
+        std::size_t pos;
+        std::size_t last_pos;
+        bool is_head;
+        LRFrame* next;
     };
 
     struct State
     {
         explicit State(std::size_t pos) : m_pos(pos) {}
         std::size_t m_pos;
-        // Comparable so combinators can detect zero-width progress
-        // (e.g. a repetition body that matched without advancing) without
-        // reaching into m_pos directly.
         friend bool operator==(const State& lhs, const State& rhs)
         {
             return lhs.m_pos == rhs.m_pos;
         }
     };
 
-    // The input length, in items. Computed once at construction.
     std::size_t input_size() const noexcept { return m_input_size; }
-
     State state() { return State{m_position}; }
-
     void state(const State& state) { m_position = state.m_pos; }
-
     bool ended() const noexcept { return m_position >= m_input_size; }
-
-    // Current position as a byte/item offset.
     std::size_t mark() const noexcept { return m_position; }
 
-    // Value at the current position. Uses the contiguous cache when available
-    // (span-backed — zero virtual dispatch); falls back to the virtual at()
-    // for paged sources (FileSource).
+    // Per-character access. Uses the contiguous cache when available (zero
+    // virtual dispatch); falls back to the virtual at() for paged sources.
     value_type current() const
     {
         assert(m_position < m_input_size && "current() past end of input");
@@ -221,8 +172,6 @@ struct Context
         }
         return m_input->at(m_position);
     }
-
-    // Value at an arbitrary offset. Same fast-path logic as current().
     value_type at(std::size_t offset) const
     {
         assert(offset < m_input_size && "at() past end of input");
@@ -232,11 +181,6 @@ struct Context
         return m_input->at(offset);
     }
 
-    // Access the underlying input source. Semantic actions that need to
-    // extract matched text by offset use ctx.input().slice(off, count) —
-    // slicing is an InputSource concern, not a parse-state concern, and
-    // keeping it on InputSource avoids forcing every Context instantiation
-    // (including non-character token types) to name std::basic_string<CharT>.
     [[nodiscard]] InputSourceBase<CharT>& input() const noexcept { return *m_input; }
 
     void next() noexcept
@@ -248,10 +192,9 @@ struct Context
 
     void reset(std::size_t pos) noexcept
     {
-        // Upper bound is always enforced. The lower bound (m_last_cut) is
-        // NOT enforced: after a cut, memo data for earlier positions has
-        // been intentionally released, but it is still valid to rewind
-        // there and re-parse from scratch.
+        // Upper bound enforced. The lower bound (m_last_cut) is NOT enforced:
+        // after a cut, memo data for earlier positions has been intentionally
+        // released, but it is still valid to rewind there and re-parse.
         assert(pos <= m_input_size && "reset past end of input");
         m_position = pos;
     }
@@ -276,18 +219,13 @@ struct Context
         if (memo == memos->second.end()) {
             return false;
         }
-        // Copy all fields, including m_cached_result. This is how
-        // NonTerminal::parse writes the final ParseResult back into the
-        // memo map after a successful first-time parse.
         memo->second = rule_state;
         return true;
     }
 
     // Read the CURRENT cached RuleState for (rule, pos) live from the memo
     // map (not a stale snapshot). Used by left-recursive re-entry to return
-    // the freshly-grown seed (which the head's loop updates each iteration),
-    // rather than the snapshot captured at this call's entry. Returns a
-    // default state if no entry exists.
+    // the freshly-grown seed. Returns a default state if no entry exists.
     RuleState memo_get(const NonTerminalType* rule, std::size_t pos) const
     {
         auto memos = m_mem.find(pos);
@@ -303,12 +241,6 @@ struct Context
 
     // -----------------------------------------------------------------------
     // Left-recursion invocation stack + active-head index (transient).
-    //
-    // Used by NonTerminal::parse to detect left-recursive cycles and grow the
-    // seed across indirectly/mutually-left-recursive rules. LRFrame objects
-    // are stack locals in NonTerminal::parse, linked here only while their
-    // call is on the C++ stack; m_growing_head entries are set/cleared around
-    // a head's growth loop. Neither stores parse answers (the memo does).
     // -----------------------------------------------------------------------
 
     LRFrame* lr_push(LRFrame* frame) noexcept
@@ -327,9 +259,8 @@ struct Context
         m_lr_stack = frame->next;
     }
 
-    // Is `rule` already being evaluated at `pos`? Scans the LR stack. True =>
-    // this application is (directly or indirectly) left-recursive — the rule
-    // recursed into itself before consuming input.
+    // Is `rule` already being evaluated at `pos`? Scans the LR stack. True ⇒
+    // this application is (directly or indirectly) left-recursive.
     bool lr_in_progress(const NonTerminalType* rule, std::size_t pos) const noexcept
     {
         for (const LRFrame* f = m_lr_stack; f != nullptr; f = f->next) {
@@ -340,9 +271,6 @@ struct Context
         return false;
     }
 
-    // The head rule currently being grown at `pos`, or nullptr if no growth is
-    // in progress there. Involved rules query this to decide whether to defer
-    // (return their current seed) rather than growing independently.
     [[nodiscard]] const NonTerminalType* growing_head(std::size_t pos) const noexcept
     {
         auto it = m_growing_head.find(pos);
@@ -360,13 +288,8 @@ struct Context
     // currently on the LR stack at `pos`. Called by a head's growth loop at
     // the start of each growth iteration so sibling (involved) rules are
     // re-evaluated against the head's freshly-grown seed instead of returning
-    // a frozen result.
-    //
-    // The stack-resident exclusion is essential: a rule mid-evaluation up the
-    // call chain must NOT have its memo dropped — it would re-enter through
-    // the first-time path and corrupt cycle detection. Only completed sibling
-    // results get cleared. The two-level memo map makes this a single
-    // inner-map sweep — it replaces Warth's involvedSet/evalSet.
+    // a frozen result. The stack-resident exclusion is essential: a rule
+    // mid-evaluation up the call chain must NOT have its memo dropped.
     void clear_siblings_at(std::size_t pos, const NonTerminalType* keep)
     {
         auto memos = m_mem.find(pos);
@@ -390,10 +313,9 @@ struct Context
         CutRecord(std::size_t i, bool c) : pos{i}, cut{c} {}
     };
 
-    // Set the current scope's cut flag. No-op when the cut stack is empty
-    // (a cut appearing outside any Alternation/Repetition scope has no
-    // scope to commit — the cut flag is simply dropped). This keeps
-    // standalone `~` / cut() safe at the grammar top level.
+    // Set the current scope's cut flag. No-op when the cut stack is empty (a
+    // cut appearing outside any Alternation/Repetition scope has no scope to
+    // commit — the flag is dropped). Keeps standalone cut() / `~` safe.
     void cut(bool c)
     {
         if (m_cut.empty())
@@ -402,9 +324,6 @@ struct Context
         m_cut.top().pos = mark();
     }
 
-    // Outside any Alternation/Repetition scope the cut stack is empty and
-    // nothing has been committed. Reading cut() there returns false (no
-    // active commitment) rather than crashing on the empty stack.
     bool cut() { return m_cut.empty() ? false : m_cut.top().cut; }
 
     void init_cut() { m_cut.emplace(mark(), false); }
@@ -417,56 +336,36 @@ struct Context
                 const auto& [pos, record] = item;
                 return pos < m_last_cut;
             });
-            // Virtual dispatch: no-op for SpanSource, evicts pages for
-            // FileSourceSource. Replaces the old if-constexpr trait branch.
             m_input->release_before(m_last_cut);
         }
         m_cut.pop();
     }
 
-    // -------------------------------------------------------------------
-    // Auto-skip. The skipper is a transparent rule invoked between
-    // adjacent sequence elements and between repetition iterations. It is
-    // owned by Grammar and stamped onto the Context at Grammar::parse
-    // entry. These accessors are public only because the expression types
-    // that call run_skipper() live in peg::parsers; end users should drive
-    // this via Grammar::set_skipper / lexeme().
-    // -------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Auto-skip. The skipper fires between adjacent sequence children and
+    // between repetition iterations; nowhere else (not before first, not
+    // after last, not inside Alternatives / predicates / terminal-seq
+    // literals). End users drive skip via Grammar::set_skipper / lexeme().
+    // -----------------------------------------------------------------------
 
-    // Invoke the skipper if one is set and auto-skip is enabled. Called
-    // by SequenceExpr and repeat_parse_impl between adjacent children.
-    // No-op (and zero virtual dispatch) when no skipper is set or when
-    // skip_enabled() is false (inside lexeme).
-    //
-    // Reentrancy guard: while the skipper itself runs, auto-skip is
-    // temporarily disabled so the skipper's own internal Repetition /
-    // Sequence children do not recursively invoke run_skipper() (which
-    // would double-consume input or, for a skipper written with
-    // adjacency, loop). This mirrors how lexeme() suppresses skip for
-    // its subtree. A skipper is therefore always written as a single
-    // self-contained rule (typically *e); it cannot rely on auto-skip
-    // itself — and that is the correct design.
+    // Reentrancy guard: while the skipper runs, skip_enabled is temporarily
+    // cleared so the skipper's own internal Repetition / Sequence children do
+    // not recursively invoke run_skipper() (which would double-consume). A
+    // skipper is therefore a single self-contained rule (typically *e) and
+    // cannot rely on auto-skip itself.
     void run_skipper()
     {
         if (m_skip_enabled && m_skipper) {
             bool prev = m_skip_enabled;
             m_skip_enabled = false;
-            // Transparent: discard the result. A skipper is always
-            // written as *e (zero-or-more), so it always succeeds.
             m_skipper->parse(*this);
             m_skip_enabled = prev;
         }
     }
 
-    // For Grammar::parse use only — stamps the Grammar-owned skipper
-    // pointer onto this Context for the duration of one parse.
     void internal_set_skipper(const NonTerminalType* s) noexcept { m_skipper = s; }
-
     [[nodiscard]] bool has_skipper() const noexcept { return m_skipper != nullptr; }
 
-    // Toggled by lexeme() to disable auto-skip for a subtree. Use
-    // skip_enabled(prev) to restore the prior value (the lexeme wrapper
-    // does this via ScopeGuard).
     void skip_enabled(bool e) noexcept { m_skip_enabled = e; }
     [[nodiscard]] bool skip_enabled() const noexcept { return m_skip_enabled; }
 
@@ -476,11 +375,7 @@ struct Context
 
     using expected_set = std::set<ExpectedItem>;
 
-    // Called by leaf expressions and NonTerminals when they fail.
-    // Updates m_furthest_failure_pos / m_expected according to the rule:
-    //   - If pos > m_furthest_failure_pos: clear, update, record.
-    //   - If pos == m_furthest_failure_pos: append (set deduplicates).
-    //   - If pos <  m_furthest_failure_pos: ignore.
+    // Furthest-wins / same-position-accumulates / earlier-ignored.
     void record_failure(std::size_t pos, ExpectedItem item)
     {
         if (!m_has_error || pos > m_furthest_failure_pos) {
@@ -491,20 +386,16 @@ struct Context
         } else if (pos == m_furthest_failure_pos) {
             m_expected.insert(std::move(item));
         }
-        // else: pos < furthest — ignore
     }
 
     [[nodiscard]] std::size_t furthest_failure_pos() const noexcept
     {
         return m_furthest_failure_pos;
     }
-
     [[nodiscard]] const expected_set& expected() const noexcept { return m_expected; }
-
     [[nodiscard]] bool has_error() const noexcept { return m_has_error; }
 
-    // Move the error out as a Diagnostic value-object. After this call,
-    // has_error() returns false (the Context is reset to "no error" state).
+    // Move the error out as a Diagnostic. After this call, has_error() is false.
     [[nodiscard]] std::optional<Diagnostic> take_error()
     {
         if (!m_has_error) {
@@ -518,34 +409,22 @@ struct Context
     }
 
     // -----------------------------------------------------------------------
-    // Multi-diagnostic accumulator.
-    //
-    // The furthest-failure path above keeps a single "best" diagnostic
-    // (furthest-wins) — the right default for single-error reporting.
-    // Production parsers (IDEs, linters) need to report many errors per
-    // file: after a recoverable failure, the parser resyncs to a sync
-    // token and continues, accumulating each recovered failure as its own
-    // diagnostic.
-    //
-    // Append-only and unordered. Each recovered rule calls
-    // record_diagnostic() once; the caller drains via take_diagnostics()
-    // after the top-level parse returns. Independent of the furthest-wins
-    // logic above.
+    // Multi-diagnostic accumulator (parallel to the furthest-failure path
+    // above). Production parsers report many errors per file: after a
+    // recoverable failure, the parser resyncs to a sync token and continues,
+    // accumulating each recovered failure as its own diagnostic.
     // -----------------------------------------------------------------------
+
     void record_diagnostic(Diagnostic diag) { m_diagnostics.push_back(std::move(diag)); }
 
     [[nodiscard]] const std::vector<Diagnostic>& diagnostics() const noexcept
     {
         return m_diagnostics;
     }
-
-    // Move all accumulated diagnostics out and clear the vector.
     [[nodiscard]] std::vector<Diagnostic> take_diagnostics() { return std::move(m_diagnostics); }
 
 protected:
     std::unique_ptr<InputSourceBase<CharT>> m_input;
-    // Non-null for contiguous (span) sources, null for paged (FileSource).
-    // Cached at construction so current()/at() skip the virtual dispatch.
     const CharT* m_fast_data;
     std::size_t m_position = 0;
     std::size_t m_last_cut = 0;
@@ -553,35 +432,16 @@ protected:
     std::map<std::size_t, std::map<const NonTerminalType*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
 
-    // Left-recursion state (transient; parse answers live only in m_mem):
-    //   m_lr_stack     — LR invocation stack head; frames are stack locals in
-    //                    NonTerminal::parse, linked here only while on the
-    //                    C++ call stack. nullptr when no rule is mid-parse.
-    //   m_growing_head — pos → head rule currently in its growth loop at that
-    //                    pos. Absent ⇒ no growth in progress there. Entries
-    //                    are set on growth-loop entry and cleared on exit.
     LRFrame* m_lr_stack = nullptr;
     std::unordered_map<std::size_t, const NonTerminalType*> m_growing_head;
 
-    // Error tracking state
     std::size_t m_furthest_failure_pos = 0;
     expected_set m_expected;
     bool m_has_error = false;
 
-    // Multi-diagnostic accumulator. Parallel to the furthest-failure state
-    // above; populated by record_diagnostic() at recovery points.
     std::vector<Diagnostic> m_diagnostics;
 
-    // Skipper: a transparent rule invoked between adjacent sequence
-    // elements and between repetition iterations. nullptr = no auto-skip.
-    // Owned by Grammar; Context holds a non-owning pointer stamped at
-    // Grammar::parse entry (see Grammar::set_skipper). Stays nullptr for
-    // Contexts not driven through Grammar::parse, so run_skipper() is a
-    // no-op in that case.
     const NonTerminalType* m_skipper = nullptr;
-    // Toggled by lexeme() for the duration of its subtree so auto-skip
-    // can be locally disabled. Save/restore via skip_enabled(bool) keeps
-    // nesting safe (lexeme inside lexeme).
     bool m_skip_enabled = true;
 };
 
@@ -591,7 +451,6 @@ auto from_file(const std::string& path)
     return Context<CharT>(FileSource<CharT, PageSize>(path));
 }
 
-// CTAD: Context(someString) deduces to Context<char>, etc.
 template<typename Range>
 Context(const Range&) -> Context<typename Range::value_type>;
 
