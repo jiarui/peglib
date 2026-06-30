@@ -3,35 +3,35 @@
 // rule (g["A"] = g["B"]) — an "alias" — and its interaction with typed actions
 // and on_match hooks.
 //
-// WHAT WORKS (cases 1, 2, 5 — GREEN, the common real-world shapes):
+// WHAT WORKS (cases 1, 2, 3, 5, 6 — GREEN):
 //   - A SINGLE-LAYER alias with its own set_action fires that action and may
 //     transform the body's value (case 1). This is how real grammars use
 //     aliases: yueshi's `field_positional = exp`, `stat_call = functioncall`,
 //     `var_name = name_token`, `chunk = block` are all single-layer aliases
-//     that wrap/transform the body value, and they work because the start rule
-//     dispatches on itself (fold_start) and folds its body via node->producer.
+//     that wrap/transform the body value.
 //   - A single-layer alias WITHOUT an action transparently passes the body's
 //     value through (case 2). This is typed_action_test case 7's invariant.
+//   - A DEEP alias CHAIN (a=b, b=c, all with actions) composes every layer's
+//     action outward (case 3). Fixed by the wrap-if-typed-fold change in
+//     NonTerminal::parse + the fold-body-from-child change in fold_and_invoke:
+//     each action-bearing rule now owns a distinct tree layer (producer =
+//     itself) instead of collapsing onto the innermost producer, so the fold
+//     dispatches on each layer in turn.
 //   - An alternation (NOT an alias) dispatches on the winning branch's producer
 //     (case 5).
+//   - A NON-START alias reached from a parent (middle=inner, root=middle, all
+//     acting) composes the middle transform (case 6) — the same wrap-if-typed-
+//     fold fix, restated as the "named transform referenced from a rule" shape
+//     real grammars reach for first.
 //
-// KNOWN LIMITATIONS (cases 3, 4 — RED, documented, NOT triggered by yueshi):
-//   - case 3: a DEEP alias CHAIN (a=b, b=c, all with actions) skips the middle
-//     layer's action. Mechanism: NonTerminal::parse adopts the body node and
-//     stamps node->producer only-if-none (NonTerminal.h:223), so the node
-//     carries the INNERMOST producer; fold_rule dispatches on it and the
-//     middle alias's typed_fold is unreachable. Fixing this generally requires
-//     either an adopter-chain on ParseTreeNode (the producer/adopter model is
-//     itself questionable — a layered-node design would remove the ambiguity
-//     entirely) or a restructuring of action registration. Not done here:
-//     yueshi has no deep alias chains (all its aliases are single-layer), so
-//     this is latent, not blocking.
-//   - case 4: an alias rule's on_match hook fires, but the inner (body) rule's
-//     on_match does NOT — fire_on_match recurses through node->children, and an
-//     alias adopts the body node (no extra child layer), so the inner rule's
-//     hook walk is lost. yueshi's parser does not use on_match on aliases
-//     (on_match is used only in the lexer, on non-alias rules), so this is also
-//     latent.
+// REMAINING LIMITATION (case 4 — RED, documented, NOT triggered by yueshi):
+//   - An alias rule's on_match hook fires, but the inner (body) rule's
+//     on_match does NOT. The typed-action channel was fixed by keying the wrap
+//     on m_typed_fold; on_match is a separate (side-effect) channel that was
+//     deliberately NOT keyed, because widening the wrap to every on_match rule
+//     would change tree shape for matcher/lexer rules for no reported benefit.
+//     yueshi's parser uses on_match only in the lexer (never on aliases), so
+//     this is latent.
 //
 // The NodeType lives in an anonymous namespace (see below) for ODR safety.
 // ---------------------------------------------------------------------------
@@ -141,21 +141,18 @@ TEST_CASE("alias-action: alias without action passes value through")
 }
 
 // ===========================================================================
-// 3. NESTED alias chain where the middle layer carries its own action.
-//    A = B; B = C; A and B both act. IDEAL: each layer fires, composing
-//    outward (c=1 → b=11 → a=111, tag=3).
+// 3. NESTED alias chain where every layer carries its own action.
+//    A = B; B = C; A and B both act. Each layer fires, composing outward
+//    (c=1 → b=11 → a=111, tag=3).
 //
-//    KNOWN LIMITATION (documented, latent — yueshi does not use deep alias
-//    chains): the middle layer's action is skipped. NonTerminal::parse adopts
-//    the body node and stamps node->producer only-if-none, so the node carries
-//    the INNERMOST producer (c); fold_rule dispatches on it and b's typed_fold
-//    is unreachable. The outermost (a, the start rule) still fires via
-//    fold_start, so the result is a acting on c's value (101, tag 3) rather
-//    than on b's (111). This case OBSERVES the limitation (no hard CHECK that
-//    would fail the suite) so the behavior is pinned and visible; a general
-//    fix would need an adopter-chain or a layered-node redesign.
+//    Regression guard for the wrap-if-typed-fold fix: previously NonTerminal::
+//    parse adopted the body node and stamped node->producer only-if-none, so
+//    the single shared node carried the INNERMOST producer (c); fold_rule
+//    dispatched on it and b's typed_fold was unreachable, dropping b's +10.
+//    Now each action-bearing rule owns a distinct tree layer (producer =
+//    itself), so the fold composes c → b → a in order.
 // ===========================================================================
-TEST_CASE("alias-action: nested aliases — middle layer action (KNOWN LIMITATION)")
+TEST_CASE("alias-action: nested aliases — every layer composes")
 {
     Grammar<char, Node> g;
 
@@ -172,11 +169,8 @@ TEST_CASE("alias-action: nested aliases — middle layer action (KNOWN LIMITATIO
     Ctx ctx(in);
     auto ast = g.parse_ast("a", ctx);
     REQUIRE(ast);
-    // Ideal: value==111, tag==3 (c=1 → b=11 → a=111). Actual (limitation):
-    // value==101, tag==3 — the outermost fires but the middle layer is skipped.
-    MESSAGE("nested-alias: value=" << ast->value << " tag=" << ast->tag
-           << " (ideal: value=111 tag=3; limitation skips b's action)");
-    CHECK(ast->tag == 3); // the outermost (start) rule's action does fire
+    CHECK(ast->value == 111); // c=1 → b=11 → a=111 — every layer fired
+    CHECK(ast->tag == 3);     // the outermost (start) rule's tag
 }
 
 // ===========================================================================
@@ -249,4 +243,45 @@ TEST_CASE("alias-action: alternation winner dispatch is unaffected")
         CHECK(ast->value == 2);
         CHECK(ast->tag == 2); // y won → y's action
     }
+}
+
+// ===========================================================================
+// 6. NON-START ALIAS reached from a parent (the "alias as a named transform
+//    referenced by another rule" shape). The shape real grammars reach for
+//    first when they want to name and reuse a transform:
+//
+//      inner  = '1'                 ; action: tag=1, value=1
+//      middle = inner               ; action: tag=2, value=inner+10  <-- alias
+//      root   = middle              ; start rule, action: tag=3, passthrough
+//
+//    Expected: root folds middle over inner => value=11, then root => tag=3.
+//
+//    Regression guard for the wrap-if-typed-fold fix. Previously NonTerminal::
+//    parse adopted the body node and stamped node->producer only-if-none, so
+//    the single node carried up the chain had producer == inner (the
+//    innermost). Root (the start rule) fired via fold_start and folded its body
+//    via fold_rule, which dispatched on node->producer — i.e. on inner, NOT on
+//    middle — so middle's transform (+10, tag=2) was dropped and the result
+//    was value=1 (raw inner), tag=3. Now middle owns its own layer and the
+//    fold composes inner → middle (+10) → root.
+// ===========================================================================
+TEST_CASE("alias-action: non-start alias transform composes")
+{
+    Grammar<char, Node> g;
+
+    auto inner = (g["inner"] = g.token('1'));
+    inner.set_action([](Ctx&, Span, char) -> Node { return Node{1, 1}; }); // tag 1
+
+    auto middle = (g["middle"] = g["inner"]);
+    middle.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value + 10, 2}; }); // tag 2
+
+    auto root = (g["root"] = g["middle"]);
+    root.set_action([](Ctx&, Span, Node n) -> Node { return Node{n.value, 3}; }); // tag 3
+
+    std::string in = "1";
+    Ctx ctx(in);
+    auto ast = g.parse_ast("root", ctx);
+    REQUIRE(ast);
+    CHECK(ast->value == 11); // inner=1 → middle=11 → root=11 — middle's transform applied
+    CHECK(ast->tag == 3);    // the outermost (start) rule's tag
 }

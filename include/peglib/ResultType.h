@@ -718,7 +718,17 @@ auto fold_and_invoke(const F& f, C& ctx, const NodePtr& node) -> decltype(auto)
     if constexpr (std::is_void_v<R>) {
         return f(ctx, sp);
     } else {
-        auto value = fold<E>(ctx, node);
+        // An action-bearing rule WRAPS its body node as node->children[0]
+        // (NonTerminal::parse wrap-if-typed-fold branch), so that each rule in
+        // a chain (root = middle = inner) is a distinct dispatchable node
+        // instead of collapsing onto the innermost producer. Fold the body
+        // from that child — folding from `node` itself would re-dispatch on
+        // node->producer == this rule's own typed_fold and recurse forever.
+        // children empty (a void-only body that built no node) → fold from
+        // `node` as the historical fallback. Span is read from the wrapper
+        // (the rule's full match span) in either case.
+        const NodePtr& body_node = node->children.empty() ? node : node->children[0];
+        auto value = fold<E>(ctx, body_node);
         if constexpr (detail::is_std_tuple_v<R>) {
             return std::apply(
                 [&](auto&&... args) { return f(ctx, sp, std::forward<decltype(args)>(args)...); },

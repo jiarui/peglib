@@ -208,22 +208,45 @@ public:
             return fail;
         }
 
-        // Use the body's tree directly as this rule's tree. If the body
-        // produced no tree (e.g. only predicates/terminals), create a fresh
-        // node. The action can read body sub-results from node->children.
-        auto node = inner.tree;
-        if (!node) {
+        // Build this rule's tree node. Two cases:
+        //
+        // (1) This rule has its own typed action (m_typed_fold): it must OWN a
+        //     distinct tree layer so the post-parse fold can dispatch on IT —
+        //     not only on the innermost producer. Wrap the body node as this
+        //     rule's single child; the body node keeps its own producer, and
+        //     this layer carries `this` as producer. This is what makes a
+        //     chain (root = middle = inner) or a non-start alias reachable
+        //     from a parent: each action-bearing rule is now a distinct node
+        //     the fold can find, instead of collapsing onto the innermost
+        //     producer and having its action silently skipped. The fold
+        //     driver (fold_and_invoke) knows to fold the body from
+        //     node->children[0].
+        //
+        // (2) Transparent rule (no typed action): adopt the body node at zero
+        //     cost. producer is stamped only-if-none so it sticks at the
+        //     innermost action-bearing rule, and the fold flows that value
+        //     straight through. This preserves zero-cost passthrough aliases
+        //     (typed_action cases 7 & 12) and keeps the tree flat for
+        //     action-free grammars.
+        ParseTreeNodePtr node;
+        if (m_typed_fold) {
             node = std::make_shared<typename Context::ParseTreeNode>();
-        }
-        node->name = m_name;
-        // Stamp producer only if the node doesn't already have one: a rule
-        // that adopts its body's node (alias, alternation-passthrough) must
-        // NOT clobber the innermost producer, or the typed fold loses the
-        // reference to the rule whose action built the value.
-        if (!node->producer)
+            node->name = m_name;
             node->producer = this;
-        node->start_offset = start_pos;
-        node->end_offset = context.mark();
+            node->start_offset = start_pos;
+            node->end_offset = context.mark();
+            if (inner.tree)
+                node->children.push_back(std::move(inner.tree));
+        } else {
+            node = inner.tree;
+            if (!node)
+                node = std::make_shared<typename Context::ParseTreeNode>();
+            node->name = m_name;
+            if (!node->producer)
+                node->producer = this;
+            node->start_offset = start_pos;
+            node->end_offset = context.mark();
+        }
 
         // parse() is pure structure: it builds and caches the tree. Value
         // computation (m_typed_fold) and side-effect hooks (m_on_match) run
