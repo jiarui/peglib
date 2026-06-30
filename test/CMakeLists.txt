@@ -66,7 +66,8 @@ add_executable(peglib_test
     matcher_test.cpp
     lr_triangle_repro_test.cpp
     alias_action_test.cpp
-    lr_token_triangle_test.cpp)
+    lr_token_triangle_test.cpp
+    streaming_test.cpp)
 
 target_link_libraries(peglib_test PRIVATE peglib peglib_test_main peglib_test_warnings)
 target_include_directories(peglib_test SYSTEM PRIVATE ${doctest_include_dir})
