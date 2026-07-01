@@ -174,17 +174,17 @@ public:
         // innermost action-bearing rule.
         ParseTreeNodePtr node;
         if (m_typed_fold) {
-            node = std::make_shared<typename Context::ParseTreeNode>();
+            node = context.make_node();
             node->name = m_name;
             node->producer = this;
             node->start_offset = start_pos;
             node->end_offset = context.mark();
             if (inner.tree)
-                node->children.push_back(std::move(inner.tree));
+                node->children.push_back(inner.tree);
         } else {
             node = inner.tree;
             if (!node)
-                node = std::make_shared<typename Context::ParseTreeNode>();
+                node = context.make_node();
             node->name = m_name;
             if (!node->producer)
                 node->producer = this;

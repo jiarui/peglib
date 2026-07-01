@@ -13,6 +13,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -94,12 +95,22 @@ struct Context
     // children, dispatch metadata. No value slot — the typed fold (parse_ast)
     // owns computed values as locals and moves them up, which is what makes a
     // move-only NodeType safe.
+    //
+    // Lifetime: ParseTreeNode is owned by the Context's arena (m_node_arena);
+    // every other reference — children, the packrat memo (RuleState), and the
+    // tree returned by parse_tree() — is a NON-OWNING observer valid for the
+    // Context's lifetime. This replaces the old shared_ptr model: the sharing
+    // (memo ↔ tree, parent ↔ child) was lifetime-only, with no mutation after
+    // build, so a single owner + observers expresses it correctly and removes
+    // the per-node refcount machinery. The returned tree must not outlive its
+    // Context (parse_ast folds it away into a context-independent value, so
+    // this only matters for direct parse_tree() callers, who use it in-scope).
     struct ParseTreeNode
     {
         std::string name;
         std::size_t start_offset = 0;
         std::size_t end_offset = 0;
-        std::vector<std::shared_ptr<ParseTreeNode>> children;
+        std::vector<ParseTreeNode*> children;
         // Producer rule (typed-fold dispatch). Stamped by NonTerminal::parse
         // so the post-parse typed fold can find each node's registered fold
         // via pointer identity. Null for anonymous combinator nodes and for
@@ -111,12 +122,12 @@ struct Context
         // runtime. SIZE_MAX = not an alternation winner.
         std::size_t alt_winner = static_cast<std::size_t>(-1);
     };
-    using ParseTreeNodePtr = std::shared_ptr<ParseTreeNode>;
+    using ParseTreeNodePtr = ParseTreeNode*;
 
     struct ParseResult
     {
         bool success = false;
-        ParseTreeNodePtr tree;
+        ParseTreeNodePtr tree = nullptr;
         explicit operator bool() const { return success; }
     };
 
@@ -183,6 +194,15 @@ struct Context
     }
 
     [[nodiscard]] InputSourceBase<CharT>& input() const noexcept { return *m_input; }
+
+    // Allocate a fresh ParseTreeNode owned by this Context's arena. The node
+    // is value-initialized; the caller fills in its fields and the node lives
+    // until the Context is destroyed (no per-node free — a monotonic pool).
+    // On a failed branch the node simply becomes unreachable garbage in the
+    // arena, which is correctness-neutral (the standard arena high-water-mark
+    // tradeoff) and avoids the alloc/free churn that the make_shared model
+    // paid on every speculative combinator node.
+    ParseTreeNode* make_node() { return &m_node_arena.emplace_back(); }
 
     void next() noexcept
     {
@@ -456,6 +476,10 @@ protected:
     std::size_t m_position = 0;
     std::size_t m_last_cut = 0;
     std::size_t m_input_size = 0;
+    // Node arena: owns every ParseTreeNode for this parse's lifetime. A deque
+    // gives stable element addresses across growth and frees all nodes on
+    // Context destruction with no per-node deallocation. See make_node().
+    std::deque<ParseTreeNode> m_node_arena;
     // Packrat memo. Two-level, keyed by (position → rule*). Both layers are
     // hash maps rather than red-black trees: the callgrind baseline showed
     // std::map node allocation + descent as the single largest hotspot

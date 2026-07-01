@@ -88,7 +88,7 @@ struct TokenExpr : ParsingExpr<Context, TokenExpr<Context, TerminalValueType>>
     {
         if (!context.ended() && symbolConsumable(context.current(), m_terminalValue)) {
             context.next();
-            auto node = std::make_shared<typename Context::ParseTreeNode>();
+            auto node = context.make_node();
             node->start_offset = context.mark() - 1;
             node->end_offset = context.mark();
             return {true, node};
@@ -118,7 +118,7 @@ struct MatcherExpr : ParsingExpr<Context, MatcherExpr<Context, Fn>>
         std::optional<Span> consumed = m_fn(context, Span{start, start});
         if (consumed) {
             context.reset(consumed->end);
-            auto node = std::make_shared<typename Context::ParseTreeNode>();
+            auto node = context.make_node();
             node->start_offset = start;
             node->end_offset = consumed->end;
             return {true, node};

@@ -33,7 +33,7 @@ struct SequenceExpr : ParsingExpr<Context, SequenceExpr<Context, Children...>>
     ParseResult parse(Context& context) const override
     {
         auto state = context.state();
-        auto node = std::make_shared<typename Context::ParseTreeNode>();
+        auto node = context.make_node();
         node->start_offset = context.mark();
         if (parseSeq<0>(context, node)) {
             node->end_offset = context.mark();
@@ -128,7 +128,7 @@ repeat_parse_impl(Context& context, ChildOp parse_child, std::size_t min_rep, st
     context.init_cut();
     ScopeGuard _{[&context]() { context.remove_cut(); }};
     auto initState = context.state();
-    auto node = std::make_shared<typename Context::ParseTreeNode>();
+    auto node = context.make_node();
     node->start_offset = context.mark();
 
     std::size_t loopCount = 0;

@@ -96,6 +96,8 @@ number is reverted (we keep only what the evidence supports).
 | Pass B: two-level `std::map` → `std::unordered_map` for the packrat memo | 2026-07-01 | all | lua chunk −22% (98M→76M ns/parse); arith −16%; LR −12%; json −6..8%. Callgrind total Ir −10.4% (1.49B→1.34B); `update_rule_state` self-Ir 8.96%→3.00%. | ✓ |
 | Pass C-step1: lazy string construction in failure path | 2026-07-01 | backtracking-heavy (arith, LR, lua) | modest. Callgrind total Ir −1.5% (1.34B→1.32B); `string::push_back` self-Ir 3.06%→2.46%. Wall-clock within noise. | ✓ |
 | Pass C-step2: `std::set<ExpectedItem>` → flat sorted-vector `ExpectedSet` | 2026-07-01 | all backtracking-heavy | Callgrind total Ir −2.8% more (1.32B→1.28B); **−14.2% cumulative** from baseline. `_Rb_tree_insert_and_rebalance` (1.17%) gone (no per-insert node alloc). Wall-clock: lua chunk −19% (76M→61M ns/parse), arith −9%. | ✓ |
+| Pass A-step1: move (don't copy) child trees into parent `children` | 2026-07-01 | all | Callgrind total Ir −0.7% (1.28B→1.274B). `_Sp_counted_base::_M_release` (1.81%) dropped out of the top 20 — the gratuitous refcount inc/dec pair per sequence/repetition child is gone. Preparatory; superseded by step 2 below (same sites became plain pointer copies). | ✓ |
+| Pass A-step2: drop `shared_ptr<ParseTreeNode>` — Context arena owns all nodes, observers are raw pointers | 2026-07-01 | all | Callgrind total Ir **−14.8%** (1.274B→1.085B); **−27.4% cumulative** from baseline (1.49B→1.09B). `make_shared` ctor + `_Sp_counted_base` refcount machinery gone from the top 20; node allocation is now `deque::emplace_back` at 1.97% with no per-node free. Wall-clock: expr left-recursive 1.64×, arith 1.41×, lua 1.59×, json wide 1.20×. | ✓ |
 
 ### Pass B notes
 
@@ -121,5 +123,42 @@ including the left-recursion suite (`lr_triangle_repro_test`,
 The new top hotspot (post Pass B+C) is heap allocation — `_int_malloc`/
 `free`/`malloc`/`operator new` together ~18% of instruction refs, dominated by
 `make_shared<ParseTreeNode>` firing on every successful match. That is the
-**Pass A target** (node arena / pool).
+**Pass A target** — addressed by the ownership refactor below.
+
+### Pass A notes — the ownership refactor
+
+This was the largest single win and the most important design decision. The
+starting point was a `shared_ptr<ParseTreeNode>` model where the memo cached a
+successful `(rule,pos)` tree and that same tree was also linked into the live
+parse tree (memo ↔ tree aliasing), plus a parent's `children` vector held each
+child. Refcounting reconciled "who owns this node."
+
+**The key realization**: the sharing was *lifetime-only*, never mutation-after-
+build. The fold and `on_match` only read nodes; nothing mutates a cached node.
+So `shared_ptr` was solving a lifetime question that a single owner + observers
+answers directly:
+
+- The **Context owns every node** via a monotonic arena (`std::deque<ParseTreeNode>`,
+  stable addresses, no per-node free).
+- The memo (`RuleState::m_cached_result`), each node's `children`, and the
+  `parse_tree()` return value all hold **raw `ParseTreeNode*` observers**.
+- The arena outlives the entire parse + fold + the caller's in-scope use of the
+  returned tree, so every observer is valid for its purpose.
+
+`ParseTreeNodePtr` became a `using`-alias to `ParseTreeNode*`, so existing
+`tree->name` / `if (tree)` call sites compile unchanged. `parse_ast` is
+unaffected (it returns `optional<NodeType>`, fully owned and context-
+independent). The one observable contract change: a tree returned by
+`parse_tree()` is now valid only for its Context's lifetime (previously a
+`shared_ptr` could keep a node alive past the Context) — but no caller ever
+used that capability (parse_ast folds the tree away; parse_tree is always used
+in-scope), so it was purely theoretical.
+
+**Lifecycle safety** (all verified by the ASan/UBSan suite — 187/187 pass):
+- Backtracking discards: failed-branch nodes become unreachable arena garbage,
+  freed wholesale at parse end. Correctness-neutral high-water-mark tradeoff.
+- Cut-eviction (`remove_cut`) drops memo *records* (cache pointers), not nodes.
+- LR growth loop: superseded seeds overwritten in the memo; old seeds are
+  unreachable garbage.
+- No cross-parse aliasing: memo and arena both live in the per-parse Context.
 
