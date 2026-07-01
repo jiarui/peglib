@@ -22,6 +22,7 @@
 #include <span>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -107,7 +108,13 @@ struct Context
     // this only matters for direct parse_tree() callers, who use it in-scope).
     struct ParseTreeNode
     {
-        std::string name;
+        // Interned: a non-owning view into the producing NonTerminal's m_name
+        // (which lives in the Grammar and outlives this node's Context). Saves
+        // the per-node std::string copy/move that the old `std::string name`
+        // paid on every committed node — rule names are a small fixed set in
+        // the Grammar, so each node just observes its producer's name rather
+        // than owning a copy. Empty for anonymous combinator nodes.
+        std::string_view name;
         std::size_t start_offset = 0;
         std::size_t end_offset = 0;
         std::vector<ParseTreeNode*> children;
