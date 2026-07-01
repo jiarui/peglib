@@ -123,3 +123,23 @@ target_compile_definitions(peglib_json_skipper_test PRIVATE
     PEGLIB_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_test(NAME peglib_json_skipper_test COMMAND peglib_json_skipper_test)
+
+# ---------------------------------------------------------------------------
+# Performance benchmark harness (NOT a test — not registered with ctest).
+# Gated on PEGLIB_BUILD_BENCHMARKS (OFF by default) so it never perturbs the
+# normal test build. Measures end-to-end parse time on representative
+# workloads (JSON, arithmetic backtracking, left-recursion, Lua). Uses only
+# std::chrono — no google-benchmark dependency.
+# ---------------------------------------------------------------------------
+if(PEGLIB_BUILD_BENCHMARKS)
+    add_executable(peglib_bench
+        perf/bench.cpp)
+    target_link_libraries(peglib_bench PRIVATE peglib peglib_test_warnings)
+    target_include_directories(peglib_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/perf)
+    # Optimized build only — benchmark numbers at -O0 are meaningless. The
+    # peglib INTERFACE target does not impose an optimization level, so set it
+    # here unconditionally without clobbering the caller's other flags.
+    target_compile_options(peglib_bench PRIVATE
+        $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:-O2>)
+endif()
+

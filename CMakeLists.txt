@@ -36,6 +36,7 @@ endif()
 # ---------------------------------------------------------------------------
 option(PEGLIB_BUILD_TESTS "Build peglib unit tests" ON)
 option(PEGLIB_BUILD_LUA_EXAMPLES "Build Lua lexer/parser examples (requires doctest only)" ON)
+option(PEGLIB_BUILD_BENCHMARKS "Build the peglib_bench performance harness (not a test; OFF by default)" OFF)
 option(PEGLIB_COVERAGE "Enable coverage instrumentation (GCC/Clang)" OFF)
 option(PEGLIB_ENABLE_CLANG_TIDY "Run clang-tidy during build" OFF)
 option(PEGLIB_ENABLE_SANITIZERS "Enable ASan/UBSan (GCC/Clang)" OFF)
