@@ -201,8 +201,10 @@ struct Context
 
     std::tuple<bool, RuleState> rule_state(const NonTerminalType* rule, std::size_t pos)
     {
-        auto [iter_records, ins] =
-            m_mem.emplace(pos, std::map<const NonTerminalType*, RuleState>{});
+        // try_emplace value-initializes an empty inner map on a miss without
+        // naming its (now unordered_map) type, so the body stays agnostic to
+        // the inner container choice.
+        auto [iter_records, ins] = m_mem.try_emplace(pos);
         auto [iter, ok] = iter_records->second.emplace(rule, RuleState{});
         return std::tuple<bool, RuleState>{ok, iter->second};
     }
@@ -429,7 +431,18 @@ protected:
     std::size_t m_position = 0;
     std::size_t m_last_cut = 0;
     std::size_t m_input_size = 0;
-    std::map<std::size_t, std::map<const NonTerminalType*, RuleState>> m_mem;
+    // Packrat memo. Two-level, keyed by (position → rule*). Both layers are
+    // hash maps rather than red-black trees: the callgrind baseline showed
+    // std::map node allocation + descent as the single largest hotspot
+    // (~30% of instruction refs) — two RB-tree node allocs per first-time
+    // (rule, pos) entry and two descents per lookup. unordered_map trades
+    // that for one hash probe + amortized bucket storage per layer, with no
+    // per-entry heap node on a hit. The two-level shape (not a single flat
+    // (pos, rule*) map) is deliberate: clear_siblings_at must iterate every
+    // rule AT a given position each left-recursion growth iteration, and a
+    // flat map would make that a full-table scan (O(total entries) per
+    // growth step → quadratic on left-recursive grammars).
+    std::unordered_map<std::size_t, std::unordered_map<const NonTerminalType*, RuleState>> m_mem;
     std::stack<CutRecord> m_cut;
 
     LRFrame* m_lr_stack = nullptr;

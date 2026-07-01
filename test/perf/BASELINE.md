@@ -93,3 +93,30 @@ number is reverted (we keep only what the evidence supports).
 | pass | date | workloads affected | ns/parse delta | kept? |
 |------|------|--------------------|---------------:|:-----:|
 | (baseline) | 2026-07-01 | — | — | — |
+| Pass B: two-level `std::map` → `std::unordered_map` for the packrat memo | 2026-07-01 | all | lua chunk −22% (98M→76M ns/parse); arith −16%; LR −12%; json −6..8%. Callgrind total Ir −10.4% (1.49B→1.34B); `update_rule_state` self-Ir 8.96%→3.00%. | ✓ |
+
+### Pass B notes
+
+Replaced both layers of the packrat memo (`std::map<pos, std::map<rule*,
+RuleState>>`) with `std::unordered_map`. The method bodies are unchanged
+(they use only `find`/`try_emplace`/`emplace`/`erase`, which both containers
+support identically) — a one-line container-type swap, plus `rule_state`
+switched to `try_emplace(pos)` so it doesn't name the (now hash-map) inner
+type.
+
+**Why two-level and not a single flat `(pos, rule*)` map:** a flat map was
+tried first and *hung* the benchmark. `clear_siblings_at(pos, keep)` — called
+every left-recursion growth iteration — must iterate every rule *at a given
+position*. With a flat map keyed by the pair, that becomes a full-table scan
+(O(total entries) per growth step), which is **quadratic** on left-recursive
+grammars (the lua `expr = expr binop expr` workload enters the growth loop at
+many positions over a large table). The two-level shape preserves
+O(entries-at-pos) locality for that path while still removing the RB-tree node
+allocations from the hot lookup path. All four ctest targets stay green,
+including the left-recursion suite (`lr_triangle_repro_test`,
+`lr_token_triangle_test`).
+
+The new top hotspot is `_int_malloc`/`free`/`malloc` (~18%) — heap allocation
+for `ParseTreeNode`s (Pass A target). The `ExpectedItem` set operations are
+now the largest coherent cluster (~14%) — Pass C target.
+
