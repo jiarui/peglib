@@ -99,6 +99,37 @@ number is reverted (we keep only what the evidence supports).
 | Pass A-step1: move (don't copy) child trees into parent `children` | 2026-07-01 | all | Callgrind total Ir −0.7% (1.28B→1.274B). `_Sp_counted_base::_M_release` (1.81%) dropped out of the top 20 — the gratuitous refcount inc/dec pair per sequence/repetition child is gone. Preparatory; superseded by step 2 below (same sites became plain pointer copies). | ✓ |
 | Pass A-step2: drop `shared_ptr<ParseTreeNode>` — Context arena owns all nodes, observers are raw pointers | 2026-07-01 | all | Callgrind total Ir **−14.8%** (1.274B→1.085B); **−27.4% cumulative** from baseline (1.49B→1.09B). `make_shared` ctor + `_Sp_counted_base` refcount machinery gone from the top 20; node allocation is now `deque::emplace_back` at 1.97% with no per-node free. Wall-clock: expr left-recursive 1.64×, arith 1.41×, lua 1.59×, json wide 1.20×. | ✓ |
 | Pass A-step3: intern node names (`std::string name` → `std::string_view` into the producer NonTerminal's name) | 2026-07-01 | all (most on name-heavy grammars) | Callgrind total Ir −3.9% (1.085B→1.043B); **−30.2% cumulative** from baseline. Each committed node no longer copies its producer's rule name (a small fixed set in the Grammar) — it observes it. The remaining string costs (operator=(string&&) 3.36%, push_back 3.11%) are in the failure-path diagnostics (retained ExpectedItem text), not node names. | ✓ |
+| Pass D: dispatch & traversal — investigated, **nothing kept** | 2026-07-01 | — | Re-profiled after Pass A. Two of the three planned sub-items target functions that are NOT in the profile: `lr_in_progress` (LR-stack scan) and `symbolConsumable`/`set<char>` (char-class) don't appear at all — the benchmark grammars use the already-O(1) range/single-char terminal paths, and the LR scan isn't hot. Virtual dispatch (item #8) stays ruled out (TODO.md:641, low ROI). `children.reserve()` was tried and **regressed** (+17% Ir): the per-node reserve cost (most nodes have 0–2 children and many are discarded on failure) exceeds the reallocation savings — `vector::reserve` alone was 2.26% of the post-reserve profile. Reverted. | ✗ |
+
+### Pass D notes — the negative result
+
+Pass D was the planned "dispatch & traversal" pass: char-class bitmap,
+LR-stack-scan fast-path, and `children.reserve()`. After re-profiling post-Pass-A,
+**none of it was justified**:
+
+- **Char-class bitmap** (`terminal(set<char>)` → 256-bit bitmap, TODO.md:441): the
+  `set<char>` path is not in the profile. The benchmark grammars (JSON, Lua,
+  arithmetic) use `terminal('a','z')` (the `array<elem,2>` range path, already
+  O(1)) and single-char terminals. Optimizing the `set<char>` path would be
+  work on an unexercised code path. A real grammar that builds char classes as
+  `set<char>` would benefit, but that's speculative.
+- **LR-stack-scan fast-path** (`lr_in_progress`): not in the profile. The
+  left-recursive workload's cost is the seed-grow loop and memo, not the stack
+  scan (which is empty for non-LR grammars and short for LR ones).
+- **`children.reserve()`**: tried, measured a **+17% Ir regression**, reverted.
+  The intuition (reserve avoids reallocs) fails because (a) most nodes have 0–2
+  children, (b) many nodes are speculative — created on entry to a combinator
+  and discarded on failure (Combinators.h:42-43) — so their reserved capacity is
+  pure waste. `vector::reserve` was 2.26% of the post-reserve profile vs the
+  ~1.7% it saved on `push_back`.
+
+The current top hotspots (post-Pass-A-step3) are mostly irreducible:
+`NonTerminal::parse`/`parseImpl` (dispatch core, ~12% combined), the failure-
+path string building for retained diagnostics (~11%, already made lazy + flat),
+and `_int_malloc`/`free` (~12%, now driven by the diagnostics strings and deque
+growth, not nodes). Further gains would need structural algorithmic changes
+(e.g. the bytecode VM, TODO.md:645) rather than the localized optimizations
+Pass D targeted.
 
 ### Pass B notes
 
