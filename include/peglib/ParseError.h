@@ -322,8 +322,7 @@ std::string escape_string_for_expected(const std::basic_string<CharT>& s)
 class Diagnostic
 {
 public:
-    Diagnostic(std::size_t pos, ExpectedSet expected)
-        : m_pos{pos}, m_expected{std::move(expected)}
+    Diagnostic(std::size_t pos, ExpectedSet expected) : m_pos{pos}, m_expected{std::move(expected)}
     {}
 
     [[nodiscard]] std::size_t position() const noexcept { return m_pos; }

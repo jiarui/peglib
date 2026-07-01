@@ -28,14 +28,14 @@
 // ---------------------------------------------------------------------------
 #include "peglib.h"
 
-#include "fixtures.hpp"
-
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
+
+#include "fixtures.hpp"
 
 using namespace peg;
 
@@ -63,17 +63,26 @@ struct BenchResult
 
 void print_header()
 {
-    std::printf("%-36s %8s %6s %11s %9s %4s\n", "workload", "size(B)", "iters", "ns/parse", "MB/s",
-                "ok");
+    std::printf(
+        "%-36s %8s %6s %11s %9s %4s\n", "workload", "size(B)", "iters", "ns/parse", "MB/s", "ok");
     std::printf("%-36s %8s %6s %11s %9s %4s\n",
-                "------------------------------------", "--------", "------", "-----------",
-                "---------", "----");
+                "------------------------------------",
+                "--------",
+                "------",
+                "-----------",
+                "---------",
+                "----");
 }
 
 void print_result(const BenchResult& r)
 {
-    std::printf("%-36s %8zu %6d %11.0f %9.1f %4d\n", r.name, r.bytes, r.iters, r.ns_per_parse,
-                r.mb_per_s, r.ok ? 1 : 0);
+    std::printf("%-36s %8zu %6d %11.0f %9.1f %4d\n",
+                r.name,
+                r.bytes,
+                r.iters,
+                r.ns_per_parse,
+                r.mb_per_s,
+                r.ok ? 1 : 0);
 }
 
 // Run `body(ctx)` `iters` times, each on a fresh Context over `input`, timing
@@ -115,15 +124,14 @@ struct JsonWorkload
     JsonWorkload()
     {
         auto cut_ = g.cut();
-        g["ws"] = *g.terminal(
-            [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
+        g["ws"] =
+            *g.terminal([](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; });
         auto escape_seq = g.terminal('\\') >> g.terminal([](char c) {
             return c == '"' || c == '\\' || c == '/' || c == 'b' || c == 'f' || c == 'n' ||
                    c == 'r' || c == 't' || c == 'u';
         });
-        auto string_char = g.terminal([](char c) {
-            return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20;
-        });
+        auto string_char = g.terminal(
+            [](char c) { return c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20; });
         g["string"] = g.terminal('"') >> *(escape_seq | string_char) >> g.terminal('"');
         auto digit = g.terminal('0', '9');
         auto nonzero_digit = g.terminal('1', '9');
@@ -138,8 +146,7 @@ struct JsonWorkload
         g["array"] = g.terminal('[') >> g["ws"] >> -g["value_list"] >> g["ws"] >> g.terminal(']');
         g["key_value"] = g["string"] >> g["ws"] >> g.terminal(':') >> g["ws"] >> g["value"];
         g["member_list"] = g["key_value"] >> *(comma_sep >> g["key_value"]);
-        g["object"] =
-            g.terminal('{') >> g["ws"] >> -g["member_list"] >> g["ws"] >> g.terminal('}');
+        g["object"] = g.terminal('{') >> g["ws"] >> -g["member_list"] >> g["ws"] >> g.terminal('}');
         g["value"] = (g["keyword"] >> cut_) | (g["number"] >> cut_) | (g["object"] >> cut_) |
                      (g["array"] >> cut_) | (g["string"] >> cut_);
         g["json"] = g["ws"] >> g["value"] >> g["ws"];
@@ -195,9 +202,9 @@ struct LuaWorkload
         g["unop"] = g.terminal('-') | g.terminalSeq("not") | g.terminal('#') | g.terminal('~');
         g["binop"] = g.terminalSeq("//") | g.terminal('+');
         g["fieldsep"] = g.terminal(',') | g.terminal(';');
-        g["field"] = (g.terminal('[') >> g["expr"] >> g.terminal(']') >> g.terminal('=') >>
-                      g["expr"]) |
-                     (g["Name"] >> g.terminal('=') >> g["expr"]) | g["expr"];
+        g["field"] =
+            (g.terminal('[') >> g["expr"] >> g.terminal(']') >> g.terminal('=') >> g["expr"]) |
+            (g["Name"] >> g.terminal('=') >> g["expr"]) | g["expr"];
         g["fieldlist"] = g["field"] >> *(g["fieldsep"] >> g["field"]) >> -g["fieldsep"];
         g["tableconstructor"] = g.terminal('{') >> -g["fieldlist"] >> g.terminal('}');
         g["parlist"] =
@@ -215,30 +222,27 @@ struct LuaWorkload
         g["label"] = g.terminalSeq("::") >> g["Name"] >> g.terminalSeq("::");
         g["retstat"] = g.terminalSeq("return") >> -g["explist"] >> g.terminal(';');
         g["attrib"] = -(g.terminal('<') >> g["Name"] >> g.terminal('.'));
-        g["attnamlist"] = g["Name"] >> g["attrib"] >> *(g.terminal(',') >> g["Name"] >> g["attrib"]);
-        g["stat_rule"] = g.terminal(';') | (g["varlist"] >> g.terminal('=') >> g["explist"]) |
-                         g["functioncall"] | g["label"] | g.terminalSeq("break") |
-                         (g.terminalSeq("goto") >> g["Name"]) |
-                         (g.terminalSeq("do") >> g["block"] >> g.terminalSeq("end")) |
-                         (g.terminalSeq("while") >> g["expr"] >> g.terminalSeq("do") >>
-                          g["block"] >> g.terminalSeq("end")) |
-                         (g.terminalSeq("repeat") >> g["block"] >> g.terminalSeq("until") >>
-                          g["expr"]) |
-                         (g.terminalSeq("if") >> g["expr"] >> g.terminalSeq("then") >>
-                          g["block"] >>
-                          *(g.terminalSeq("elseif") >> g["expr"] >> g.terminalSeq("then") >>
-                            g["block"]) >>
-                          -(g.terminalSeq("else") >> g["block"]) >> g.terminalSeq("end")) |
-                         (g.terminalSeq("for") >> g["Name"] >> g.terminal('=') >> g["expr"] >>
-                          g.terminal(',') >> g["expr"] >> -(g.terminal(',') >> g["expr"]) >>
-                          g.terminalSeq("do") >> g["block"] >> g.terminalSeq("end")) |
-                         (g.terminalSeq("for") >> g["namelist"] >> g.terminalSeq("in") >>
-                          g["explist"] >> g.terminalSeq("do") >> g["block"] >>
-                          g.terminalSeq("end")) |
-                         (g.terminalSeq("function") >> g["funcname"] >> g["funcbody"]) |
-                         (g.terminalSeq("local") >> g.terminalSeq("function") >> g["Name"] >>
-                          g["funcbody"]) |
-                         (g.terminalSeq("local") >> g["attnamlist"] >> -(g.terminal('-') >> g["explist"]));
+        g["attnamlist"] =
+            g["Name"] >> g["attrib"] >> *(g.terminal(',') >> g["Name"] >> g["attrib"]);
+        g["stat_rule"] =
+            g.terminal(';') | (g["varlist"] >> g.terminal('=') >> g["explist"]) |
+            g["functioncall"] | g["label"] | g.terminalSeq("break") |
+            (g.terminalSeq("goto") >> g["Name"]) |
+            (g.terminalSeq("do") >> g["block"] >> g.terminalSeq("end")) |
+            (g.terminalSeq("while") >> g["expr"] >> g.terminalSeq("do") >> g["block"] >>
+             g.terminalSeq("end")) |
+            (g.terminalSeq("repeat") >> g["block"] >> g.terminalSeq("until") >> g["expr"]) |
+            (g.terminalSeq("if") >> g["expr"] >> g.terminalSeq("then") >> g["block"] >>
+             *(g.terminalSeq("elseif") >> g["expr"] >> g.terminalSeq("then") >> g["block"]) >>
+             -(g.terminalSeq("else") >> g["block"]) >> g.terminalSeq("end")) |
+            (g.terminalSeq("for") >> g["Name"] >> g.terminal('=') >> g["expr"] >> g.terminal(',') >>
+             g["expr"] >> -(g.terminal(',') >> g["expr"]) >> g.terminalSeq("do") >> g["block"] >>
+             g.terminalSeq("end")) |
+            (g.terminalSeq("for") >> g["namelist"] >> g.terminalSeq("in") >> g["explist"] >>
+             g.terminalSeq("do") >> g["block"] >> g.terminalSeq("end")) |
+            (g.terminalSeq("function") >> g["funcname"] >> g["funcbody"]) |
+            (g.terminalSeq("local") >> g.terminalSeq("function") >> g["Name"] >> g["funcbody"]) |
+            (g.terminalSeq("local") >> g["attnamlist"] >> -(g.terminal('-') >> g["explist"]));
         g["chunk"] = g["block"];
         g["expr"] = g.terminalSeq("nil") | g.terminalSeq("false") | g.terminalSeq("true") |
                     g.terminalSeq("...") | g["functiondef"] | g["prefixexp"] |
@@ -286,8 +290,8 @@ int main(int argc, char** argv)
     const int lr_n = quick ? 500 : 5000;
     const int lua_n = quick ? 200 : 2000;
 
-    const int iters_small = quick ? 10 : 100;  // for the larger-input workloads
-    const int iters_large = quick ? 30 : 300;  // for the smaller-input workloads
+    const int iters_small = quick ? 10 : 100; // for the larger-input workloads
+    const int iters_large = quick ? 30 : 300; // for the smaller-input workloads
     const int warmup = 3;
 
     print_header();
@@ -296,8 +300,9 @@ int main(int argc, char** argv)
     {
         JsonWorkload w;
         auto input = peglib_bench::fixtures::wide_json_array(json_wide_n);
-        auto r = run("json wide array", input, warmup, iters_small,
-                     [&](Ctx& ctx) { return w.g.parse(ctx) && ctx.ended(); });
+        auto r = run("json wide array", input, warmup, iters_small, [&](Ctx& ctx) {
+            return w.g.parse(ctx) && ctx.ended();
+        });
         print_result(r);
     }
 
@@ -305,8 +310,9 @@ int main(int argc, char** argv)
     {
         JsonWorkload w;
         auto input = peglib_bench::fixtures::deeply_nested_json(json_deep_n);
-        auto r = run("json deep nest", input, warmup, iters_small,
-                     [&](Ctx& ctx) { return w.g.parse(ctx) && ctx.ended(); });
+        auto r = run("json deep nest", input, warmup, iters_small, [&](Ctx& ctx) {
+            return w.g.parse(ctx) && ctx.ended();
+        });
         print_result(r);
     }
 
@@ -314,8 +320,9 @@ int main(int argc, char** argv)
     {
         ArithWorkload w;
         auto input = peglib_bench::fixtures::dense_arithmetic(arith_n);
-        auto r = run("arith dense (backtrack)", input, warmup, iters_large,
-                     [&](Ctx& ctx) { return w.g.parse(ctx) && ctx.ended(); });
+        auto r = run("arith dense (backtrack)", input, warmup, iters_large, [&](Ctx& ctx) {
+            return w.g.parse(ctx) && ctx.ended();
+        });
         print_result(r);
     }
 
@@ -323,8 +330,9 @@ int main(int argc, char** argv)
     {
         ExprLRWorkload w;
         auto input = peglib_bench::fixtures::left_recursive_chain(lr_n);
-        auto r = run("expr left-recursive", input, warmup, iters_large,
-                     [&](Ctx& ctx) { return w.g.parse(ctx) && ctx.ended(); });
+        auto r = run("expr left-recursive", input, warmup, iters_large, [&](Ctx& ctx) {
+            return w.g.parse(ctx) && ctx.ended();
+        });
         print_result(r);
     }
 
@@ -332,8 +340,9 @@ int main(int argc, char** argv)
     {
         LuaWorkload w;
         auto input = peglib_bench::fixtures::lua_like_chunk(lua_n);
-        auto r = run("lua chunk", input, warmup, iters_small,
-                     [&](Ctx& ctx) { return w.g.parse(ctx) && ctx.ended(); });
+        auto r = run("lua chunk", input, warmup, iters_small, [&](Ctx& ctx) {
+            return w.g.parse(ctx) && ctx.ended();
+        });
         print_result(r);
     }
 
