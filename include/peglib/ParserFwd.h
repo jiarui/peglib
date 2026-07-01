@@ -95,40 +95,52 @@ bool symbolConsumable(const elem& v, const Functor& f)
 // TerminalExpr and TokenExpr. Shapes handled in order of specificity:
 // single value → 'x'; array-of-2 → 'lo'..'hi'; iterable → comma-joined;
 // else → fallback.
+//
+// The escaped display string is built LAZILY: record_failure_lazy invokes the
+// producer only when `pos` is furthest-or-tied (i.e. the item would actually
+// be retained). Under ordered-choice backtracking, terminal/token failures
+// fire at every non-matching branch but only the furthest-position ones are
+// kept — so the eager string construction (escape_char_for_expected + snprintf)
+// that the old code did unconditionally was pure waste on every discarded
+// failure, which the profile showed as ~7% of instruction refs.
 template<typename Context, typename V>
 void record_terminal_expected(Context& context, const V& value, std::string_view fallback)
 {
     std::size_t pos = context.mark();
     if constexpr (std::is_same_v<V, typename Context::value_type>) {
-        context.record_failure(
-            pos,
-            ExpectedItem{.kind = ExpectedKind::Literal, .text = escape_char_for_expected(value)});
+        context.record_failure_lazy(pos, [&]() {
+            return ExpectedItem{.kind = ExpectedKind::Literal,
+                                .text = escape_char_for_expected(value)};
+        });
     } else if constexpr (requires {
                              std::get<0>(value);
                              std::get<1>(value);
                          }) {
         auto lo = std::get<0>(value);
         auto hi = std::get<1>(value);
-        std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
-        context.record_failure(pos,
-                               ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+        context.record_failure_lazy(pos, [&]() {
+            std::string text = escape_char_for_expected(lo) + ".." + escape_char_for_expected(hi);
+            return ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)};
+        });
     } else if constexpr (requires {
                              value.begin();
                              value.end();
                          }) {
-        std::string text;
-        bool first = true;
-        for (const auto& v : value) {
-            if (!first)
-                text += ", ";
-            first = false;
-            text += escape_char_for_expected(v);
-        }
-        context.record_failure(pos,
-                               ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)});
+        context.record_failure_lazy(pos, [&]() {
+            std::string text;
+            bool first = true;
+            for (const auto& v : value) {
+                if (!first)
+                    text += ", ";
+                first = false;
+                text += escape_char_for_expected(v);
+            }
+            return ExpectedItem{.kind = ExpectedKind::Range, .text = std::move(text)};
+        });
     } else {
-        context.record_failure(
-            pos, ExpectedItem{.kind = ExpectedKind::Literal, .text = std::string{fallback}});
+        context.record_failure_lazy(pos, [&]() {
+            return ExpectedItem{.kind = ExpectedKind::Literal, .text = std::string{fallback}};
+        });
     }
 }
 

@@ -11,6 +11,7 @@
 //               construction, invisible to the template signature.
 #pragma once
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -375,7 +376,7 @@ struct Context
     // Error tracking: furthest-failure position + expected set
     // -----------------------------------------------------------------------
 
-    using expected_set = std::set<ExpectedItem>;
+    using expected_set = ExpectedSet;
 
     // Furthest-wins / same-position-accumulates / earlier-ignored.
     void record_failure(std::size_t pos, ExpectedItem item)
@@ -388,6 +389,30 @@ struct Context
         } else if (pos == m_furthest_failure_pos) {
             m_expected.insert(std::move(item));
         }
+    }
+
+    // Lazy variant: the ExpectedItem is produced by `producer` ONLY if `pos` is
+    // furthest-or-tied (i.e. it would actually be retained). This is the common
+    // case under ordered-choice backtracking: terminal/token failures happen at
+    // every non-matching branch, but only the ones at the furthest position are
+    // kept — so building the escaped display string eagerly (the old path
+    // through record_terminal_expected) wasted a std::string allocation +
+    // snprintf/escape work on every discarded failure. Callers that already
+    // have a cheap ExpectedItem should keep using the eager overload above.
+    template<typename Producer>
+        requires std::invocable<Producer&> &&
+                 std::convertible_to<std::invoke_result_t<Producer&>, ExpectedItem>
+    void record_failure_lazy(std::size_t pos, Producer producer)
+    {
+        if (!m_has_error || pos > m_furthest_failure_pos) {
+            m_furthest_failure_pos = pos;
+            m_expected.clear();
+            m_expected.insert(producer());
+            m_has_error = true;
+        } else if (pos == m_furthest_failure_pos) {
+            m_expected.insert(producer());
+        }
+        // pos < furthest: producer never invoked — string never built.
     }
 
     [[nodiscard]] std::size_t furthest_failure_pos() const noexcept

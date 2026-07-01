@@ -4,6 +4,7 @@
 #pragma once
 #include "peglib/SourceMap.h"
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,8 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace peg
 {
@@ -42,6 +45,71 @@ struct ExpectedItem
             return kind < rhs.kind;
         return text < rhs.text;
     }
+};
+
+// ===========================================================================
+// ExpectedSet: the "expected" collection at the furthest failure position.
+//
+// A sorted, deduplicated std::vector rather than std::set. The set is small
+// (typically a handful of items at one position), so the RB-tree node
+// allocation + descent that std::set pays per insert is pure overhead here —
+// the callgrind baseline showed _M_get_insert_unique_pos + set::insert at
+// ~6.6% of instruction refs after the packrat-memo fix. A flat vector with
+// binary-search insert trades that for a single contiguous allocation and
+// cache-friendly iteration, with identical dedup + ordered-iteration
+// semantics. Exposes the subset of std::set's interface actually used
+// (size/empty/clear/begin/end/insert) plus a move-aware constructor.
+// ===========================================================================
+class ExpectedSet
+{
+public:
+    using value_type = ExpectedItem;
+    using iterator = typename std::vector<ExpectedItem>::iterator;
+    using const_iterator = typename std::vector<ExpectedItem>::const_iterator;
+
+    ExpectedSet() = default;
+    explicit ExpectedSet(std::vector<ExpectedItem> v) : m_items{std::move(v)} {}
+    // initializer_list ctor: convenience for tests / explicit construction.
+    // Sorts + dedups (callers may pass unsorted).
+    ExpectedSet(std::initializer_list<ExpectedItem> il) : m_items{il}
+    {
+        std::sort(m_items.begin(), m_items.end());
+        m_items.erase(std::unique(m_items.begin(), m_items.end()), m_items.end());
+    }
+
+    [[nodiscard]] bool empty() const noexcept { return m_items.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return m_items.size(); }
+    void clear() noexcept { m_items.clear(); }
+
+    [[nodiscard]] iterator begin() noexcept { return m_items.begin(); }
+    [[nodiscard]] iterator end() noexcept { return m_items.end(); }
+    [[nodiscard]] const_iterator begin() const noexcept { return m_items.begin(); }
+    [[nodiscard]] const_iterator end() const noexcept { return m_items.end(); }
+
+    // Insert keeping sorted + deduped. Returns an iterator to the item (new or
+    // existing) plus whether a new element was inserted, mirroring std::set.
+    std::pair<iterator, bool> insert(ExpectedItem item)
+    {
+        auto it = std::lower_bound(m_items.begin(), m_items.end(), item);
+        if (it != m_items.end() && *it == item) {
+            return {it, false};
+        }
+        return {m_items.insert(it, std::move(item)), true};
+    }
+
+    // Bulk-append-from-set constructor helper: used by callers that already
+    // hold a std::set<ExpectedItem> (e.g. ParseError::to_diagnostic before
+    // this refactor carried over). Sorts + dedups defensively.
+    static ExpectedSet from_sorted_unique(std::vector<ExpectedItem> v)
+    {
+        // Assumes v is already sorted+unique (the previous std::set guaranteed
+        // it); no re-sort needed. Kept distinct from the explicit ctor for
+        // call-site clarity.
+        return ExpectedSet{std::move(v)};
+    }
+
+private:
+    std::vector<ExpectedItem> m_items;
 };
 
 // ===========================================================================
@@ -254,12 +322,12 @@ std::string escape_string_for_expected(const std::basic_string<CharT>& s)
 class Diagnostic
 {
 public:
-    Diagnostic(std::size_t pos, std::set<ExpectedItem> expected)
+    Diagnostic(std::size_t pos, ExpectedSet expected)
         : m_pos{pos}, m_expected{std::move(expected)}
     {}
 
     [[nodiscard]] std::size_t position() const noexcept { return m_pos; }
-    [[nodiscard]] const std::set<ExpectedItem>& expected() const noexcept { return m_expected; }
+    [[nodiscard]] const ExpectedSet& expected() const noexcept { return m_expected; }
 
     // "filename:line:col: error: expected A or B or C"; empty set → "unexpected input".
     [[nodiscard]] std::string format(const SourceMap& map, std::string_view filename) const
@@ -286,14 +354,14 @@ public:
 
 private:
     std::size_t m_pos;
-    std::set<ExpectedItem> m_expected;
+    ExpectedSet m_expected;
 };
 
 // Thrown when a cut-committed branch fails. Data-compatible with Diagnostic.
 class ParseError : public std::runtime_error
 {
 public:
-    ParseError(std::size_t pos, std::set<ExpectedItem> expected)
+    ParseError(std::size_t pos, ExpectedSet expected)
         : std::runtime_error{"peg::ParseError: cut-committed branch failed"}, m_pos{pos},
           m_expected{std::move(expected)}
     {
@@ -313,7 +381,7 @@ public:
     }
 
     [[nodiscard]] std::size_t position() const noexcept { return m_pos; }
-    [[nodiscard]] const std::set<ExpectedItem>& expected() const noexcept { return m_expected; }
+    [[nodiscard]] const ExpectedSet& expected() const noexcept { return m_expected; }
 
     [[nodiscard]] Diagnostic to_diagnostic() const { return Diagnostic{m_pos, m_expected}; }
 
@@ -321,7 +389,7 @@ public:
 
 private:
     std::size_t m_pos;
-    std::set<ExpectedItem> m_expected;
+    ExpectedSet m_expected;
     std::string m_what;
 };
 

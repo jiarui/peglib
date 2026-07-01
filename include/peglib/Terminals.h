@@ -62,13 +62,16 @@ private:
     void record_expected(Context& context) const
     {
         std::size_t pos = context.mark();
-        std::string text;
-        for (const auto& v : m_terminalValues) {
-            text += to_display_cpo(v);
-        }
-        context.record_failure(
-            pos,
-            ExpectedItem{.kind = ExpectedKind::Literal, .text = escape_string_for_expected(text)});
+        // Lazy: build the escaped literal only if this position is retained
+        // (furthest-or-tied). See record_terminal_expected for rationale.
+        context.record_failure_lazy(pos, [&]() {
+            std::string text;
+            for (const auto& v : m_terminalValues) {
+                text += to_display_cpo(v);
+            }
+            return ExpectedItem{.kind = ExpectedKind::Literal,
+                                .text = escape_string_for_expected(text)};
+        });
     }
 };
 

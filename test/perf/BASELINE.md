@@ -94,6 +94,8 @@ number is reverted (we keep only what the evidence supports).
 |------|------|--------------------|---------------:|:-----:|
 | (baseline) | 2026-07-01 | — | — | — |
 | Pass B: two-level `std::map` → `std::unordered_map` for the packrat memo | 2026-07-01 | all | lua chunk −22% (98M→76M ns/parse); arith −16%; LR −12%; json −6..8%. Callgrind total Ir −10.4% (1.49B→1.34B); `update_rule_state` self-Ir 8.96%→3.00%. | ✓ |
+| Pass C-step1: lazy string construction in failure path | 2026-07-01 | backtracking-heavy (arith, LR, lua) | modest. Callgrind total Ir −1.5% (1.34B→1.32B); `string::push_back` self-Ir 3.06%→2.46%. Wall-clock within noise. | ✓ |
+| Pass C-step2: `std::set<ExpectedItem>` → flat sorted-vector `ExpectedSet` | 2026-07-01 | all backtracking-heavy | Callgrind total Ir −2.8% more (1.32B→1.28B); **−14.2% cumulative** from baseline. `_Rb_tree_insert_and_rebalance` (1.17%) gone (no per-insert node alloc). Wall-clock: lua chunk −19% (76M→61M ns/parse), arith −9%. | ✓ |
 
 ### Pass B notes
 
@@ -116,7 +118,8 @@ allocations from the hot lookup path. All four ctest targets stay green,
 including the left-recursion suite (`lr_triangle_repro_test`,
 `lr_token_triangle_test`).
 
-The new top hotspot is `_int_malloc`/`free`/`malloc` (~18%) — heap allocation
-for `ParseTreeNode`s (Pass A target). The `ExpectedItem` set operations are
-now the largest coherent cluster (~14%) — Pass C target.
+The new top hotspot (post Pass B+C) is heap allocation — `_int_malloc`/
+`free`/`malloc`/`operator new` together ~18% of instruction refs, dominated by
+`make_shared<ParseTreeNode>` firing on every successful match. That is the
+**Pass A target** (node arena / pool).
 

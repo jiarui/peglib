@@ -264,7 +264,7 @@ TEST_CASE("error-parseerror-exception-construct")
 
 TEST_CASE("error-parseerror-exception-thrown-and-caught")
 {
-    std::set<ExpectedItem> expected = {
+    ExpectedSet expected = {
         ExpectedItem{ExpectedKind::RuleName, "Numeral"},
         ExpectedItem{ExpectedKind::RuleName, "Name"},
     };
